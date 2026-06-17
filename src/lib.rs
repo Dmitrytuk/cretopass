@@ -1,7 +1,41 @@
+use std::io;
+
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::ExecutableCommand;
+use ratatui::{backend::CrosstermBackend, Terminal};
+
 pub mod tree;
 
 pub use tree::node::{ExtraField, FieldType, Node};
 pub use tree::widget::{InputMode, TreeState, TreeWidget};
+
+/// Runs the TUI with the built-in demo tree.
+pub fn run() -> io::Result<()> {
+    run_with_root(build_demo_tree())
+}
+
+/// Runs the TUI with a custom root node.
+pub fn run_with_root(root: Node) -> io::Result<()> {
+    let mut state = TreeState::new(root);
+
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    stdout.execute(EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let res = tree::app_tree::run_app(&mut terminal, &mut state);
+
+    disable_raw_mode()?;
+    terminal.backend_mut().execute(LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+
+    if let Err(ref e) = res {
+        eprintln!("Error: {e}");
+    }
+
+    res
+}
 
 /// Builds a demo tree with sample data: a "Knowledge Base" root containing
 /// Rust, Python, and Docker categories, each with three leaf topics.
