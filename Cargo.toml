@@ -1,0 +1,9 @@
+[package]
+name = "tree-tui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ratatui = "0.28"
+crossterm = "0.28"
+uuid = { version = "1.0", features = ["v4"] }
