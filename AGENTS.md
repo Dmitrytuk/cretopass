@@ -37,7 +37,7 @@ Password field values display as `*****` in the detail overlay and when unfocuse
 ## Architecture
 
 - **Crate**: library + binary. `src/lib.rs` is the crate root, re-exporting public API. `src/main.rs` is a thin binary that launches the TUI and can be consumed as a dependency by other crates.
-- **6 source files**: `src/lib.rs` (crate root, re-exports, `build_demo_tree()`, terminal setup, `run()`/`run_with_root()`), `src/main.rs` (just calls `tree_tui::run()`), `src/tree/mod.rs` (module decl), `src/tree/node.rs` (Node struct), `src/tree/widget.rs` (TreeState, InputMode, TreeWidget), `src/tree/app_tree.rs` (event loop, key handlers, all overlay rendering)
+- **7 source files**: `src/lib.rs` (crate root, re-exports, `build_demo_tree()`, terminal helpers, `run()`/`run_with_root()`), `src/main.rs` (just calls `tree_tui::run()`), `src/tree/mod.rs` (module decl), `src/tree/node.rs` (Node struct), `src/tree/widget.rs` (TreeState, InputMode, TreeWidget), `src/tree/app_tree.rs` (event loop, key handlers, all overlay rendering), `src/settings/mod.rs` (settings menu, `run()`, `render()`)
 - **Node**: carries `id: Uuid`, `name`, `description`, `extra_fields: Vec<ExtraField>`, `children: Vec<Node>`
 - **ExtraField/FieldType**: `{field_type: Login|Password|Custom(String), value: String}` — `display_value()` masks Password as `*****`
 - **TreeState**: owns root Node, `expanded: HashSet<Uuid>`, `selected: usize`, clipboard, search state, `mode: InputMode`
@@ -67,6 +67,13 @@ Password field values display as `*****` in the detail overlay and when unfocuse
 ## Dependencies
 
 ratatui 0.28, crossterm 0.28, uuid 1.0 (feature: v4). No test framework, no lint config, no CI.
+
+## Settings Menu
+
+- `cargo run` opens the settings menu first. Navigate with `j`/`k`, select with `Enter`, quit with `q`/`Esc`.
+- "Open secret file" launches the tree app with the built-in demo tree (Knowledge Base). When the tree app quits, control returns to the settings menu.
+- "Create new secret file" is a placeholder (no action yet).
+- Recent files list shows dummy data (`vault_2024.kdbx`, `work_passwords.kdbx`, `personal.kdbx`).
 
 ## Quirks & edge cases
 

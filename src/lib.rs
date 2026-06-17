@@ -5,36 +5,47 @@ use crossterm::ExecutableCommand;
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 pub mod tree;
+pub mod settings;
 
 pub use tree::node::{ExtraField, FieldType, Node};
 pub use tree::widget::{InputMode, TreeState, TreeWidget};
 
-/// Runs the TUI with the built-in demo tree.
+/// Runs the settings menu. Selecting "Open secret file" opens the tree
+/// app with the built-in demo tree.
 pub fn run() -> io::Result<()> {
-    run_with_root(build_demo_tree())
+    let mut terminal = setup_terminal()?;
+    let res = settings::run(&mut terminal);
+    cleanup_terminal(&mut terminal);
+    if let Err(ref e) = res {
+        eprintln!("Error: {e}");
+    }
+    res
 }
 
-/// Runs the TUI with a custom root node.
+/// Runs the TUI with a custom root node, skipping the settings menu.
 pub fn run_with_root(root: Node) -> io::Result<()> {
     let mut state = TreeState::new(root);
+    let mut terminal = setup_terminal()?;
+    let res = tree::app_tree::run_app(&mut terminal, &mut state);
+    cleanup_terminal(&mut terminal);
+    if let Err(ref e) = res {
+        eprintln!("Error: {e}");
+    }
+    res
+}
 
+fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     stdout.execute(EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    Terminal::new(backend)
+}
 
-    let res = tree::app_tree::run_app(&mut terminal, &mut state);
-
-    disable_raw_mode()?;
-    terminal.backend_mut().execute(LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-
-    if let Err(ref e) = res {
-        eprintln!("Error: {e}");
-    }
-
-    res
+fn cleanup_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) {
+    let _ = disable_raw_mode();
+    let _ = terminal.backend_mut().execute(LeaveAlternateScreen);
+    let _ = terminal.show_cursor();
 }
 
 /// Builds a demo tree with sample data: a "Knowledge Base" root containing
