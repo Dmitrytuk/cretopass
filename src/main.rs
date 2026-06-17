@@ -1,5 +1,3 @@
-mod tree;
-
 use std::io::{self, Write};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -11,44 +9,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 use ratatui::{backend::CrosstermBackend, Terminal};
-use tree::node::{ExtraField, FieldType, Node};
-use tree::widget::{InputMode, TreeState, TreeWidget};
-
-fn build_demo_tree() -> Node {
-    Node::with_children(
-        "Knowledge Base",
-        "",
-        vec![
-            Node::with_children(
-                "Rust",
-                "Systems language focused on safety and performance",
-                vec![
-                    Node::new("Ownership", "Borrow checker, lifetimes, and memory management"),
-                    Node::new("Traits", "Shared behavior via trait definitions and implementations"),
-                    Node::new("Async", "Async/await, futures, and tokio runtime"),
-                ],
-            ),
-            Node::with_children(
-                "Python",
-                "High-level general purpose programming language",
-                vec![
-                    Node::new("AsyncIO", "Event loop, coroutines, and async/await syntax"),
-                    Node::new("Typing", "Type hints, MyPy, and gradual typing"),
-                    Node::new("Packaging", "pip, venv, poetry, and dependency management"),
-                ],
-            ),
-            Node::with_children(
-                "Docker",
-                "Container platform for developing and running applications",
-                vec![
-                    Node::new("Images", "Building custom images with Dockerfiles"),
-                    Node::new("Compose", "Multi-container applications with docker-compose.yml"),
-                    Node::new("Volumes", "Persistent data storage and sharing"),
-                ],
-            ),
-        ],
-    )
-}
+use tree_tui::{ExtraField, FieldType, InputMode, TreeState, TreeWidget};
 
 fn main() -> io::Result<()> {
     enable_raw_mode()?;
@@ -57,7 +18,7 @@ fn main() -> io::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let root = build_demo_tree();
+    let root = tree_tui::build_demo_tree();
     let mut state = TreeState::new(root);
 
     let res = run_app(&mut terminal, &mut state);
