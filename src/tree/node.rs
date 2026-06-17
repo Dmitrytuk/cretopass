@@ -1,7 +1,8 @@
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// The type of an extra field attached to a node.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FieldType {
     Login,
     Password,
@@ -30,7 +31,7 @@ impl FieldType {
 }
 
 /// A single extra field (login, password, or custom) on a node.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtraField {
     pub field_type: FieldType,
     pub value: String,
@@ -38,7 +39,7 @@ pub struct ExtraField {
 
 /// A node in the tree with a unique identifier, display name, description,
 /// optional extra fields, and optional children.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub id: Uuid,
     pub name: String,

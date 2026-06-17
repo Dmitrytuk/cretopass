@@ -6,6 +6,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 pub mod tree;
 pub mod settings;
+pub mod file_handling;
 
 pub use tree::node::{ExtraField, FieldType, Node};
 pub use tree::widget::{InputMode, TreeState, TreeWidget};

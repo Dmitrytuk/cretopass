@@ -38,7 +38,7 @@ Password field values display as `*****` in the detail overlay and when unfocuse
 ## Architecture
 
 - **Crate**: library + binary. `src/lib.rs` is the crate root, re-exporting public API. `src/main.rs` is a thin binary that launches the TUI and can be consumed as a dependency by other crates.
-- **7 source files**: `src/lib.rs` (crate root, re-exports, `build_demo_tree()`, terminal helpers, `run()`/`run_with_root()`), `src/main.rs` (just calls `tree_tui::run()`), `src/tree/mod.rs` (module decl), `src/tree/node.rs` (Node struct), `src/tree/widget.rs` (TreeState, InputMode, TreeWidget), `src/tree/app_tree.rs` (event loop, key handlers, all overlay rendering), `src/settings/mod.rs` (settings menu, `run()`, `render()`)
+- **8 source files**: `src/lib.rs` (crate root, re-exports, `build_demo_tree()`, terminal helpers, `run()`/`run_with_root()`), `src/main.rs` (just calls `tree_tui::run()`), `src/tree/mod.rs` (module decl), `src/tree/node.rs` (Node struct), `src/tree/widget.rs` (TreeState, InputMode, TreeWidget), `src/tree/app_tree.rs` (event loop, key handlers, all overlay rendering), `src/settings/mod.rs` (settings menu, `run()`, `render()`), `src/file_handling/mod.rs` (JSON serialization, file I/O)
 - **Node**: carries `id: Uuid`, `name`, `description`, `extra_fields: Vec<ExtraField>`, `children: Vec<Node>`
 - **ExtraField/FieldType**: `{field_type: Login|Password|Custom(String), value: String}` — `display_value()` masks Password as `*****`
 - **TreeState**: owns root Node, `expanded: HashSet<Uuid>`, `selected: usize`, clipboard, search state, `mode: InputMode`
@@ -67,7 +67,7 @@ Password field values display as `*****` in the detail overlay and when unfocuse
 
 ## Dependencies
 
-ratatui 0.28, crossterm 0.28, uuid 1.0 (feature: v4). No test framework, no lint config, no CI.
+ratatui 0.28, crossterm 0.28, uuid 1.0 (features: v4, serde), serde 1 (feature: derive), serde_json 1.
 
 ## Settings Menu
 
