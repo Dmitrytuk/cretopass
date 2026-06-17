@@ -31,7 +31,12 @@ pub enum InputMode {
     /// Waiting for the second `d` to confirm a cut operation.
     AwaitingDd,
     /// Detail overlay shown for the selected node.
-    Detail,
+    Detail {
+        /// Currently highlighted row index (0 = description, 1+ = extra fields).
+        selected: usize,
+        /// Copy confirmation alert text, if any.
+        alert: Option<String>,
+    },
     /// Inline form for editing an existing node's name/description/extra fields.
     Editing {
         node_id: Uuid,
@@ -40,7 +45,6 @@ pub enum InputMode {
         extra_fields: Vec<ExtraField>,
         field: usize,
         cursor: usize,
-        delete_pending: bool,
     },
     /// Inline form for adding a new child node.
     Adding {
@@ -49,7 +53,6 @@ pub enum InputMode {
         extra_fields: Vec<ExtraField>,
         field: usize,
         cursor: usize,
-        delete_pending: bool,
     },
     /// Popup for selecting a field type to add (login, password, custom).
     SelectFieldType {
@@ -59,7 +62,6 @@ pub enum InputMode {
         extra_fields: Vec<ExtraField>,
         field: usize,
         cursor: usize,
-        delete_pending: bool,
         selected_type: usize,
     },
     /// Popup for entering a custom field name.
@@ -70,7 +72,6 @@ pub enum InputMode {
         extra_fields: Vec<ExtraField>,
         field: usize,
         cursor: usize,
-        delete_pending: bool,
         input: String,
     },
     /// Confirmation popup for deleting an extra field.
@@ -81,7 +82,6 @@ pub enum InputMode {
         extra_fields: Vec<ExtraField>,
         field: usize,
         cursor: usize,
-        delete_pending: bool,
         target_index: usize,
     },
 }

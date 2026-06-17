@@ -18,6 +18,7 @@ cargo doc --open                     # generate and open API docs from doc comme
 | `h`/`l` | Collapse/expand (leaf: `l` opens detail) |
 | `Enter` | Toggle expand (parent) or detail (leaf) |
 | `Ctrl+Enter` / `i` | Detail overlay for any node |
+| `Enter` (detail) | Copy selected row to clipboard |
 | `d d` | Cut selected node |
 | `p` / `P` | Paste as sibling / as child |
 | `o` | Add child |
@@ -25,11 +26,11 @@ cargo doc --open                     # generate and open API docs from doc comme
 | `Esc` (normal) | Clear search highlights |
 | `q` / `Ctrl+C` | Quit |
 
-Detail overlay: `i`=edit, `c`=copy to clipboard, `Esc`/`Enter`/`Space`=close. Shows extra fields (Login/Password/Custom) below description.
+Detail overlay: `j`/`k`=navigate rows, `Enter`=copy row data to clipboard, `i`=edit, `Esc`/`Space`=close. Shows extra fields (Login/Password/Custom) below description. Selected row highlighted with `▸`. Copy shows "Copied!" alert popup — any key dismisses it.
 
 Add/Edit form: `Tab`/`Up`/`Down`=switch field, `Enter`=save, `Esc`=cancel, `Left`/`Right`/`Home`/`End`=cursor. Supports extra fields.
 
-Extra fields: each node can have Login, Password, and/or Custom fields. Focus "+ Add Field" row and press `Enter` to add one. Pick type from popup (`j/k` or `1`/`2`/`3` to navigate, `Enter` to choose). Custom fields prompt for a name first. Focus an extra field row and press `Del` or `d` `d` to delete with confirmation (`y`).
+Extra fields: each node can have Login, Password, and/or Custom fields. Focus "+ Add Field" row and press `Enter` to add one. Pick type from popup (`j/k` or `1`/`2`/`3` to navigate, `Enter` to choose). Custom fields prompt for a name first. Focus an extra field row and press `Del` to delete with confirmation (`y`).
 
 Password field values display as `*****` in the detail overlay and when unfocused in edit forms. When actively editing (cursor in field), the raw value is shown.
 
@@ -49,7 +50,7 @@ Password field values display as `*****` in the detail overlay and when unfocuse
 - Extra fields use `field` index scheme: `0`=name, `1`=desc, `2..2+n-1`=extra fields, `2+n`="+ Add Field" button.
 - `update_node()` and `add_child_to_selected()` now accept `extra_fields: Vec<ExtraField>`.
 - Adding mode also supports cursor and extra fields (same as editing mode).
-- Delete on extra field: first `d` sets `delete_pending`, second `d` opens confirmation popup; `Delete` key opens it directly.
+- Delete on extra field: `Delete` key opens confirmation popup; `y` confirms, any other key cancels.
 
 ## Search
 

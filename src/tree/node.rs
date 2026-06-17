@@ -23,7 +23,7 @@ impl FieldType {
     /// Password fields are masked as `*****`; all other types show the raw value.
     pub fn display_value(&self, value: &str) -> String {
         match self {
-            FieldType::Password => "*".repeat(value.len()),
+            FieldType::Password => "****".to_string(),
             _ => value.to_string(),
         }
     }
