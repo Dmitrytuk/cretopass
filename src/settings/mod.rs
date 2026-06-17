@@ -1,8 +1,8 @@
 use std::io;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{backend::Backend, Frame, Terminal};
@@ -83,13 +83,20 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 }
 
 fn render(frame: &mut Frame, area: Rect, state: &SettingsState) {
+    let layout = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
+
     let block = Block::default()
-        .title(" Password Keeper ")
+        .title(" Settings ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let inner = block.inner(layout[0]);
+    frame.render_widget(block, layout[0]);
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
@@ -125,11 +132,29 @@ fn render(frame: &mut Frame, area: Rect, state: &SettingsState) {
         lines.push(Line::from(Span::styled(format!("{}{}", prefix, file), style)));
     }
 
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+
+    render_settings_status_bar(frame, layout[1], state);
+    render_settings_help_bar(frame, layout[2]);
+}
+
+fn render_settings_status_bar(frame: &mut Frame, area: Rect, _state: &SettingsState) {
+    let text = Text::from(Line::from(vec![
+        Span::styled(
+            " SETTINGS ",
+            Style::default()
+                .bg(Color::Cyan)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    frame.render_widget(Paragraph::new(text), area);
+}
+
+fn render_settings_help_bar(frame: &mut Frame, area: Rect) {
+    let text = Text::from(Line::from(vec![Span::styled(
         "j/k:navigate  Enter:select  q:quit",
         Style::default().fg(Color::DarkGray),
-    )));
-
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+    )]));
+    frame.render_widget(Paragraph::new(text), area);
 }
