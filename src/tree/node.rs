@@ -97,6 +97,20 @@ impl Node {
         self.children.insert(index, child);
     }
 
+    /// Recursively finds a descendant node by [`Uuid`], returning a shared
+    /// reference to it.
+    pub fn find(&self, id: Uuid) -> Option<&Node> {
+        if self.id == id {
+            return Some(self);
+        }
+        for child in &self.children {
+            if let Some(found) = child.find(id) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
     /// Recursively finds a descendant node by [`Uuid`], returning a mutable
     /// reference to it.
     pub fn find_mut(&mut self, id: Uuid) -> Option<&mut Node> {

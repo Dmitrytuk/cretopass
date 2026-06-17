@@ -103,6 +103,7 @@ fn run_app<B: ratatui::backend::Backend>(
                 InputMode::SelectFieldType { .. } => handle_select_field_type(key, state),
                 InputMode::CustomFieldName { .. } => handle_custom_field_name(key, state),
                 InputMode::ConfirmDeleteField { .. } => handle_confirm_delete(key, state),
+                InputMode::ConfirmDiscardChanges { .. } => handle_confirm_discard(key, state),
                 InputMode::Detail { .. } => handle_detail(key, state),
             }
         }
@@ -308,7 +309,13 @@ fn handle_adding(key: event::KeyEvent, state: &mut TreeState) {
             state.mode = InputMode::Normal;
         }
         KeyCode::Esc => {
-            state.mode = InputMode::Normal;
+            if adding_has_changes(&name, &desc, &extra_fields) {
+                state.mode = InputMode::ConfirmDiscardChanges {
+                    node_id: None, name, desc, extra_fields, field, cursor,
+                };
+            } else {
+                state.mode = InputMode::Normal;
+            }
         }
         KeyCode::Tab | KeyCode::Down => {
             let new_field = (field + 1) % total;
@@ -415,7 +422,13 @@ fn handle_editing(key: event::KeyEvent, state: &mut TreeState) {
             state.mode = InputMode::Detail { selected: 0, alert: None };
         }
         KeyCode::Esc => {
-            state.mode = InputMode::Detail { selected: 0, alert: None };
+            if editing_has_changes(state, node_id, &name, &desc, &extra_fields) {
+                state.mode = InputMode::ConfirmDiscardChanges {
+                    node_id: Some(node_id), name, desc, extra_fields, field, cursor,
+                };
+            } else {
+                state.mode = InputMode::Detail { selected: 0, alert: None };
+            }
         }
         KeyCode::Tab | KeyCode::Down => {
             let new_field = (field + 1) % total;
@@ -609,6 +622,70 @@ fn handle_confirm_delete(key: event::KeyEvent, state: &mut TreeState) {
     }
 }
 
+fn editing_has_changes(
+    state: &TreeState,
+    node_id: uuid::Uuid,
+    name: &str,
+    desc: &str,
+    extra_fields: &[ExtraField],
+) -> bool {
+    let original = state.root.find(node_id);
+    match original {
+        None => false,
+        Some(n) => {
+            if name != n.name || desc != n.description {
+                return true;
+            }
+            if extra_fields.len() != n.extra_fields.len() {
+                return true;
+            }
+            for (a, b) in extra_fields.iter().zip(n.extra_fields.iter()) {
+                if a.value != b.value {
+                    return true;
+                }
+                match (&a.field_type, &b.field_type) {
+                    (FieldType::Login, FieldType::Login)
+                    | (FieldType::Password, FieldType::Password) => {}
+                    (FieldType::Custom(an), FieldType::Custom(bn)) if an == bn => {}
+                    _ => return true,
+                }
+            }
+            false
+        }
+    }
+}
+
+fn adding_has_changes(name: &str, desc: &str, extra_fields: &[ExtraField]) -> bool {
+    !name.is_empty() || !desc.is_empty() || !extra_fields.is_empty()
+}
+
+fn handle_confirm_discard(key: event::KeyEvent, state: &mut TreeState) {
+    let (node_id, name, desc, extra_fields, field, cursor) = match &state.mode {
+        InputMode::ConfirmDiscardChanges { node_id, name, desc, extra_fields, field, cursor } => {
+            (*node_id, name.clone(), desc.clone(), extra_fields.clone(), *field, *cursor)
+        }
+        _ => return,
+    };
+
+    match key.code {
+        KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+            if node_id.is_some() {
+                state.mode = InputMode::Detail { selected: 0, alert: None };
+            } else {
+                state.mode = InputMode::Normal;
+            }
+        }
+        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+            if let Some(nid) = node_id {
+                state.mode = InputMode::Editing { node_id: nid, name, desc, extra_fields, field, cursor };
+            } else {
+                state.mode = InputMode::Adding { name, desc, extra_fields, field, cursor };
+            }
+        }
+        _ => {}
+    }
+}
+
 fn copy_to_clipboard(text: &str) {
     let cmds: &[&[&str]] = if cfg!(target_os = "macos") {
         &[&["pbcopy"]]
@@ -711,6 +788,7 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
         InputMode::SelectFieldType { .. } => render_select_field_type_overlay(frame, area, state),
         InputMode::CustomFieldName { .. } => render_custom_field_name_overlay(frame, area, state),
         InputMode::ConfirmDeleteField { .. } => render_confirm_delete_overlay(frame, area, state),
+        InputMode::ConfirmDiscardChanges { .. } => render_confirm_discard_overlay(frame, area, state),
         InputMode::Detail { .. } => {
             render_detail_overlay(frame, area, state);
             if matches!(state.mode, InputMode::Detail { ref alert, .. } if alert.is_some()) {
@@ -732,6 +810,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         InputMode::SelectFieldType { .. } => ("FIELD TYPE", Style::default().bg(Color::Blue).fg(Color::White)),
         InputMode::CustomFieldName { .. } => ("CUSTOM NAME", Style::default().bg(Color::Blue).fg(Color::White)),
         InputMode::ConfirmDeleteField { .. } => ("CONFIRM", Style::default().bg(Color::Red).fg(Color::White)),
+        InputMode::ConfirmDiscardChanges { .. } => ("DISCARD?", Style::default().bg(Color::Yellow).fg(Color::Red)),
     };
 
     let name = state.current_name().unwrap_or_default();
@@ -793,6 +872,7 @@ fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         InputMode::SelectFieldType { .. } => "j/k:nav  1/2/3:select  Enter:choose  Esc:cancel",
         InputMode::CustomFieldName { .. } => "Type name  Enter:done  Esc:cancel",
         InputMode::ConfirmDeleteField { .. } => "y:delete  n/Esc:cancel",
+        InputMode::ConfirmDiscardChanges { .. } => "Enter/y:discard  n/Esc:continue editing",
     };
 
     let text = Text::from(Line::from(vec![Span::styled(
@@ -1098,6 +1178,38 @@ fn render_copy_alert_overlay(frame: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             "Press any key",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(block, overlay_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+fn render_confirm_discard_overlay(frame: &mut Frame, area: Rect, _state: &TreeState) {
+    let overlay_area = Rect {
+        x: area.width / 4,
+        y: area.height / 2 - 2,
+        width: area.width / 2,
+        height: 5,
+    };
+
+    let block = Block::default()
+        .title(" Unsaved Changes ")
+        .borders(Borders::ALL)
+        .style(Style::default().bg(Color::Black).fg(Color::Yellow));
+
+    let inner = block.inner(overlay_area);
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "Discard changes?",
+            Style::default().fg(Color::White),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Enter/y:discard  n/Esc:continue editing",
             Style::default().fg(Color::DarkGray),
         )),
     ];

@@ -28,7 +28,7 @@ cargo doc --open                     # generate and open API docs from doc comme
 
 Detail overlay: `j`/`k`=navigate rows, `Enter`=copy row data to clipboard, `i`=edit, `Esc`/`Space`=close. Shows extra fields (Login/Password/Custom) below description. Selected row highlighted with `▸`. Copy shows "Copied!" alert popup — any key dismisses it.
 
-Add/Edit form: `Tab`/`Up`/`Down`=switch field, `Enter`=save, `Esc`=cancel, `Left`/`Right`/`Home`/`End`=cursor. Supports extra fields.
+Add/Edit form: `Tab`/`Up`/`Down`=switch field, `Enter`=save, `Esc`=cancel (with confirmation if data changed), `Left`/`Right`/`Home`/`End`=cursor. Supports extra fields. `Esc` on changed data shows "Discard changes?" popup — `Enter`/`y` discards, `n`/`Esc` returns to editing.
 
 Extra fields: each node can have Login, Password, and/or Custom fields. Focus "+ Add Field" row and press `Enter` to add one. Pick type from popup (`j/k` or `1`/`2`/`3` to navigate, `Enter` to choose). Custom fields prompt for a name first. Focus an extra field row and press `Del` to delete with confirmation (`y`).
 

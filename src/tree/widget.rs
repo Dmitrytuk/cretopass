@@ -84,6 +84,15 @@ pub enum InputMode {
         cursor: usize,
         target_index: usize,
     },
+    /// Confirmation popup for discarding unsaved changes in edit/add mode.
+    ConfirmDiscardChanges {
+        node_id: Option<Uuid>,
+        name: String,
+        desc: String,
+        extra_fields: Vec<ExtraField>,
+        field: usize,
+        cursor: usize,
+    },
 }
 
 /// Central application state.
