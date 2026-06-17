@@ -25,22 +25,31 @@ cargo doc --open                     # generate and open API docs from doc comme
 | `Esc` (normal) | Clear search highlights |
 | `q` / `Ctrl+C` | Quit |
 
-Detail overlay: `i`=edit, `c`=copy to clipboard, `Esc`/`Enter`/`Space`=close
+Detail overlay: `i`=edit, `c`=copy to clipboard, `Esc`/`Enter`/`Space`=close. Shows extra fields (Login/Password/Custom) below description.
 
-Add/Edit form: `Tab`/`Up`/`Down`=switch field, `Enter`=save, `Esc`=cancel, `Left`/`Right`/`Home`/`End`=cursor (edit only)
+Add/Edit form: `Tab`/`Up`/`Down`=switch field, `Enter`=save, `Esc`=cancel, `Left`/`Right`/`Home`/`End`=cursor. Supports extra fields.
+
+Extra fields: each node can have Login, Password, and/or Custom fields. Focus "+ Add Field" row and press `Enter` to add one. Pick type from popup (`j/k` or `1`/`2`/`3` to navigate, `Enter` to choose). Custom fields prompt for a name first. Focus an extra field row and press `Del` or `d` `d` to delete with confirmation (`y`).
+
+Password field values display as `*****` in the detail overlay and when unfocused in edit forms. When actively editing (cursor in field), the raw value is shown.
 
 ## Architecture
 
 - **4 source files**: `src/main.rs` (event loop + overlays), `src/tree/mod.rs` (module decl), `src/tree/node.rs` (Node struct), `src/tree/widget.rs` (TreeState, InputMode, TreeWidget)
-- **Node**: carries `id: Uuid`, `name`, `description`, `children: Vec<Node>`
+- **Node**: carries `id: Uuid`, `name`, `description`, `extra_fields: Vec<ExtraField>`, `children: Vec<Node>`
+- **ExtraField/FieldType**: `{field_type: Login|Password|Custom(String), value: String}` — `display_value()` masks Password as `*****`
 - **TreeState**: owns root Node, `expanded: HashSet<Uuid>`, `selected: usize`, clipboard, search state, `mode: InputMode`
-- **InputMode**: Normal, Search, AwaitingDd, Detail, Adding{name,desc,field}, Editing{node_id,name,desc,field,cursor}
+- **InputMode**: Normal, Search, AwaitingDd, Detail, Adding{name,desc,extra_fields,field,cursor,delete_pending}, Editing{node_id,...}, SelectFieldType, CustomFieldName, ConfirmDeleteField
 - **TreeWidget::render**: DFS flat list with indentation, ▶/▼ icons, ▸ selection arrow, search highlight (DarkGray bg)
 
 ## Editing quirks
 
 - Cursor is a **byte offset** (not grapheme). Editing uses `String::insert(byte_pos, c)` and `String::remove(byte_pos)`. Multi-byte chars handled via `chars().next().len_utf8()` in `cursor_field_spans()`.
 - `cursor_field_spans()` splits text at cursor, renders character under cursor as inverted rectangle (White bg, Black fg).
+- Extra fields use `field` index scheme: `0`=name, `1`=desc, `2..2+n-1`=extra fields, `2+n`="+ Add Field" button.
+- `update_node()` and `add_child_to_selected()` now accept `extra_fields: Vec<ExtraField>`.
+- Adding mode also supports cursor and extra fields (same as editing mode).
+- Delete on extra field: first `d` sets `delete_pending`, second `d` opens confirmation popup; `Delete` key opens it directly.
 
 ## Search
 

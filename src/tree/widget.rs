@@ -9,8 +9,9 @@ use ratatui::{
 };
 use uuid::Uuid;
 
-use super::node::Node;
+use super::node::{ExtraField, Node};
 
+/// A single visible row in the flattened tree display.
 #[derive(Debug, Clone)]
 pub struct VisibleNode {
     pub id: Uuid,
@@ -20,16 +21,72 @@ pub struct VisibleNode {
     pub expanded: bool,
 }
 
+/// Application input mode determining how key events are interpreted.
 #[derive(Debug, Clone)]
 pub enum InputMode {
+    /// Default mode: navigation, expand/collapse, cut/paste, search.
     Normal,
+    /// Search mode: typing a query, navigating between matches.
     Search,
+    /// Waiting for the second `d` to confirm a cut operation.
     AwaitingDd,
+    /// Detail overlay shown for the selected node.
     Detail,
-    Editing { node_id: Uuid, name: String, desc: String, field: usize, cursor: usize },
-    Adding { name: String, desc: String, field: usize },
+    /// Inline form for editing an existing node's name/description/extra fields.
+    Editing {
+        node_id: Uuid,
+        name: String,
+        desc: String,
+        extra_fields: Vec<ExtraField>,
+        field: usize,
+        cursor: usize,
+        delete_pending: bool,
+    },
+    /// Inline form for adding a new child node.
+    Adding {
+        name: String,
+        desc: String,
+        extra_fields: Vec<ExtraField>,
+        field: usize,
+        cursor: usize,
+        delete_pending: bool,
+    },
+    /// Popup for selecting a field type to add (login, password, custom).
+    SelectFieldType {
+        node_id: Option<Uuid>,
+        name: String,
+        desc: String,
+        extra_fields: Vec<ExtraField>,
+        field: usize,
+        cursor: usize,
+        delete_pending: bool,
+        selected_type: usize,
+    },
+    /// Popup for entering a custom field name.
+    CustomFieldName {
+        node_id: Option<Uuid>,
+        name: String,
+        desc: String,
+        extra_fields: Vec<ExtraField>,
+        field: usize,
+        cursor: usize,
+        delete_pending: bool,
+        input: String,
+    },
+    /// Confirmation popup for deleting an extra field.
+    ConfirmDeleteField {
+        node_id: Option<Uuid>,
+        name: String,
+        desc: String,
+        extra_fields: Vec<ExtraField>,
+        field: usize,
+        cursor: usize,
+        delete_pending: bool,
+        target_index: usize,
+    },
 }
 
+/// Central application state.
 #[derive(Debug, Clone)]
 pub struct TreeState {
     pub root: Node,
@@ -45,6 +102,7 @@ pub struct TreeState {
 }
 
 impl TreeState {
+    /// Creates a new `TreeState` with the given root.
     pub fn new(root: Node) -> Self {
         let mut state = Self {
             root,
@@ -62,6 +120,8 @@ impl TreeState {
         state
     }
 
+    /// Rebuilds the `visible` flat list from the current expansion state,
+    /// then recomputes search matches if a search is active.
     pub fn update_visible(&mut self) {
         self.visible = build_visible(&self.root, &self.expanded, 0);
         if self.search_active && !self.search_query.is_empty() {
@@ -90,6 +150,7 @@ impl TreeState {
         self.selected = sorted[0];
     }
 
+    /// Moves selection to the next visible row.
     pub fn select_next(&mut self) {
         if self.search_active && !self.matched.is_empty() {
             let mut sorted: Vec<usize> = self.matched.iter().copied().collect();
@@ -104,6 +165,7 @@ impl TreeState {
         }
     }
 
+    /// Moves selection to the previous visible row.
     pub fn select_prev(&mut self) {
         if self.search_active && !self.matched.is_empty() {
             let mut sorted: Vec<usize> = self.matched.iter().copied().collect();
@@ -118,10 +180,12 @@ impl TreeState {
         }
     }
 
+    /// Returns the [`Uuid`] of the node at the current selection, if any.
     pub fn selected_node_id(&self) -> Option<Uuid> {
         self.visible.get(self.selected).map(|v| v.id)
     }
 
+    /// Toggles the expanded/collapsed state of the selected node.
     pub fn toggle_expand(&mut self) {
         if let Some(id) = self.selected_node_id() {
             if self.expanded.contains(&id) {
@@ -133,6 +197,7 @@ impl TreeState {
         }
     }
 
+    /// Explicitly expands or collapses the selected node.
     pub fn expand_collapse(&mut self, expand: bool) {
         if let Some(id) = self.selected_node_id() {
             if expand {
@@ -144,6 +209,7 @@ impl TreeState {
         }
     }
 
+    /// Removes the selected node from the tree and stores it in the clipboard.
     pub fn cut_selected(&mut self) {
         let id = match self.selected_node_id() {
             Some(id) => id,
@@ -159,6 +225,7 @@ impl TreeState {
         }
     }
 
+    /// Inserts the clipboard node as a sibling immediately after the selected node.
     pub fn paste_sibling(&mut self) {
         let node = match &self.clipboard {
             Some(n) => n.clone(),
@@ -174,6 +241,7 @@ impl TreeState {
         }
     }
 
+    /// Inserts the clipboard node as the first child of the selected node.
     pub fn paste_child(&mut self) {
         let node = match &self.clipboard {
             Some(n) => n.clone(),
@@ -190,21 +258,25 @@ impl TreeState {
         }
     }
 
-    pub fn update_node(&mut self, node_id: Uuid, name: String, desc: String) {
+    /// Finds a node by [`Uuid`] and replaces its name, description, and extra fields.
+    pub fn update_node(&mut self, node_id: Uuid, name: String, desc: String, extra_fields: Vec<ExtraField>) {
         if let Some(target) = self.root.find_mut(node_id) {
             target.name = name;
             target.description = desc;
+            target.extra_fields = extra_fields;
             self.update_visible();
         }
     }
 
-    pub fn add_child_to_selected(&mut self, name: String, desc: String) {
+    /// Creates a new child node under the currently selected node.
+    pub fn add_child_to_selected(&mut self, name: String, desc: String, extra_fields: Vec<ExtraField>) {
         let id = match self.selected_node_id() {
             Some(id) => id,
             None => return,
         };
         let final_name = if name.is_empty() { "Untitled".to_string() } else { name };
-        let node = Node::new(&final_name, &desc);
+        let mut node = Node::new(&final_name, &desc);
+        node.extra_fields = extra_fields;
         if let Some(target) = self.root.find_mut(id) {
             target.add_child(node);
             self.expanded.insert(id);
@@ -212,23 +284,28 @@ impl TreeState {
         }
     }
 
+    /// Returns the number of visible rows in the current tree view.
     pub fn num_visible(&self) -> usize {
         self.visible.len()
     }
 
+    /// Returns the number of visible rows that match the active search query.
     pub fn num_matched(&self) -> usize {
         self.matched.len()
     }
 
+    /// Returns the name of the currently selected visible row, if any.
     pub fn current_name(&self) -> Option<String> {
         self.visible.get(self.selected).map(|v| v.name.clone())
     }
 
+    /// Clones and returns the full [`Node`] for the currently selected item.
     pub fn current_node(&self) -> Option<Node> {
         let id = self.visible.get(self.selected)?.id;
         find_node(&self.root, id)
     }
 
+    /// Activates search for the given query string.
     pub fn set_search(&mut self, query: String) {
         self.search_active = true;
         if !query.is_empty() {
@@ -239,6 +316,7 @@ impl TreeState {
         self.snap_to_first_match();
     }
 
+    /// Deactivates search and clears all match highlights.
     pub fn clear_search(&mut self) {
         self.search_query.clear();
         self.search_active = false;
@@ -326,9 +404,11 @@ fn find_parent_mut<'a>(root: &'a mut Node, id: Uuid) -> Option<&'a mut Node> {
     None
 }
 
+/// Zero-sized type serving as a namespace for the tree rendering function.
 pub struct TreeWidget;
 
 impl TreeWidget {
+    /// Renders the tree view into the given area.
     pub fn render(frame: &mut Frame, area: Rect, state: &TreeState) {
         let block = Block::default()
             .title(" Tree ")
