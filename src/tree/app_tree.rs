@@ -64,6 +64,10 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
         KeyCode::Char('q') | KeyCode::Char('Q') => {
             state.quit = true;
         }
+        KeyCode::Char('H') => {
+            state.return_to_menu = true;
+            state.quit = true;
+        }
         KeyCode::Char('j') | KeyCode::Down => {
             state.select_next();
         }

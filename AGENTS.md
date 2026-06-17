@@ -24,7 +24,8 @@ cargo doc --open                     # generate and open API docs from doc comme
 | `o` | Add child |
 | `/` | Search (type, `Enter` confirm, `Esc` cancel) |
 | `Esc` (normal) | Clear search highlights |
-| `q` / `Ctrl+C` | Quit |
+| `q` / `Ctrl+C` | Quit entire app |
+| `H` (shift+h) | Return to settings menu |
 
 Detail overlay: `j`/`k`=navigate rows, `Enter`=copy row data to clipboard, `i`=edit, `Esc`/`Space`=close. Shows extra fields (Login/Password/Custom) below description. Selected row highlighted with `▸`. Copy shows "Copied!" alert popup — any key dismisses it.
 
@@ -77,7 +78,7 @@ ratatui 0.28, crossterm 0.28, uuid 1.0 (feature: v4). No test framework, no lint
 
 ## Quirks & edge cases
 
-- Quit sets `state.quit` flag → event loop breaks → `main()` runs cleanup (LeaveAlternateScreen, disable_raw_mode, show_cursor).
+- Quit sets `state.quit` flag → event loop breaks → `main()` runs cleanup (LeaveAlternateScreen, disable_raw_mode, show_cursor). `q` in tree app quits everything (including settings). `H` (shift+h) in tree app returns to settings menu.
 - Add form defaults empty name to `"Untitled"`.
 - `remove_node()` only targets children (not root). Root cannot be cut.
 - `insert_after()` finds parent, inserts at `pos+1`. `paste_child()` inserts as first child.

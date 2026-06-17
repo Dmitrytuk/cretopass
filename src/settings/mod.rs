@@ -75,6 +75,9 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     let root = crate::build_demo_tree();
                     let mut tree_state = crate::tree::widget::TreeState::new(root);
                     crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
+                    if !tree_state.return_to_menu {
+                        state.quit = true;
+                    }
                 }
                 _ => {}
             }

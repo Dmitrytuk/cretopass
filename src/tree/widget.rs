@@ -108,6 +108,7 @@ pub struct TreeState {
     pub matched: HashSet<usize>,
     pub mode: InputMode,
     pub quit: bool,
+    pub return_to_menu: bool,
 }
 
 impl TreeState {
@@ -124,6 +125,7 @@ impl TreeState {
             matched: HashSet::new(),
             mode: InputMode::Normal,
             quit: false,
+            return_to_menu: false,
         };
         state.update_visible();
         state
