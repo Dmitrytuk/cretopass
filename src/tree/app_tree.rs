@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 
+use crate::settings::utils::save_tree;
 use crate::tree::node::{ExtraField, FieldType};
 use crate::tree::widget::{InputMode, TreeState, TreeWidget};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -39,6 +40,17 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) ->
                 InputMode::ConfirmDeleteField { .. } => handle_confirm_delete(key, state),
                 InputMode::ConfirmDiscardChanges { .. } => handle_confirm_discard(key, state),
                 InputMode::Detail { .. } => handle_detail(key, state),
+            }
+
+            let path = state.active_file_path.clone();
+            let passphrase = state.active_file_passphrase.clone();
+            if state.dirty {
+                if let Some(ref p) = path {
+                    state.dirty = false;
+                    if let Err(e) = save_tree(&state.root, p, &passphrase) {
+                        eprintln!("Save failed: {e}");
+                    }
+                }
             }
         }
     }

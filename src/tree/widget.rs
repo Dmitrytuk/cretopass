@@ -109,6 +109,12 @@ pub struct TreeState {
     pub mode: InputMode,
     pub quit: bool,
     pub return_to_menu: bool,
+    /// Path of the currently opened encrypted file, if any.
+    pub active_file_path: Option<String>,
+    /// Passphrase for the open file (raw bytes, provided by user).
+    pub active_file_passphrase: Vec<u8>,
+    /// Set to `true` whenever the tree is mutated; cleared after save.
+    pub dirty: bool,
 }
 
 impl TreeState {
@@ -126,6 +132,9 @@ impl TreeState {
             mode: InputMode::Normal,
             quit: false,
             return_to_menu: false,
+            active_file_path: None,
+            active_file_passphrase: Vec::new(),
+            dirty: false,
         };
         state.update_visible();
         state
@@ -233,6 +242,7 @@ impl TreeState {
             if self.selected >= self.visible.len() && !self.visible.is_empty() {
                 self.selected = self.visible.len().saturating_sub(1);
             }
+            self.dirty = true;
         }
     }
 
@@ -249,6 +259,7 @@ impl TreeState {
         if self.root.contains(selected_id) {
             insert_after(&mut self.root, selected_id, node);
             self.update_visible();
+            self.dirty = true;
         }
     }
 
@@ -266,6 +277,7 @@ impl TreeState {
             target.add_child(node);
             self.expanded.insert(selected_id);
             self.update_visible();
+            self.dirty = true;
         }
     }
 
@@ -276,6 +288,7 @@ impl TreeState {
             target.description = desc;
             target.extra_fields = extra_fields;
             self.update_visible();
+            self.dirty = true;
         }
     }
 
@@ -292,6 +305,7 @@ impl TreeState {
             target.add_child(node);
             self.expanded.insert(id);
             self.update_visible();
+            self.dirty = true;
         }
     }
 
@@ -421,8 +435,11 @@ pub struct TreeWidget;
 impl TreeWidget {
     /// Renders the tree view into the given area.
     pub fn render(frame: &mut Frame, area: Rect, state: &TreeState) {
+        let title = state.active_file_path.as_deref()
+            .map(|p| format!(" Tree — {} ", p))
+            .unwrap_or_else(|| " Tree ".to_string());
         let block = Block::default()
-            .title(" Tree ")
+            .title(title)
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan));
 
