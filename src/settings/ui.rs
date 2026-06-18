@@ -101,7 +101,7 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 fn handle_settings_key<B: Backend>(
     key: event::KeyEvent,
     state: &mut SettingsState,
-    _terminal: &mut Terminal<B>,
+    terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     match key.code {
         KeyCode::Char('q') | KeyCode::Char('Q') => state.quit = true,
@@ -126,6 +126,24 @@ fn handle_settings_key<B: Backend>(
                 let file_idx = idx - MENU_ITEMS.len();
                 if file_idx < state.recent_files.len() {
                     let file_path = state.recent_files[file_idx].clone();
+
+                    // If this is the currently active file, re-open the tree directly
+                    if let Some(ref active_file) = state.active_file {
+                        if active_file.path.as_deref() == Some(&file_path) {
+                            if let Some(ref node) = active_file.node {
+                                let mut tree_state =
+                                    crate::tree::widget::TreeState::new(node.clone());
+                                tree_state.active_file_path = Some(file_path);
+                                tree_state.active_file_passphrase = active_file.passphrase.clone();
+                                crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
+                                if !tree_state.return_to_menu {
+                                    state.quit = true;
+                                }
+                                return Ok(());
+                            }
+                        }
+                    }
+
                     match utils::validate_encrypted_file(&file_path) {
                         Err(e) => {
                             state.modal = Some(SettingsModal::Alert { message: e });
