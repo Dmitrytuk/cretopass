@@ -108,6 +108,19 @@ fn handle_settings_key<B: Backend>(
         KeyCode::Esc => state.quit = true,
         KeyCode::Char('j') | KeyCode::Down => state.select_next(),
         KeyCode::Char('k') | KeyCode::Up => state.select_prev(),
+        KeyCode::Char('H') => {
+            if let Some(ref active_file) = state.active_file {
+                if let Some(ref node) = active_file.node {
+                    let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
+                    tree_state.active_file_path = active_file.path.clone();
+                    tree_state.active_file_passphrase = active_file.passphrase.clone();
+                    crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
+                    if !tree_state.return_to_menu {
+                        state.quit = true;
+                    }
+                }
+            }
+        }
         KeyCode::Enter => {
             let idx = state.selected;
             if idx == 0 {
