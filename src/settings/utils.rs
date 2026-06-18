@@ -19,7 +19,7 @@ fn config_dir() -> PathBuf {
     if cfg!(target_os = "linux") {
         if let Ok(val) = std::env::var("XDG_CONFIG_HOME") {
             let mut p = PathBuf::from(val);
-            p.push("tree-tui");
+            p.push("pwd-keeper");
             return p;
         }
         if let Ok(val) = std::env::var("HOME") {
@@ -36,7 +36,7 @@ fn config_dir() -> PathBuf {
     } else if cfg!(target_os = "windows") {
         if let Ok(val) = std::env::var("APPDATA") {
             let mut p = PathBuf::from(val);
-            p.push("tree-tui");
+            p.push("pwd-keeper");
             return p;
         }
     }

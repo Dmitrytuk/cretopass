@@ -1,5 +1,5 @@
 use std::io;
 
 fn main() -> io::Result<()> {
-    tree_tui::run()
+    simple_password_keeper::run()
 }
