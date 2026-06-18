@@ -9,12 +9,12 @@ use crate::tree::node::Node;
 const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
 const RECENT_FILE_NAME: &str = "recent_files.json";
 
-/// Returns the platform-specific config directory for tree-tui.
+/// Returns the platform-specific config directory for pwd-keeper.
 ///
-/// - Linux: `$XDG_CONFIG_HOME/tree-tui/` or `~/.config/tree-tui/`
-/// - macOS: `~/Library/Application Support/tree-tui/`
-/// - Windows: `%APPDATA%/tree-tui/`
-/// - Fallback: `./.tree-tui/`
+/// - Linux: `$XDG_CONFIG_HOME/pwd-keeper/` or `~/.config/pwd-keeper/`
+/// - macOS: `~/Library/Application Support/pwd-keeper/`
+/// - Windows: `%APPDATA%/pwd-keeper/`
+/// - Fallback: `./.pwd-keeper/`
 fn config_dir() -> PathBuf {
     if cfg!(target_os = "linux") {
         if let Ok(val) = std::env::var("XDG_CONFIG_HOME") {
@@ -24,13 +24,13 @@ fn config_dir() -> PathBuf {
         }
         if let Ok(val) = std::env::var("HOME") {
             let mut p = PathBuf::from(val);
-            p.push(".config/tree-tui");
+            p.push(".config/pwd-keeper");
             return p;
         }
     } else if cfg!(target_os = "macos") {
         if let Ok(val) = std::env::var("HOME") {
             let mut p = PathBuf::from(val);
-            p.push("Library/Application Support/tree-tui");
+            p.push("Library/Application Support/pwd-keeper");
             return p;
         }
     } else if cfg!(target_os = "windows") {
@@ -41,7 +41,7 @@ fn config_dir() -> PathBuf {
         }
     }
     let mut p = PathBuf::from(".");
-    p.push(".tree-tui");
+    p.push(".pwd-keeper");
     p
 }
 
