@@ -73,7 +73,7 @@ ratatui 0.28, crossterm 0.28, uuid 1.0 (features: v4, serde), serde 1 (feature: 
 
 - `cargo run` opens the settings menu first. Navigate with `j`/`k`, select with `Enter`, quit with `q`/`Esc`.
 - "Open secret file" opens a **FileInput modal** to enter a path (or press Enter on empty field for OS file browser). Validates file (≤50MB, age-encrypted header), then opens a **PassphraseInput modal**. On success, launches the tree app with the decrypted data. Wrong passphrase shows a red error bar; modal stays open. `Esc` cancels.
-- "Create new secret file" placeholder (Alert modal "Not implemented yet").
+- "Create new secret file" opens a **FileInput modal** to enter a path/filename. Validates writability via a temp-file probe, then opens the PassphraseInput modal. On success creates an encrypted file with a root node named `"Secrets"` and opens the tree app.
 - **Recent files** loaded from `~/.config/tree-tui/recent_files.json`. Each row is selectable — Enter validates the file then opens the PassphraseInput modal.
 - Active file path shown in the window title bar of both Settings and Tree (`" Settings — /path/to/file "` / `" Tree — /path/to/file "`).
 - After successful open+decrypt, the file path is saved to recent files (deduplicated, most recent first).

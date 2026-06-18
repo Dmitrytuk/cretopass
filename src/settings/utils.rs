@@ -224,6 +224,30 @@ pub fn push_recent_file(files: &mut Vec<String>, path: &str) -> Result<(), Strin
     save_recent_files(files)
 }
 
+/// Creates a new encrypted secret file at the given path.
+///
+/// 1. Writes a temporary file to verify the path is writable.
+/// 2. Creates a [`Node`] with a single root named `"Secrets"`.
+/// 3. Serialises to JSON, encrypts with the passphrase, and writes.
+/// 4. Removes the temporary file on success.
+///
+/// Returns the created [`Node`] on success.
+pub fn create_secret_file(path: &str, passphrase: &str) -> Result<Node, String> {
+    // Probe writability by creating and removing a temp file
+    let probe_path = format!("{}.tmp", path);
+    fs::write(&probe_path, b"probe")
+        .map_err(|e| format!("Cannot write to path: {e}"))?;
+    let _ = fs::remove_file(&probe_path);
+
+    let node = Node::new("Secrets", "");
+    let json =
+        file_handling::node_to_json(&node).map_err(|e| format!("Failed to serialise: {e}"))?;
+    let encrypted =
+        crate::crypt::encrypt(&json, passphrase).map_err(|e| format!("Encryption failed: {e}"))?;
+    fs::write(path, &encrypted).map_err(|e| format!("Failed to write file: {e}"))?;
+    Ok(node)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -462,5 +486,37 @@ mod tests {
         assert!(result.unwrap_err().contains("too small"));
 
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_create_secret_file_ok() {
+        let path = format!("/tmp/test_create_ok_{}.age", uuid::Uuid::new_v4());
+        let _ = fs::remove_file(&path);
+
+        let node = create_secret_file(&path, "test-pass").unwrap();
+
+        assert_eq!(node.name, "Secrets");
+        assert!(node.children.is_empty());
+
+        // File should exist and contain valid encrypted data
+        assert!(fs::metadata(&path).is_ok());
+        let data = fs::read(&path).unwrap();
+        assert!(data.starts_with(b"age-encrypt"));
+
+        // Decrypt and verify node
+        let json = crypt::decrypt(&data, "test-pass").unwrap();
+        let decoded: Node = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.name, "Secrets");
+        assert!(decoded.children.is_empty());
+        assert_eq!(node.id, decoded.id);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_create_secret_file_invalid_path() {
+        let path = "/nonexistent_dir_12345/test.age".to_string();
+        let result = create_secret_file(&path, "pass");
+        assert!(result.is_err());
     }
 }

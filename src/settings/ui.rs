@@ -1,3 +1,4 @@
+use std::fs;
 use std::io;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -13,10 +14,14 @@ use crate::settings::utils;
 const MENU_ITEMS: &[&str] = &["Open secret file", "Create new secret file"];
 
 enum SettingsModal {
-    FileInput { path: String, cursor: usize },
+    FileInput {
+        path: String,
+        cursor: usize,
+        creating: bool,
+    },
     PassphraseInput {
         file_path: String,
-        file_data: Vec<u8>,
+        file_data: Option<Vec<u8>>,
         passphrase: String,
         cursor: usize,
         error: Option<String>,
@@ -109,10 +114,13 @@ fn handle_settings_key<B: Backend>(
                 state.modal = Some(SettingsModal::FileInput {
                     path: String::new(),
                     cursor: 0,
+                    creating: false,
                 });
             } else if idx == 1 {
-                state.modal = Some(SettingsModal::Alert {
-                    message: "Not implemented yet".to_string(),
+                state.modal = Some(SettingsModal::FileInput {
+                    path: String::new(),
+                    cursor: 0,
+                    creating: true,
                 });
             } else {
                 let file_idx = idx - MENU_ITEMS.len();
@@ -125,7 +133,7 @@ fn handle_settings_key<B: Backend>(
                         Ok(data) => {
                             state.modal = Some(SettingsModal::PassphraseInput {
                                 file_path,
-                                file_data: data,
+                                file_data: Some(data),
                                 passphrase: String::new(),
                                 cursor: 0,
                                 error: None,
@@ -147,18 +155,15 @@ fn handle_modal_key<B: Backend>(
     state: &mut SettingsState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
-    // Take the modal out so we can freely modify state without borrow conflicts
     let mut modal = match state.modal.take() {
         Some(m) => m,
         None => return Ok(()),
     };
 
     match key.code {
-        KeyCode::Esc => {
-            // Drop modal — don't put it back
-        }
+        KeyCode::Esc => {}
         KeyCode::Char(c) => match &mut modal {
-            SettingsModal::FileInput { path, cursor } => {
+            SettingsModal::FileInput { path, cursor, .. } => {
                 path.insert(*cursor, c);
                 *cursor += 1;
                 state.modal = Some(modal);
@@ -171,12 +176,10 @@ fn handle_modal_key<B: Backend>(
                 *error = None;
                 state.modal = Some(modal);
             }
-            SettingsModal::Alert { .. } => {
-                // Any key dismisses alert
-            }
+            SettingsModal::Alert { .. } => {}
         },
         KeyCode::Backspace => match &mut modal {
-            SettingsModal::FileInput { path, cursor } => {
+            SettingsModal::FileInput { path, cursor, .. } => {
                 if *cursor > 0 {
                     *cursor -= 1;
                     path.remove(*cursor);
@@ -208,7 +211,7 @@ fn handle_modal_key<B: Backend>(
         },
         KeyCode::Right => {
             match &mut modal {
-                SettingsModal::FileInput { cursor, path } => {
+                SettingsModal::FileInput { cursor, path, .. } => {
                     if *cursor < path.len() {
                         *cursor += 1;
                     }
@@ -246,12 +249,34 @@ fn handle_modal_key<B: Backend>(
             }
         },
         KeyCode::Enter => match modal {
-            SettingsModal::FileInput { path, .. } => {
+            SettingsModal::FileInput {
+                path, creating, ..
+            } => {
                 if path.is_empty() {
                     if let Some(picked) = utils::open_file_dialog() {
                         state.modal = Some(SettingsModal::FileInput {
                             path: picked,
                             cursor: 0,
+                            creating,
+                        });
+                    }
+                } else if creating {
+                    // Probe writability by writing and removing a temp file
+                    let probe_path = format!("{}.tmp", path);
+                    let writable = fs::write(&probe_path, b"").is_ok();
+                    let _ = fs::remove_file(&probe_path);
+
+                    if writable {
+                        state.modal = Some(SettingsModal::PassphraseInput {
+                            file_path: path,
+                            file_data: None,
+                            passphrase: String::new(),
+                            cursor: 0,
+                            error: None,
+                        });
+                    } else {
+                        state.modal = Some(SettingsModal::Alert {
+                            message: "Cannot write to this path".to_string(),
                         });
                     }
                 } else {
@@ -262,7 +287,7 @@ fn handle_modal_key<B: Backend>(
                         Ok(data) => {
                             state.modal = Some(SettingsModal::PassphraseInput {
                                 file_path: path,
-                                file_data: data,
+                                file_data: Some(data),
                                 passphrase: String::new(),
                                 cursor: 0,
                                 error: None,
@@ -277,46 +302,85 @@ fn handle_modal_key<B: Backend>(
                 passphrase,
                 ..
             } => {
-                // Try to decrypt. If it fails, put modal back with error.
-                match utils::decrypt_to_node(&file_data, &passphrase) {
-                    Err(e) => {
-                        state.modal = Some(SettingsModal::PassphraseInput {
-                            file_path,
-                            file_data,
-                            passphrase,
-                            cursor: 0,
-                            error: Some(format!("wrong password: {e}")),
-                        });
+                match file_data {
+                    Some(data) => {
+                        match utils::decrypt_to_node(&data, &passphrase) {
+                            Err(e) => {
+                                state.modal = Some(SettingsModal::PassphraseInput {
+                                    file_path,
+                                    file_data: Some(data),
+                                    passphrase,
+                                    cursor: 0,
+                                    error: Some(format!("wrong password: {e}")),
+                                });
+                            }
+                            Ok(node) => {
+                                let pp_bytes = passphrase.into_bytes();
+                                let active_file = ActiveFileState {
+                                    path: Some(file_path.clone()),
+                                    passphrase: pp_bytes.clone(),
+                                    node: Some(node.clone()),
+                                };
+                                state.active_file = Some(active_file);
+
+                                let mut files = state.recent_files.clone();
+                                let _ = utils::push_recent_file(&mut files, &file_path);
+                                state.recent_files = files;
+
+                                let mut tree_state =
+                                    crate::tree::widget::TreeState::new(node);
+                                tree_state.active_file_path = Some(file_path);
+                                tree_state.active_file_passphrase = pp_bytes;
+                                crate::tree::app_tree::run_app(
+                                    terminal,
+                                    &mut tree_state,
+                                )?;
+
+                                if !tree_state.return_to_menu {
+                                    state.quit = true;
+                                }
+                            }
+                        }
                     }
-                    Ok(node) => {
-                        let pp_bytes = passphrase.into_bytes();
-                        let active_file = ActiveFileState {
-                            path: Some(file_path.clone()),
-                            passphrase: pp_bytes.clone(),
-                            node: Some(node.clone()),
-                        };
-                        state.active_file = Some(active_file);
+                    None => {
+                        match utils::create_secret_file(&file_path, &passphrase) {
+                            Err(e) => {
+                                state.modal = Some(SettingsModal::Alert {
+                                    message: e,
+                                });
+                            }
+                            Ok(node) => {
+                                let pp_bytes = passphrase.into_bytes();
+                                let active_file = ActiveFileState {
+                                    path: Some(file_path.clone()),
+                                    passphrase: pp_bytes.clone(),
+                                    node: Some(node.clone()),
+                                };
+                                state.active_file = Some(active_file);
 
-                        // Update recent files
-                        let mut files = state.recent_files.clone();
-                        let _ = utils::push_recent_file(&mut files, &file_path);
-                        state.recent_files = files;
+                                let mut files = state.recent_files.clone();
+                                let _ =
+                                    utils::push_recent_file(&mut files, &file_path);
+                                state.recent_files = files;
 
-                        // Launch tree (modal stays dropped)
-                        let mut tree_state = crate::tree::widget::TreeState::new(node);
-                        tree_state.active_file_path = Some(file_path);
-                        tree_state.active_file_passphrase = pp_bytes;
-                        crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
+                                let mut tree_state =
+                                    crate::tree::widget::TreeState::new(node);
+                                tree_state.active_file_path = Some(file_path);
+                                tree_state.active_file_passphrase = pp_bytes;
+                                crate::tree::app_tree::run_app(
+                                    terminal,
+                                    &mut tree_state,
+                                )?;
 
-                        if !tree_state.return_to_menu {
-                            state.quit = true;
+                                if !tree_state.return_to_menu {
+                                    state.quit = true;
+                                }
+                            }
                         }
                     }
                 }
             }
-            SettingsModal::Alert { .. } => {
-                // Dismiss alert
-            }
+            SettingsModal::Alert { .. } => {}
         },
         _ => {
             state.modal = Some(modal);
@@ -412,24 +476,39 @@ fn make_overlay(area: Rect, height: u16) -> Rect {
 }
 
 fn render_file_input_modal(frame: &mut Frame, area: Rect, state: &SettingsState) {
-    let (path, cursor) = match &state.modal {
-        Some(SettingsModal::FileInput { path, cursor }) => (path.clone(), *cursor),
+    let (path, cursor, creating) = match &state.modal {
+        Some(SettingsModal::FileInput {
+            path, cursor, creating, ..
+        }) => (path.clone(), *cursor, *creating),
         _ => return,
     };
 
     let overlay_area = make_overlay(area, 7);
+
+    let title = if creating {
+        " Create New Secret File "
+    } else {
+        " Open File "
+    };
     let block = Block::default()
-        .title(" Open File ")
+        .title(title)
         .borders(Borders::ALL)
         .style(Style::default().bg(Color::Black).fg(Color::Cyan));
 
     let inner = block.inner(overlay_area);
 
     let mut lines = vec![Line::from("")];
-    lines.push(Line::from(Span::styled(
-        "Enter file path or press Enter on empty field to browse",
-        Style::default().fg(Color::DarkGray),
-    )));
+    if creating {
+        lines.push(Line::from(Span::styled(
+            "Enter a path and filename for the new secret file",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "Enter file path or press Enter on empty field to browse",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
     lines.push(Line::from(""));
 
     let before = &path[..cursor.min(path.len())];
