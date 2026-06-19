@@ -37,7 +37,7 @@ pub struct SettingsState {
 
 impl SettingsState {
     pub fn new() -> Self {
-        let settings = utils::load_settings().unwrap_or_default();
+        let settings = utils::load_settings();
         Self {
             selected: 0,
             settings,

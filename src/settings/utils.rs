@@ -20,6 +20,8 @@ pub struct AppSettings {
     pub last_opened_file: Option<String>,
     /// If `true`, window title shows the full path; otherwise just the filename.
     pub display_full_path: bool,
+    /// If `true`, automatically open the last-opened file on startup.
+    pub open_last_opened_file_on_startup: bool,
 }
 
 impl Default for AppSettings {
@@ -28,6 +30,7 @@ impl Default for AppSettings {
             recent_files: Vec::new(),
             last_opened_file: None,
             display_full_path: true,
+            open_last_opened_file_on_startup: true,
         }
     }
 }
@@ -155,26 +158,34 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), String> {
     Ok(())
 }
 
+/// Returns default settings and persists them to disk.
+fn create_default_settings() -> AppSettings {
+    let defaults = AppSettings::default();
+    let _ = save_settings(&defaults);
+    defaults
+}
+
 /// Loads app settings from the config directory.
 ///
-/// Returns default settings if the file does not exist.
-pub fn load_settings() -> Result<AppSettings, String> {
+/// If the file does not exist, is corrupt, or has an incompatible format
+/// (e.g. from an older version), it is recreated with default values.
+pub fn load_settings() -> AppSettings {
     let path = config_dir().join(SETTINGS_FILE_NAME);
 
     let bytes = match fs::read(&path) {
         Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(AppSettings::default());
-        }
-        Err(e) => return Err(format!("Failed to read settings: {e}")),
+        Err(_) => return create_default_settings(),
     };
 
-    let archived = rkyv::access::<ArchivedAppSettings, rancor::Error>(&bytes)
-        .map_err(|e| format!("Failed to parse settings: {e}"))?;
-    let settings = rkyv::deserialize::<AppSettings, rancor::Error>(archived)
-        .map_err(|e| format!("Failed to deserialize settings: {e}"))?;
+    let archived = match rkyv::access::<ArchivedAppSettings, rancor::Error>(&bytes) {
+        Ok(a) => a,
+        Err(_) => return create_default_settings(),
+    };
 
-    Ok(settings)
+    match rkyv::deserialize::<AppSettings, rancor::Error>(archived) {
+        Ok(s) => s,
+        Err(_) => create_default_settings(),
+    }
 }
 
 /// Attempts to open an OS-native file-selection dialog.
@@ -459,9 +470,10 @@ mod tests {
             ],
             last_opened_file: Some("/home/user/vault.age".to_string()),
             display_full_path: false,
+            open_last_opened_file_on_startup: true,
         };
         save_settings(&settings).unwrap();
-        let loaded = load_settings().unwrap();
+        let loaded = load_settings();
 
         assert_eq!(loaded.recent_files.len(), 2);
         assert_eq!(loaded.recent_files[0], "/home/user/vault.age");
@@ -473,9 +485,10 @@ mod tests {
     }
 
     #[test]
-    fn test_settings_default_display_full_path() {
+    fn test_settings_defaults() {
         let settings = AppSettings::default();
         assert!(settings.display_full_path);
+        assert!(settings.open_last_opened_file_on_startup);
         assert!(settings.recent_files.is_empty());
         assert!(settings.last_opened_file.is_none());
     }
@@ -486,20 +499,31 @@ mod tests {
 
         let settings = AppSettings::default();
         save_settings(&settings).unwrap();
-        let loaded = load_settings().unwrap();
+        let loaded = load_settings();
         assert!(loaded.recent_files.is_empty());
         assert!(loaded.last_opened_file.is_none());
         assert!(loaded.display_full_path);
+        assert!(loaded.open_last_opened_file_on_startup);
 
         clean_settings_file();
     }
 
     #[test]
-    fn test_settings_no_file_returns_defaults() {
+    fn test_settings_no_file_creates_defaults() {
         clean_settings_file();
-        let loaded = load_settings().unwrap();
+
+        let loaded = load_settings();
+
+        // Should have created the file with defaults
         assert!(loaded.recent_files.is_empty());
         assert!(loaded.display_full_path);
+        assert!(loaded.open_last_opened_file_on_startup);
+
+        // File should now exist on disk
+        let path = config_dir().join(SETTINGS_FILE_NAME);
+        assert!(path.exists());
+
+        clean_settings_file();
     }
 
     #[test]
@@ -514,6 +538,7 @@ mod tests {
             ],
             last_opened_file: None,
             display_full_path: true,
+            open_last_opened_file_on_startup: true,
         };
         push_recent_file(&mut settings, "/beta.age").unwrap();
 
@@ -549,11 +574,13 @@ mod tests {
 
         let mut settings = AppSettings::default();
         settings.display_full_path = false;
+        settings.open_last_opened_file_on_startup = false;
         settings.recent_files.push("/a.age".to_string());
         save_settings(&settings).unwrap();
 
-        let loaded = load_settings().unwrap();
+        let loaded = load_settings();
         assert!(!loaded.display_full_path);
+        assert!(!loaded.open_last_opened_file_on_startup);
 
         clean_settings_file();
     }
