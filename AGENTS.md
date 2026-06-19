@@ -1,4 +1,4 @@
-# tree-tui
+# simple-password-keeper
 
 Rust ratatui-based TUI app with a custom tree data structure (not file-system), vim-style navigation, search/filter, and edit/add forms. In-memory only, no persistence.
 
@@ -24,7 +24,8 @@ cargo doc --open                     # generate and open API docs from doc comme
 | `o` | Add child |
 | `/` | Search (type, `Enter` confirm, `Esc` cancel) |
 | `Esc` (normal) | Clear search highlights |
-| `q` / `Ctrl+C` | Quit |
+| `q` / `Ctrl+C` | Quit entire app |
+| `H` (shift+h) | Return to settings menu |
 
 Detail overlay: `j`/`k`=navigate rows, `Enter`=copy row data to clipboard, `i`=edit, `Esc`/`Space`=close. Shows extra fields (Login/Password/Custom) below description. Selected row highlighted with `▸`. Copy shows "Copied!" alert popup — any key dismisses it.
 
@@ -37,10 +38,10 @@ Password field values display as `*****` in the detail overlay and when unfocuse
 ## Architecture
 
 - **Crate**: library + binary. `src/lib.rs` is the crate root, re-exporting public API. `src/main.rs` is a thin binary that launches the TUI and can be consumed as a dependency by other crates.
-- **7 source files**: `src/lib.rs` (crate root, re-exports, `build_demo_tree()`, terminal helpers, `run()`/`run_with_root()`), `src/main.rs` (just calls `tree_tui::run()`), `src/tree/mod.rs` (module decl), `src/tree/node.rs` (Node struct), `src/tree/widget.rs` (TreeState, InputMode, TreeWidget), `src/tree/app_tree.rs` (event loop, key handlers, all overlay rendering), `src/settings/mod.rs` (settings menu, `run()`, `render()`)
+- **12 source files**: `src/lib.rs` (crate root, re-exports, `build_demo_tree()`, terminal helpers, `run()`/`run_with_root()`), `src/main.rs` (just calls `tree_tui::run()`), `src/tree/mod.rs` (module decl), `src/tree/node.rs` (Node struct), `src/tree/widget.rs` (TreeState, InputMode, TreeWidget), `src/tree/app_tree.rs` (event loop, key handlers, all overlay rendering), `src/settings.rs` (module root, re-exports `ui`, `active_file`, and `utils`), `src/settings/ui.rs` (settings GUI: `SettingsState`, `run()`, `render()`), `src/settings/active_file.rs` (opened-file state: path, passphrase, Node), `src/settings/utils.rs` (orchestration: file validation, decrypt, save, recents, file dialog), `src/file_handling/mod.rs` (JSON serialization, file I/O), `src/crypt/mod.rs` (age-based encrypt/decrypt)
 - **Node**: carries `id: Uuid`, `name`, `description`, `extra_fields: Vec<ExtraField>`, `children: Vec<Node>`
 - **ExtraField/FieldType**: `{field_type: Login|Password|Custom(String), value: String}` — `display_value()` masks Password as `*****`
-- **TreeState**: owns root Node, `expanded: HashSet<Uuid>`, `selected: usize`, clipboard, search state, `mode: InputMode`
+- **TreeState**: owns root Node, `expanded: HashSet<Uuid>`, `selected: usize`, clipboard, search state, `mode: InputMode`, `active_file_path`, `active_file_passphrase`, `dirty` flag
 - **InputMode**: Normal, Search, AwaitingDd, Detail, Adding{name,desc,extra_fields,field,cursor,delete_pending}, Editing{node_id,...}, SelectFieldType, CustomFieldName, ConfirmDeleteField
 - **TreeWidget::render**: DFS flat list with indentation, ▶/▼ icons, ▸ selection arrow, search highlight (DarkGray bg)
 
@@ -66,18 +67,27 @@ Password field values display as `*****` in the detail overlay and when unfocuse
 
 ## Dependencies
 
-ratatui 0.28, crossterm 0.28, uuid 1.0 (feature: v4). No test framework, no lint config, no CI.
+ratatui 0.28, crossterm 0.28, uuid 1.0 (features: v4, serde), serde 1 (feature: derive), serde_json 1, age 0.11.
 
 ## Settings Menu
 
 - `cargo run` opens the settings menu first. Navigate with `j`/`k`, select with `Enter`, quit with `q`/`Esc`.
-- "Open secret file" launches the tree app with the built-in demo tree (Knowledge Base). When the tree app quits, control returns to the settings menu.
-- "Create new secret file" is a placeholder (no action yet).
-- Recent files list shows dummy data (`vault_2024.kdbx`, `work_passwords.kdbx`, `personal.kdbx`).
+- "Open secret file" opens a **FileInput modal** to enter a path (or press Enter on empty field for OS file browser). Validates file (≤50MB, age-encrypted header), then opens a **PassphraseInput modal**. On success, launches the tree app with the decrypted data. Wrong passphrase shows a red error bar; modal stays open. `Esc` cancels.
+- "Create new secret file" opens a **FileInput modal** to enter a path/filename. Validates writability via a temp-file probe, then opens the PassphraseInput modal. On success creates an encrypted file with a root node named `"Secrets"` and opens the tree app.
+- **Recent files** loaded from `~/.config/pwd-keeper/recent_files.json`. Each row is selectable — Enter validates the file then opens the PassphraseInput modal.
+- Active file path shown in the window title bar of both Settings and Tree (`" Settings — /path/to/file "` / `" Tree — /path/to/file "`).
+- After successful open+decrypt, the file path is saved to recent files (deduplicated, most recent first).
+
+## Auto-save
+
+- Every mutation (add, edit, cut, paste) sets `TreeState.dirty = true`.
+- On the next event-loop iteration, if a file is loaded (`active_file_path` is Some), `settings::utils::save_tree()` is called.
+- `save_tree()`: (1) copies the current file to `{path}.bak`, (2) serialises `root` to JSON via `file_handling`, (3) encrypts with the stored passphrase via `crypt`, (4) writes to the original path.
+- No explicit save keybinding needed — saves are automatic after every change.
 
 ## Quirks & edge cases
 
-- Quit sets `state.quit` flag → event loop breaks → `main()` runs cleanup (LeaveAlternateScreen, disable_raw_mode, show_cursor).
+- Quit sets `state.quit` flag → event loop breaks → `main()` runs cleanup (LeaveAlternateScreen, disable_raw_mode, show_cursor). `q` in tree app quits everything (including settings). `H` (shift+h) in tree app returns to settings menu.
 - Add form defaults empty name to `"Untitled"`.
 - `remove_node()` only targets children (not root). Root cannot be cut.
 - `insert_after()` finds parent, inserts at `pos+1`. `paste_child()` inserts as first child.
