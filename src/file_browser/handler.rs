@@ -179,11 +179,6 @@ fn handle_input_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileB
             if name.is_empty() {
                 return None;
             }
-            let name = if name.contains('.') {
-                name
-            } else {
-                format!("{}.age", name)
-            };
             let full_path = state.current_dir.join(&name);
             Some(FileBrowserAction::Selected(
                 full_path.to_string_lossy().to_string(),
