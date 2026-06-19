@@ -13,7 +13,10 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
             KeyCode::Char('y') | KeyCode::Enter => {
                 if let Some(ref path_str) = state.confirm_delete.clone() {
                     let path = std::path::Path::new(path_str);
-                    if fs::delete_file(path).is_ok() {
+                    if Some(path) == state.active_file_path.as_deref() {
+                        state.error =
+                            Some("Cannot delete the currently open file".to_string());
+                    } else if fs::delete_file(path).is_ok() {
                         state.refresh_entries();
                     }
                 }
@@ -276,21 +279,36 @@ fn handle_rename_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<File
             if new_name.is_empty() {
                 return None;
             }
-            let from = std::path::Path::new(&state.rename_target);
+            let old_target = state.rename_target.clone();
+            let from = std::path::Path::new(&old_target);
             let to = state.current_dir.join(&new_name);
             match fs::rename_file(from, &to) {
                 Ok(()) => {
+                    let new_path_str = to.to_string_lossy().to_string();
+                    let is_active =
+                        state.active_file_path.as_deref() == Some(from);
+                    if is_active {
+                        state.active_file_path = Some(to);
+                    }
+                    state.rename_target.clear();
                     state.focus = FocusTarget::List;
                     state.rename_name.clear();
                     state.rename_cursor = 0;
-                    state.rename_target.clear();
                     state.refresh_entries();
+                    if is_active {
+                        Some(FileBrowserAction::Renamed {
+                            from: old_target,
+                            to: new_path_str,
+                        })
+                    } else {
+                        None
+                    }
                 }
                 Err(e) => {
                     state.error = Some(e);
+                    None
                 }
             }
-            None
         }
         _ => None,
     }
@@ -432,6 +450,7 @@ mod tests {
                 );
             }
             FileBrowserAction::Cancelled => panic!("expected Selected, got Cancelled"),
+            FileBrowserAction::Renamed { .. } => panic!("expected Selected, got Renamed"),
         }
     }
 
@@ -479,6 +498,7 @@ mod tests {
                 );
             }
             FileBrowserAction::Cancelled => panic!("expected Selected, got Cancelled"),
+            FileBrowserAction::Renamed { .. } => panic!("expected Selected, got Renamed"),
         }
     }
 

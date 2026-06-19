@@ -1,5 +1,6 @@
 use std::fs;
 use std::io;
+use std::path::PathBuf;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -145,13 +146,21 @@ fn handle_settings_key<B: Backend>(
         KeyCode::Enter => {
             let idx = state.selected;
             if idx == 0 {
-                state.modal = Some(SettingsModal::FileBrowser(FileBrowserState::new(
-                    FileBrowserMode::OpenFile,
-                )));
+                let mut fb = FileBrowserState::new(FileBrowserMode::OpenFile);
+                fb.set_active_file_path(
+                    state.active_file.as_ref().and_then(|af| {
+                        af.path.as_ref().map(|p| PathBuf::from(p))
+                    }),
+                );
+                state.modal = Some(SettingsModal::FileBrowser(fb));
             } else if idx == 1 {
-                state.modal = Some(SettingsModal::FileBrowser(FileBrowserState::new(
-                    FileBrowserMode::CreateFile,
-                )));
+                let mut fb = FileBrowserState::new(FileBrowserMode::CreateFile);
+                fb.set_active_file_path(
+                    state.active_file.as_ref().and_then(|af| {
+                        af.path.as_ref().map(|p| PathBuf::from(p))
+                    }),
+                );
+                state.modal = Some(SettingsModal::FileBrowser(fb));
             } else if idx == 2 {
                 state.modal = Some(SettingsModal::AppSettings { setting_idx: 0 });
             } else {
@@ -217,6 +226,20 @@ fn handle_file_browser_key<B: Backend>(
             state.modal = Some(SettingsModal::FileBrowser(modal));
         }
         Some(FileBrowserAction::Cancelled) => {}
+        Some(FileBrowserAction::Renamed { from, to }) => {
+            // Update active_file path if it was the renamed file
+            if let Some(ref active_file) = state.active_file {
+                if active_file.path.as_deref() == Some(&from) {
+                    state.active_file.as_mut().unwrap().path = Some(to.clone());
+                }
+            }
+            // Update last_opened_file in settings if it was the renamed file
+            if state.settings.last_opened_file.as_deref() == Some(&from) {
+                state.settings.last_opened_file = Some(to.clone());
+                let _ = utils::save_settings(&state.settings);
+            }
+            state.modal = Some(SettingsModal::FileBrowser(modal));
+        }
         Some(FileBrowserAction::Selected(path)) => {
             let creating = modal.mode == FileBrowserMode::CreateFile;
 
