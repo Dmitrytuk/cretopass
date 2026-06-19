@@ -8,17 +8,14 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{backend::Backend, Frame, Terminal};
 
+use crate::file_browser::{self, FileBrowserAction, FileBrowserMode, FileBrowserState};
 use crate::settings::active_file::ActiveFileState;
 use crate::settings::utils;
 
 const MENU_ITEMS: &[&str] = &["Open secret file", "Create new secret file"];
 
 enum SettingsModal {
-    FileInput {
-        path: String,
-        cursor: usize,
-        creating: bool,
-    },
+    FileBrowser(FileBrowserState),
     PassphraseInput {
         file_path: String,
         file_data: Option<Vec<u8>>,
@@ -87,8 +84,15 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 continue;
             }
 
+            let is_file_browser = state
+                .modal
+                .as_ref()
+                .is_some_and(|m| matches!(m, SettingsModal::FileBrowser(_)));
+
             if state.modal.is_none() {
                 handle_settings_key(key, &mut state, terminal)?;
+            } else if is_file_browser {
+                handle_file_browser_key(key, &mut state, terminal)?;
             } else {
                 handle_modal_key(key, &mut state, terminal)?;
             }
@@ -124,23 +128,18 @@ fn handle_settings_key<B: Backend>(
         KeyCode::Enter => {
             let idx = state.selected;
             if idx == 0 {
-                state.modal = Some(SettingsModal::FileInput {
-                    path: String::new(),
-                    cursor: 0,
-                    creating: false,
-                });
+                state.modal = Some(SettingsModal::FileBrowser(FileBrowserState::new(
+                    FileBrowserMode::OpenFile,
+                )));
             } else if idx == 1 {
-                state.modal = Some(SettingsModal::FileInput {
-                    path: String::new(),
-                    cursor: 0,
-                    creating: true,
-                });
+                state.modal = Some(SettingsModal::FileBrowser(FileBrowserState::new(
+                    FileBrowserMode::CreateFile,
+                )));
             } else {
                 let file_idx = idx - MENU_ITEMS.len();
                 if file_idx < state.recent_files.len() {
                     let file_path = state.recent_files[file_idx].clone();
 
-                    // If this is the currently active file, re-open the tree directly
                     if let Some(ref active_file) = state.active_file {
                         if active_file.path.as_deref() == Some(&file_path) {
                             if let Some(ref node) = active_file.node {
@@ -179,7 +178,68 @@ fn handle_settings_key<B: Backend>(
     Ok(())
 }
 
-// ── Modal key handling ──
+// ── File browser key handling ──
+
+fn handle_file_browser_key<B: Backend>(
+    key: event::KeyEvent,
+    state: &mut SettingsState,
+    _terminal: &mut Terminal<B>,
+) -> io::Result<()> {
+    let mut modal = match state.modal.take() {
+        Some(SettingsModal::FileBrowser(b)) => b,
+        _ => return Ok(()),
+    };
+
+    let action = file_browser::handle_key(key, &mut modal);
+
+    match action {
+        None => {
+            state.modal = Some(SettingsModal::FileBrowser(modal));
+        }
+        Some(FileBrowserAction::Cancelled) => {}
+        Some(FileBrowserAction::Selected(path)) => {
+            let creating = modal.mode == FileBrowserMode::CreateFile;
+
+            if creating {
+                let probe_path = format!("{}.tmp", path);
+                let writable = fs::write(&probe_path, b"").is_ok();
+                let _ = fs::remove_file(&probe_path);
+
+                if writable {
+                    state.modal = Some(SettingsModal::PassphraseInput {
+                        file_path: path,
+                        file_data: None,
+                        passphrase: String::new(),
+                        cursor: 0,
+                        error: None,
+                    });
+                } else {
+                    state.modal = Some(SettingsModal::Alert {
+                        message: "Cannot write to this path".to_string(),
+                    });
+                }
+            } else {
+                match utils::validate_encrypted_file(&path) {
+                    Err(e) => {
+                        state.modal = Some(SettingsModal::Alert { message: e });
+                    }
+                    Ok(data) => {
+                        state.modal = Some(SettingsModal::PassphraseInput {
+                            file_path: path,
+                            file_data: Some(data),
+                            passphrase: String::new(),
+                            cursor: 0,
+                            error: None,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// ── Modal key handling (Passphrase, Alert) ──
 
 fn handle_modal_key<B: Backend>(
     key: event::KeyEvent,
@@ -194,11 +254,6 @@ fn handle_modal_key<B: Backend>(
     match key.code {
         KeyCode::Esc => {}
         KeyCode::Char(c) => match &mut modal {
-            SettingsModal::FileInput { path, cursor, .. } => {
-                path.insert(*cursor, c);
-                *cursor += 1;
-                state.modal = Some(modal);
-            }
             SettingsModal::PassphraseInput {
                 passphrase, cursor, error, ..
             } => {
@@ -208,15 +263,9 @@ fn handle_modal_key<B: Backend>(
                 state.modal = Some(modal);
             }
             SettingsModal::Alert { .. } => {}
+            SettingsModal::FileBrowser(_) => unreachable!(),
         },
         KeyCode::Backspace => match &mut modal {
-            SettingsModal::FileInput { path, cursor, .. } => {
-                if *cursor > 0 {
-                    *cursor -= 1;
-                    path.remove(*cursor);
-                }
-                state.modal = Some(modal);
-            }
             SettingsModal::PassphraseInput {
                 passphrase, cursor, ..
             } => {
@@ -229,48 +278,41 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
+            SettingsModal::FileBrowser(_) => unreachable!(),
         },
         KeyCode::Left => match &mut modal {
-            SettingsModal::FileInput { cursor, .. }
-            | SettingsModal::PassphraseInput { cursor, .. } => {
+            SettingsModal::PassphraseInput { cursor, .. } => {
                 *cursor = cursor.saturating_sub(1);
                 state.modal = Some(modal);
             }
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
+            SettingsModal::FileBrowser(_) => unreachable!(),
         },
-        KeyCode::Right => {
-            match &mut modal {
-                SettingsModal::FileInput { cursor, path, .. } => {
-                    if *cursor < path.len() {
-                        *cursor += 1;
-                    }
+        KeyCode::Right => match &mut modal {
+            SettingsModal::PassphraseInput { cursor, passphrase, .. } => {
+                if *cursor < passphrase.len() {
+                    *cursor += 1;
                 }
-                SettingsModal::PassphraseInput { cursor, passphrase, .. } => {
-                    if *cursor < passphrase.len() {
-                        *cursor += 1;
-                    }
-                }
-                SettingsModal::Alert { .. } => {}
+                state.modal = Some(modal);
             }
-            state.modal = Some(modal);
-        }
+            SettingsModal::Alert { .. } => {
+                state.modal = Some(modal);
+            }
+            SettingsModal::FileBrowser(_) => unreachable!(),
+        },
         KeyCode::Home => match &mut modal {
-            SettingsModal::FileInput { cursor, .. }
-            | SettingsModal::PassphraseInput { cursor, .. } => {
+            SettingsModal::PassphraseInput { cursor, .. } => {
                 *cursor = 0;
                 state.modal = Some(modal);
             }
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
+            SettingsModal::FileBrowser(_) => unreachable!(),
         },
         KeyCode::End => match &mut modal {
-            SettingsModal::FileInput { cursor, path, .. } => {
-                *cursor = path.len();
-                state.modal = Some(modal);
-            }
             SettingsModal::PassphraseInput { cursor, passphrase, .. } => {
                 *cursor = passphrase.len();
                 state.modal = Some(modal);
@@ -278,140 +320,78 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
+            SettingsModal::FileBrowser(_) => unreachable!(),
         },
         KeyCode::Enter => match modal {
-            SettingsModal::FileInput {
-                path, creating, ..
-            } => {
-                if path.is_empty() {
-                    if let Some(picked) = utils::open_file_dialog() {
-                        state.modal = Some(SettingsModal::FileInput {
-                            path: picked,
-                            cursor: 0,
-                            creating,
-                        });
-                    }
-                } else if creating {
-                    // Probe writability by writing and removing a temp file
-                    let probe_path = format!("{}.tmp", path);
-                    let writable = fs::write(&probe_path, b"").is_ok();
-                    let _ = fs::remove_file(&probe_path);
-
-                    if writable {
-                        state.modal = Some(SettingsModal::PassphraseInput {
-                            file_path: path,
-                            file_data: None,
-                            passphrase: String::new(),
-                            cursor: 0,
-                            error: None,
-                        });
-                    } else {
-                        state.modal = Some(SettingsModal::Alert {
-                            message: "Cannot write to this path".to_string(),
-                        });
-                    }
-                } else {
-                    match utils::validate_encrypted_file(&path) {
-                        Err(e) => {
-                            state.modal = Some(SettingsModal::Alert { message: e });
-                        }
-                        Ok(data) => {
-                            state.modal = Some(SettingsModal::PassphraseInput {
-                                file_path: path,
-                                file_data: Some(data),
-                                passphrase: String::new(),
-                                cursor: 0,
-                                error: None,
-                            });
-                        }
-                    }
-                }
-            }
             SettingsModal::PassphraseInput {
                 file_path,
                 file_data,
                 passphrase,
                 ..
-            } => {
-                match file_data {
-                    Some(data) => {
-                        match utils::decrypt_to_node(&data, &passphrase) {
-                            Err(e) => {
-                                state.modal = Some(SettingsModal::PassphraseInput {
-                                    file_path,
-                                    file_data: Some(data),
-                                    passphrase,
-                                    cursor: 0,
-                                    error: Some(format!("wrong password: {e}")),
-                                });
-                            }
-                            Ok(node) => {
-                                let pp_bytes = passphrase.into_bytes();
-                                let active_file = ActiveFileState {
-                                    path: Some(file_path.clone()),
-                                    passphrase: pp_bytes.clone(),
-                                    node: Some(node.clone()),
-                                };
-                                state.active_file = Some(active_file);
+            } => match file_data {
+                Some(data) => match utils::decrypt_to_node(&data, &passphrase) {
+                    Err(e) => {
+                        state.modal = Some(SettingsModal::PassphraseInput {
+                            file_path,
+                            file_data: Some(data),
+                            passphrase,
+                            cursor: 0,
+                            error: Some(format!("wrong password: {e}")),
+                        });
+                    }
+                    Ok(node) => {
+                        let pp_bytes = passphrase.into_bytes();
+                        let active_file = ActiveFileState {
+                            path: Some(file_path.clone()),
+                            passphrase: pp_bytes.clone(),
+                            node: Some(node.clone()),
+                        };
+                        state.active_file = Some(active_file);
 
-                                let mut files = state.recent_files.clone();
-                                let _ = utils::push_recent_file(&mut files, &file_path);
-                                state.recent_files = files;
+                        let mut files = state.recent_files.clone();
+                        let _ = utils::push_recent_file(&mut files, &file_path);
+                        state.recent_files = files;
 
-                                let mut tree_state =
-                                    crate::tree::widget::TreeState::new(node);
-                                tree_state.active_file_path = Some(file_path);
-                                tree_state.active_file_passphrase = pp_bytes;
-                                crate::tree::app_tree::run_app(
-                                    terminal,
-                                    &mut tree_state,
-                                )?;
+                        let mut tree_state = crate::tree::widget::TreeState::new(node);
+                        tree_state.active_file_path = Some(file_path);
+                        tree_state.active_file_passphrase = pp_bytes;
+                        crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
 
-                                if !tree_state.return_to_menu {
-                                    state.quit = true;
-                                }
-                            }
+                        if !tree_state.return_to_menu {
+                            state.quit = true;
                         }
                     }
-                    None => {
-                        match utils::create_secret_file(&file_path, &passphrase) {
-                            Err(e) => {
-                                state.modal = Some(SettingsModal::Alert {
-                                    message: e,
-                                });
-                            }
-                            Ok(node) => {
-                                let pp_bytes = passphrase.into_bytes();
-                                let active_file = ActiveFileState {
-                                    path: Some(file_path.clone()),
-                                    passphrase: pp_bytes.clone(),
-                                    node: Some(node.clone()),
-                                };
-                                state.active_file = Some(active_file);
+                },
+                None => match utils::create_secret_file(&file_path, &passphrase) {
+                    Err(e) => {
+                        state.modal = Some(SettingsModal::Alert { message: e });
+                    }
+                    Ok(node) => {
+                        let pp_bytes = passphrase.into_bytes();
+                        let active_file = ActiveFileState {
+                            path: Some(file_path.clone()),
+                            passphrase: pp_bytes.clone(),
+                            node: Some(node.clone()),
+                        };
+                        state.active_file = Some(active_file);
 
-                                let mut files = state.recent_files.clone();
-                                let _ =
-                                    utils::push_recent_file(&mut files, &file_path);
-                                state.recent_files = files;
+                        let mut files = state.recent_files.clone();
+                        let _ = utils::push_recent_file(&mut files, &file_path);
+                        state.recent_files = files;
 
-                                let mut tree_state =
-                                    crate::tree::widget::TreeState::new(node);
-                                tree_state.active_file_path = Some(file_path);
-                                tree_state.active_file_passphrase = pp_bytes;
-                                crate::tree::app_tree::run_app(
-                                    terminal,
-                                    &mut tree_state,
-                                )?;
+                        let mut tree_state = crate::tree::widget::TreeState::new(node);
+                        tree_state.active_file_path = Some(file_path);
+                        tree_state.active_file_passphrase = pp_bytes;
+                        crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
 
-                                if !tree_state.return_to_menu {
-                                    state.quit = true;
-                                }
-                            }
+                        if !tree_state.return_to_menu {
+                            state.quit = true;
                         }
                     }
-                }
-            }
+                },
+            },
             SettingsModal::Alert { .. } => {}
+            SettingsModal::FileBrowser(_) => unreachable!(),
         },
         _ => {
             state.modal = Some(modal);
@@ -426,7 +406,9 @@ fn render(frame: &mut Frame, area: Rect, state: &SettingsState) {
     render_settings_window(frame, area, state);
 
     match &state.modal {
-        Some(SettingsModal::FileInput { .. }) => render_file_input_modal(frame, area, state),
+        Some(SettingsModal::FileBrowser(ref browser)) => {
+            file_browser::render_file_browser(frame, area, browser);
+        }
         Some(SettingsModal::PassphraseInput { .. }) => render_passphrase_modal(frame, area, state),
         Some(SettingsModal::Alert { message }) => render_alert_modal(frame, area, message),
         None => {}
@@ -504,73 +486,6 @@ fn make_overlay(area: Rect, height: u16) -> Rect {
         width: area.width * 3 / 5,
         height: overlay_height,
     }
-}
-
-fn render_file_input_modal(frame: &mut Frame, area: Rect, state: &SettingsState) {
-    let (path, cursor, creating) = match &state.modal {
-        Some(SettingsModal::FileInput {
-            path, cursor, creating, ..
-        }) => (path.clone(), *cursor, *creating),
-        _ => return,
-    };
-
-    let overlay_area = make_overlay(area, 7);
-
-    let title = if creating {
-        " Create New Secret File "
-    } else {
-        " Open File "
-    };
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black).fg(Color::Cyan));
-
-    let inner = block.inner(overlay_area);
-
-    let mut lines = vec![Line::from("")];
-    if creating {
-        lines.push(Line::from(Span::styled(
-            "Enter a path and filename for the new secret file",
-            Style::default().fg(Color::DarkGray),
-        )));
-    } else {
-        lines.push(Line::from(Span::styled(
-            "Enter file path or press Enter on empty field to browse",
-            Style::default().fg(Color::DarkGray),
-        )));
-    }
-    lines.push(Line::from(""));
-
-    let before = &path[..cursor.min(path.len())];
-    let at = path
-        .get(cursor..)
-        .and_then(|s| s.chars().next())
-        .map(|c| c.to_string())
-        .unwrap_or_default();
-    let after = &path[cursor + at.len()..];
-
-    let cursor_char = if at.is_empty() { " " } else { &at };
-
-    lines.push(Line::from(vec![
-        Span::styled("Path: ", Style::default().fg(Color::Cyan)),
-        Span::raw(before.to_string()),
-        Span::styled(
-            cursor_char.to_string(),
-            Style::default().bg(Color::White).fg(Color::Black),
-        ),
-        Span::raw(after.to_string()),
-    ]));
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Enter:confirm  Esc:cancel",
-        Style::default().fg(Color::DarkGray),
-    )));
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
 fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState) {
