@@ -4,6 +4,7 @@ use crate::tree::node::Node;
 ///
 /// Stored in the settings module so both the settings UI and the tree
 /// app can access the shared file state without coupling them directly.
+#[derive(Clone)]
 pub struct ActiveFileState {
     /// Full filesystem path of the opened file.
     pub path: Option<String>,
