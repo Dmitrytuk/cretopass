@@ -628,4 +628,53 @@ mod tests {
         let result = create_secret_file(&path, "pass");
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_create_file_timing() {
+        let path = format!("/tmp/test_create_time_{}.age", uuid::Uuid::new_v4());
+        let passphrase = "test-passphrase";
+
+        let start = std::time::Instant::now();
+        let result = create_secret_file(&path, passphrase);
+        let elapsed = start.elapsed();
+
+        assert!(result.is_ok());
+        assert!(std::path::Path::new(&path).exists());
+
+        println!(
+            "create_secret_file took {:?} ({}.{:03} ms)",
+            elapsed,
+            elapsed.as_millis(),
+            elapsed.subsec_millis(),
+        );
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_open_file_timing() {
+        let path = format!("/tmp/test_open_time_{}.age", uuid::Uuid::new_v4());
+        let passphrase = "test-passphrase";
+
+        let root = Node::new("Secrets", "");
+        create_test_encrypted_file(&path, passphrase, &root);
+
+        let data = validate_encrypted_file(&path).expect("validation should succeed");
+
+        let start = std::time::Instant::now();
+        let node = decrypt_to_node(&data, passphrase);
+        let elapsed = start.elapsed();
+
+        assert!(node.is_ok());
+        assert_eq!(node.unwrap().name, "Secrets");
+
+        println!(
+            "decrypt_to_node took {:?} ({}.{:03} ms)",
+            elapsed,
+            elapsed.as_millis(),
+            elapsed.subsec_millis(),
+        );
+
+        let _ = fs::remove_file(&path);
+    }
 }
