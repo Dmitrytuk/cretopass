@@ -6,7 +6,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{block::Title, Block, Borders, Clear, Paragraph};
 use ratatui::{backend::Backend, Frame, Terminal};
 
 use crate::file_browser::{self, FileBrowserAction, FileBrowserMode, FileBrowserState};
@@ -60,6 +60,7 @@ pub struct SettingsState {
     pub quit: bool,
     pub active_file: Option<ActiveFileState>,
     modal: Option<SettingsModal>,
+    pub status: Option<&'static str>,
 }
 
 impl SettingsState {
@@ -86,6 +87,7 @@ impl SettingsState {
             quit: false,
             active_file: None,
             modal,
+            status: None,
         }
     }
 
@@ -685,8 +687,11 @@ fn handle_modal_key<B: Backend>(
                             (&active_file.path, &active_file.node)
                         {
                             let new_pass_bytes = new_pass.into_bytes();
+                            state.status = Some("Saving...");
+                            terminal.draw(|f| render(f, f.area(), state))?;
                             match utils::save_tree(node, path, &new_pass_bytes) {
                                 Err(e) => {
+                                    state.status = None;
                                     state.modal = Some(SettingsModal::ChangePwInput {
                                         current: String::new(),
                                         current_cursor: 0,
@@ -699,6 +704,7 @@ fn handle_modal_key<B: Backend>(
                                     });
                                 }
                                 Ok(()) => {
+                                    state.status = None;
                                     state.active_file.as_mut().unwrap().passphrase =
                                         new_pass_bytes.clone();
                                     let mut tree_state =
@@ -734,11 +740,15 @@ fn handle_modal_key<B: Backend>(
         };
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                state.status = Some("Saving...");
+                terminal.draw(|f| render(f, f.area(), state))?;
                 match utils::create_secret_file(&file_path, "") {
                     Err(e) => {
+                        state.status = None;
                         state.modal = Some(SettingsModal::Alert { message: e });
                     }
                     Ok(node) => {
+                        state.status = None;
                         let pp_bytes = Vec::new();
                         let active_file = ActiveFileState {
                             path: Some(file_path.clone()),
@@ -913,35 +923,41 @@ fn handle_modal_key<B: Backend>(
                 passphrase,
                 ..
             } => match file_data {
-                Some(data) => match utils::decrypt_to_node(&data, &passphrase) {
-                    Err(e) => {
-                        state.modal = Some(SettingsModal::PassphraseInput {
-                            file_path,
-                            file_data: Some(data),
-                            passphrase,
-                            cursor: 0,
-                            error: Some(format!("wrong password: {e}")),
-                        });
-                    }
-                    Ok(node) => {
-                        let pp_bytes = passphrase.into_bytes();
-                        let active_file = ActiveFileState {
-                            path: Some(file_path.clone()),
-                            passphrase: pp_bytes.clone(),
-                            node: Some(node.clone()),
-                        };
-                        state.active_file = Some(active_file);
+                Some(data) => {
+                    state.status = Some("Loading...");
+                    terminal.draw(|f| render(f, f.area(), state))?;
+                    match utils::decrypt_to_node(&data, &passphrase) {
+                        Err(e) => {
+                            state.status = None;
+                            state.modal = Some(SettingsModal::PassphraseInput {
+                                file_path,
+                                file_data: Some(data),
+                                passphrase,
+                                cursor: 0,
+                                error: Some(format!("wrong password: {e}")),
+                            });
+                        }
+                        Ok(node) => {
+                            state.status = None;
+                            let pp_bytes = passphrase.into_bytes();
+                            let active_file = ActiveFileState {
+                                path: Some(file_path.clone()),
+                                passphrase: pp_bytes.clone(),
+                                node: Some(node.clone()),
+                            };
+                            state.active_file = Some(active_file);
 
-                        let _ = utils::push_recent_file(&mut state.settings, &file_path);
+                            let _ = utils::push_recent_file(&mut state.settings, &file_path);
 
-                        let mut tree_state = crate::tree::widget::TreeState::new(node);
-                        tree_state.active_file_path = Some(file_path);
-                        tree_state.active_file_passphrase = pp_bytes;
-                        tree_state.display_full_path = state.settings.display_full_path;
-                        crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
+                            let mut tree_state = crate::tree::widget::TreeState::new(node);
+                            tree_state.active_file_path = Some(file_path);
+                            tree_state.active_file_passphrase = pp_bytes;
+                            tree_state.display_full_path = state.settings.display_full_path;
+                            crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
 
-                        if !tree_state.return_to_menu {
-                            state.quit = true;
+                            if !tree_state.return_to_menu {
+                                state.quit = true;
+                            }
                         }
                     }
                 },
@@ -950,11 +966,15 @@ fn handle_modal_key<B: Backend>(
                         state.modal = Some(SettingsModal::ConfirmNoPassphrase { file_path });
                         return Ok(());
                     }
+                    state.status = Some("Saving...");
+                    terminal.draw(|f| render(f, f.area(), state))?;
                     match utils::create_secret_file(&file_path, &passphrase) {
                         Err(e) => {
+                            state.status = None;
                             state.modal = Some(SettingsModal::Alert { message: e });
                         }
                         Ok(node) => {
+                            state.status = None;
                             let pp_bytes = passphrase.into_bytes();
                             let active_file = ActiveFileState {
                                 path: Some(file_path.clone()),
@@ -1044,10 +1064,22 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
         })
         .unwrap_or_else(|| " Settings ".to_string());
 
-    let block = Block::default()
+    let mut block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
+
+    if let Some(status) = state.status {
+        let color = match status {
+            "Loading..." => Color::Green,
+            "Saving..." => Color::Red,
+            _ => Color::White,
+        };
+        block = block.title(
+            Title::from(Line::from(Span::styled(status, Style::default().fg(color))))
+                .alignment(Alignment::Right),
+        );
+    }
 
     let inner = block.inner(layout[0]);
     frame.render_widget(block, layout[0]);

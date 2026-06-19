@@ -45,12 +45,15 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) ->
             let path = state.active_file_path.clone();
             let passphrase = state.active_file_passphrase.clone();
             if state.dirty {
+                state.status = Some("Saving...");
+                terminal.draw(|f| ui(f, state))?;
                 if let Some(ref p) = path {
                     state.dirty = false;
                     if let Err(e) = save_tree(&state.root, p, &passphrase) {
                         eprintln!("Save failed: {e}");
                     }
                 }
+                state.status = None;
             }
         }
     }

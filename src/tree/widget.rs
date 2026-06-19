@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{block::Title, Block, Borders, Paragraph},
     Frame,
 };
 use uuid::Uuid;
@@ -117,6 +117,8 @@ pub struct TreeState {
     pub dirty: bool,
     /// If `true`, window title shows the full path; otherwise just the filename.
     pub display_full_path: bool,
+    /// Status indicator shown in the window title bar (e.g. "Loading..." or "Saving...").
+    pub status: Option<&'static str>,
 }
 
 impl TreeState {
@@ -138,6 +140,7 @@ impl TreeState {
             active_file_passphrase: Vec::new(),
             dirty: false,
             display_full_path: true,
+            status: None,
         };
         state.update_visible();
         state
@@ -451,10 +454,22 @@ impl TreeWidget {
                 }
             })
             .unwrap_or_else(|| " Tree ".to_string());
-        let block = Block::default()
+        let mut block = Block::default()
             .title(title)
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan));
+
+        if let Some(status) = state.status {
+            let color = match status {
+                "Loading..." => Color::Green,
+                "Saving..." => Color::Red,
+                _ => Color::White,
+            };
+            block = block.title(
+                Title::from(Line::from(Span::styled(status, Style::default().fg(color))))
+                    .alignment(Alignment::Right),
+            );
+        }
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
