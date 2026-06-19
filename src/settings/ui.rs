@@ -23,7 +23,7 @@ enum SettingsModal {
         cursor: usize,
         error: Option<String>,
     },
-    AppSettings,
+    AppSettings { setting_idx: usize },
     Alert { message: String },
 }
 
@@ -138,7 +138,7 @@ fn handle_settings_key<B: Backend>(
                     FileBrowserMode::CreateFile,
                 )));
             } else if idx == 2 {
-                state.modal = Some(SettingsModal::AppSettings);
+                state.modal = Some(SettingsModal::AppSettings { setting_idx: 0 });
             } else {
                 let file_idx = idx - MENU_ITEMS.len();
                 if file_idx < state.settings.recent_files.len() {
@@ -252,15 +252,38 @@ fn handle_modal_key<B: Backend>(
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     // ── AppSettings modal ──
-    if state.modal.as_ref().is_some_and(|m| matches!(m, SettingsModal::AppSettings)) {
+    if state.modal.as_ref().is_some_and(|m| matches!(m, SettingsModal::AppSettings { .. })) {
         match key.code {
-            KeyCode::Enter | KeyCode::Char(' ') => {
-                state.settings.display_full_path = !state.settings.display_full_path;
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let Some(SettingsModal::AppSettings { ref mut setting_idx }) = state.modal {
+                    *setting_idx = (*setting_idx + 1).min(1);
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if let Some(SettingsModal::AppSettings { ref mut setting_idx }) = state.modal {
+                    *setting_idx = setting_idx.saturating_sub(1);
+                }
+            }
+            KeyCode::Char(' ') => {
+                let idx = match state.modal.as_ref() {
+                    Some(SettingsModal::AppSettings { setting_idx }) => *setting_idx,
+                    _ => unreachable!(),
+                };
+                if idx == 0 {
+                    state.settings.display_full_path = !state.settings.display_full_path;
+                } else {
+                    state.settings.open_last_opened_file_on_startup =
+                        !state.settings.open_last_opened_file_on_startup;
+                }
+            }
+            KeyCode::Enter => {
                 let _ = utils::save_settings(&state.settings);
-                state.modal = None;
+                state.modal = Some(SettingsModal::Alert {
+                    message: "Settings saved".to_string(),
+                });
             }
             KeyCode::Esc => {
-                let _ = utils::save_settings(&state.settings);
+                state.settings = utils::load_settings();
                 state.modal = None;
             }
             _ => {}
@@ -285,7 +308,7 @@ fn handle_modal_key<B: Backend>(
                 state.modal = Some(modal);
             }
             SettingsModal::Alert { .. } => {}
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
         },
         KeyCode::Backspace => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -300,7 +323,7 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
         },
         KeyCode::Left => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
@@ -310,7 +333,7 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
         },
         KeyCode::Right => match &mut modal {
             SettingsModal::PassphraseInput { cursor, passphrase, .. } => {
@@ -322,7 +345,7 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
         },
         KeyCode::Home => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
@@ -332,7 +355,7 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
         },
         KeyCode::End => match &mut modal {
             SettingsModal::PassphraseInput { cursor, passphrase, .. } => {
@@ -342,7 +365,7 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
         },
         KeyCode::Enter => match modal {
             SettingsModal::PassphraseInput {
@@ -411,7 +434,7 @@ fn handle_modal_key<B: Backend>(
                 },
             },
             SettingsModal::Alert { .. } => {}
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
         },
         _ => {
             state.modal = Some(modal);
@@ -430,7 +453,7 @@ fn render(frame: &mut Frame, area: Rect, state: &SettingsState) {
             file_browser::render_file_browser(frame, area, browser);
         }
         Some(SettingsModal::PassphraseInput { .. }) => render_passphrase_modal(frame, area, state),
-        Some(SettingsModal::AppSettings) => render_app_settings_modal(frame, area, state),
+        Some(SettingsModal::AppSettings { .. }) => render_app_settings_modal(frame, area, state),
         Some(SettingsModal::Alert { message }) => render_alert_modal(frame, area, message),
         None => {}
     }
@@ -528,7 +551,12 @@ fn make_overlay(area: Rect, height: u16) -> Rect {
 }
 
 fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsState) {
-    let overlay_area = make_overlay(area, 7);
+    let setting_idx = match &state.modal {
+        Some(SettingsModal::AppSettings { setting_idx }) => *setting_idx,
+        _ => 0,
+    };
+
+    let overlay_area = make_overlay(area, 10);
     let block = Block::default()
         .title(" Settings ")
         .borders(Borders::ALL)
@@ -536,25 +564,34 @@ fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsStat
 
     let inner = block.inner(overlay_area);
 
-    let checkbox = if state.settings.display_full_path {
-        "[X]"
-    } else {
-        "[ ]"
-    };
-
-    let lines = vec![
-        Line::from(""),
-        Line::from(vec![
-            Span::styled(" ", Style::default()),
-            Span::styled(checkbox, Style::default().fg(Color::Green)),
-            Span::styled(" Display full path in title bar", Style::default().fg(Color::White)),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            " Enter/Space:toggle  Esc:close & save",
-            Style::default().fg(Color::DarkGray),
-        )),
+    let rows = [
+        ("Display full path in title bar", state.settings.display_full_path),
+        ("Start with last file", state.settings.open_last_opened_file_on_startup),
     ];
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(""));
+
+    for (i, (label, value)) in rows.iter().enumerate() {
+        let is_selected = i == setting_idx;
+        let style = if is_selected {
+            Style::default().bg(Color::DarkGray).fg(Color::White)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let prefix = if is_selected { "▸ " } else { "  " };
+        let checkbox = if *value { "[X]" } else { "[ ]" };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{}{} ", prefix, checkbox), style),
+            Span::styled(*label, style),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Space:toggle  Enter:save  Esc:cancel",
+        Style::default().fg(Color::DarkGray),
+    )));
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
