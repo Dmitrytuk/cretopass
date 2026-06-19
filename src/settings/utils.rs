@@ -2,7 +2,7 @@ use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use rkyv::{rancor, Archive, Deserialize, Serialize};
 
 use crate::crypt;
 use crate::file_handling;
@@ -12,7 +12,7 @@ const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
 const SETTINGS_FILE_NAME: &str = "settings.pwd";
 
 /// Persistent app settings stored in `~/.config/pwd-keeper/settings.pwd`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Archive, Deserialize, Serialize)]
 pub struct AppSettings {
     /// Recently opened secret files (most recent first).
     pub recent_files: Vec<String>,
@@ -147,8 +147,8 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), String> {
     fs::create_dir_all(&dir).map_err(|e| format!("Cannot create config directory: {e}"))?;
 
     let path = dir.join(SETTINGS_FILE_NAME);
-    let bytes =
-        postcard::to_allocvec(settings).map_err(|e| format!("Failed to serialise settings: {e}"))?;
+    let bytes = rkyv::to_bytes::<rancor::Error>(settings)
+        .map_err(|e| format!("Failed to serialise settings: {e}"))?;
 
     fs::write(&path, &bytes).map_err(|e| format!("Failed to write settings: {e}"))?;
 
@@ -169,8 +169,10 @@ pub fn load_settings() -> Result<AppSettings, String> {
         Err(e) => return Err(format!("Failed to read settings: {e}")),
     };
 
-    let settings: AppSettings = postcard::from_bytes(&bytes)
+    let archived = rkyv::access::<ArchivedAppSettings, rancor::Error>(&bytes)
         .map_err(|e| format!("Failed to parse settings: {e}"))?;
+    let settings = rkyv::deserialize::<AppSettings, rancor::Error>(archived)
+        .map_err(|e| format!("Failed to deserialize settings: {e}"))?;
 
     Ok(settings)
 }
