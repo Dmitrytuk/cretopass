@@ -32,7 +32,7 @@ pub struct FileEntry {
 }
 
 /// Result returned by the key handler when the user completes or cancels.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FileBrowserAction {
     /// Full path of the file the user selected (open) or wants to create.
     Selected(String),

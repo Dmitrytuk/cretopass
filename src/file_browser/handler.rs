@@ -149,6 +149,10 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
             create_new_folder(state);
             None
         }
+        KeyCode::Char('N') if state.mode == FileBrowserMode::CreateFile => {
+            state.focus = FocusTarget::Input;
+            None
+        }
         KeyCode::Char('r') => {
             if let Some(entry) = state.entries.get(state.selected) {
                 if entry.is_age_file && !entry.is_dir {
@@ -342,5 +346,202 @@ fn create_new_folder(state: &mut FileBrowserState) {
             }
         }
         Err(e) => state.error = Some(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+    use super::*;
+    use crate::file_browser::FileBrowserMode;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    fn make_state(mode: FileBrowserMode) -> FileBrowserState {
+        let mut state = FileBrowserState::new(mode);
+        // Point to /tmp so list_dir works and entries are populated
+        state.current_dir = std::path::PathBuf::from("/tmp");
+        state.entries = fs::list_dir(std::path::Path::new("/tmp")).unwrap_or_default();
+        state.selected = 0;
+        state
+    }
+
+    // ── N switches focus in CreateFile mode ──
+
+    #[test]
+    fn test_n_switches_to_input_create_file() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        assert_eq!(state.focus, FocusTarget::List);
+
+        let result = handle_key(key(KeyCode::Char('N')), &mut state);
+
+        assert_eq!(result, None);
+        assert_eq!(state.focus, FocusTarget::Input);
+    }
+
+    #[test]
+    fn test_n_switches_to_input_empty_list() {
+        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        state.current_dir = std::path::PathBuf::from("/tmp/__empty_test_dir__");
+        let _ = std::fs::create_dir_all(&state.current_dir);
+        state.entries = fs::list_dir(&state.current_dir).unwrap();
+        assert_eq!(state.filtered_len(), 0);
+
+        let result = handle_key(key(KeyCode::Char('N')), &mut state);
+        assert_eq!(result, None);
+        assert_eq!(state.focus, FocusTarget::Input);
+
+        let _ = std::fs::remove_dir(&state.current_dir);
+    }
+
+    #[test]
+    fn test_n_noop_in_open_file_mode() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        assert_eq!(state.focus, FocusTarget::List);
+
+        handle_key(key(KeyCode::Char('N')), &mut state);
+
+        // Focus should remain List (N only works in CreateFile mode)
+        assert_eq!(state.focus, FocusTarget::List);
+    }
+
+    // ── Enter in Input mode ──
+
+    #[test]
+    fn test_enter_in_input_returns_selected() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.focus = FocusTarget::Input;
+        state.creating_name = "test_create_file.age".to_string();
+
+        let result = handle_key(key(KeyCode::Enter), &mut state);
+
+        assert!(result.is_some());
+        match result.unwrap() {
+            FileBrowserAction::Selected(path) => {
+                assert!(
+                    path.contains("test_create_file.age"),
+                    "path should contain filename: {path}"
+                );
+            }
+            FileBrowserAction::Cancelled => panic!("expected Selected, got Cancelled"),
+        }
+    }
+
+    #[test]
+    fn test_enter_in_input_empty_name_noop() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.focus = FocusTarget::Input;
+        state.creating_name = "   ".to_string(); // whitespace → trimmed to empty
+
+        let result = handle_key(key(KeyCode::Enter), &mut state);
+
+        assert_eq!(result, None);
+    }
+
+    // ── Full create-file flow ──
+
+    #[test]
+    fn test_full_flow_create_file() {
+        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        state.current_dir = std::path::PathBuf::from("/tmp");
+        state.entries = fs::list_dir(std::path::Path::new("/tmp")).unwrap_or_default();
+
+        // Step 1: N → focus becomes Input
+        handle_key(key(KeyCode::Char('N')), &mut state);
+        assert_eq!(state.focus, FocusTarget::Input);
+
+        // Step 2: type filename
+        for c in "myvault.age".chars() {
+            handle_key(key(KeyCode::Char(c)), &mut state);
+        }
+        assert_eq!(state.creating_name, "myvault.age");
+
+        // Step 3: Enter → Selected returned
+        let result = handle_key(key(KeyCode::Enter), &mut state);
+        assert!(result.is_some());
+        match result.unwrap() {
+            FileBrowserAction::Selected(path) => {
+                assert!(
+                    path.contains("myvault.age"),
+                    "path should contain filename: {path}"
+                );
+                assert!(
+                    path.contains("/tmp"),
+                    "path should contain /tmp: {path}"
+                );
+            }
+            FileBrowserAction::Cancelled => panic!("expected Selected, got Cancelled"),
+        }
+    }
+
+    // ── N in Input mode returns to List ──
+
+    #[test]
+    fn test_n_in_input_returns_to_list() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.focus = FocusTarget::Input;
+
+        let result = handle_key(key(KeyCode::Char('N')), &mut state);
+
+        assert_eq!(result, None);
+        assert_eq!(state.focus, FocusTarget::List);
+    }
+
+    // ── Typing in Input mode ──
+
+    #[test]
+    fn test_typing_in_input_insers_chars() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.focus = FocusTarget::Input;
+
+        handle_key(key(KeyCode::Char('h')), &mut state);
+        handle_key(key(KeyCode::Char('i')), &mut state);
+
+        assert_eq!(state.creating_name, "hi");
+        assert_eq!(state.creating_cursor, 2);
+    }
+
+    #[test]
+    fn test_backspace_in_input_removes_chars() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.focus = FocusTarget::Input;
+        state.creating_name = "abc".to_string();
+        state.creating_cursor = 3;
+
+        handle_key(key(KeyCode::Backspace), &mut state);
+
+        assert_eq!(state.creating_name, "ab");
+        assert_eq!(state.creating_cursor, 2);
+    }
+
+    // ── Navigate in Input mode ──
+
+    #[test]
+    fn test_cursor_left_right_in_input() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.focus = FocusTarget::Input;
+        state.creating_name = "abcd".to_string();
+        state.creating_cursor = 4;
+
+        handle_key(key(KeyCode::Left), &mut state);
+        assert_eq!(state.creating_cursor, 3);
+
+        handle_key(key(KeyCode::Right), &mut state);
+        assert_eq!(state.creating_cursor, 4);
+
+        // Home / End
+        handle_key(key(KeyCode::Home), &mut state);
+        assert_eq!(state.creating_cursor, 0);
+
+        handle_key(key(KeyCode::End), &mut state);
+        assert_eq!(state.creating_cursor, 4);
     }
 }
