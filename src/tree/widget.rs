@@ -115,6 +115,8 @@ pub struct TreeState {
     pub active_file_passphrase: Vec<u8>,
     /// Set to `true` whenever the tree is mutated; cleared after save.
     pub dirty: bool,
+    /// If `true`, window title shows the full path; otherwise just the filename.
+    pub display_full_path: bool,
 }
 
 impl TreeState {
@@ -135,6 +137,7 @@ impl TreeState {
             active_file_path: None,
             active_file_passphrase: Vec::new(),
             dirty: false,
+            display_full_path: true,
         };
         state.update_visible();
         state
@@ -436,7 +439,17 @@ impl TreeWidget {
     /// Renders the tree view into the given area.
     pub fn render(frame: &mut Frame, area: Rect, state: &TreeState) {
         let title = state.active_file_path.as_deref()
-            .map(|p| format!(" Tree — {} ", p))
+            .map(|p| {
+                if state.display_full_path {
+                    format!(" Tree — {} ", p)
+                } else {
+                    let name = std::path::Path::new(p)
+                        .file_name()
+                        .map(|n| n.to_string_lossy())
+                        .unwrap_or(std::borrow::Cow::Borrowed(p));
+                    format!(" Tree — {} ", name)
+                }
+            })
             .unwrap_or_else(|| " Tree ".to_string());
         let block = Block::default()
             .title(title)

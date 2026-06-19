@@ -10,9 +10,9 @@ use ratatui::{backend::Backend, Frame, Terminal};
 
 use crate::file_browser::{self, FileBrowserAction, FileBrowserMode, FileBrowserState};
 use crate::settings::active_file::ActiveFileState;
-use crate::settings::utils;
+use crate::settings::utils::{self, AppSettings};
 
-const MENU_ITEMS: &[&str] = &["Open secret file", "Create new secret file"];
+const MENU_ITEMS: &[&str] = &["Open secret file", "Create new secret file", "Settings"];
 
 enum SettingsModal {
     FileBrowser(FileBrowserState),
@@ -23,12 +23,13 @@ enum SettingsModal {
         cursor: usize,
         error: Option<String>,
     },
+    AppSettings,
     Alert { message: String },
 }
 
 pub struct SettingsState {
     selected: usize,
-    pub recent_files: Vec<String>,
+    pub settings: AppSettings,
     pub quit: bool,
     pub active_file: Option<ActiveFileState>,
     modal: Option<SettingsModal>,
@@ -36,10 +37,10 @@ pub struct SettingsState {
 
 impl SettingsState {
     pub fn new() -> Self {
-        let recent_files = utils::load_recent_files().unwrap_or_default();
+        let settings = utils::load_settings().unwrap_or_default();
         Self {
             selected: 0,
-            recent_files,
+            settings,
             quit: false,
             active_file: None,
             modal: None,
@@ -47,7 +48,7 @@ impl SettingsState {
     }
 
     fn total_navigable(&self) -> usize {
-        MENU_ITEMS.len() + self.recent_files.len()
+        MENU_ITEMS.len() + self.settings.recent_files.len()
     }
 
     fn select_next(&mut self) {
@@ -118,6 +119,7 @@ fn handle_settings_key<B: Backend>(
                     let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
                     tree_state.active_file_path = active_file.path.clone();
                     tree_state.active_file_passphrase = active_file.passphrase.clone();
+                    tree_state.display_full_path = state.settings.display_full_path;
                     crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
                     if !tree_state.return_to_menu {
                         state.quit = true;
@@ -135,10 +137,12 @@ fn handle_settings_key<B: Backend>(
                 state.modal = Some(SettingsModal::FileBrowser(FileBrowserState::new(
                     FileBrowserMode::CreateFile,
                 )));
+            } else if idx == 2 {
+                state.modal = Some(SettingsModal::AppSettings);
             } else {
                 let file_idx = idx - MENU_ITEMS.len();
-                if file_idx < state.recent_files.len() {
-                    let file_path = state.recent_files[file_idx].clone();
+                if file_idx < state.settings.recent_files.len() {
+                    let file_path = state.settings.recent_files[file_idx].clone();
 
                     if let Some(ref active_file) = state.active_file {
                         if active_file.path.as_deref() == Some(&file_path) {
@@ -147,6 +151,7 @@ fn handle_settings_key<B: Backend>(
                                     crate::tree::widget::TreeState::new(node.clone());
                                 tree_state.active_file_path = Some(file_path);
                                 tree_state.active_file_passphrase = active_file.passphrase.clone();
+                                tree_state.display_full_path = state.settings.display_full_path;
                                 crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
                                 if !tree_state.return_to_menu {
                                     state.quit = true;
@@ -239,13 +244,30 @@ fn handle_file_browser_key<B: Backend>(
     Ok(())
 }
 
-// ── Modal key handling (Passphrase, Alert) ──
+// ── Modal key handling (Passphrase, Alert, AppSettings) ──
 
 fn handle_modal_key<B: Backend>(
     key: event::KeyEvent,
     state: &mut SettingsState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
+    // ── AppSettings modal ──
+    if state.modal.as_ref().is_some_and(|m| matches!(m, SettingsModal::AppSettings)) {
+        match key.code {
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                state.settings.display_full_path = !state.settings.display_full_path;
+                let _ = utils::save_settings(&state.settings);
+                state.modal = None;
+            }
+            KeyCode::Esc => {
+                let _ = utils::save_settings(&state.settings);
+                state.modal = None;
+            }
+            _ => {}
+        }
+        return Ok(());
+    }
+
     let mut modal = match state.modal.take() {
         Some(m) => m,
         None => return Ok(()),
@@ -263,7 +285,7 @@ fn handle_modal_key<B: Backend>(
                 state.modal = Some(modal);
             }
             SettingsModal::Alert { .. } => {}
-            SettingsModal::FileBrowser(_) => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
         },
         KeyCode::Backspace => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -278,7 +300,7 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
         },
         KeyCode::Left => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
@@ -288,7 +310,7 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
         },
         KeyCode::Right => match &mut modal {
             SettingsModal::PassphraseInput { cursor, passphrase, .. } => {
@@ -300,7 +322,7 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
         },
         KeyCode::Home => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
@@ -310,7 +332,7 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
         },
         KeyCode::End => match &mut modal {
             SettingsModal::PassphraseInput { cursor, passphrase, .. } => {
@@ -320,7 +342,7 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
         },
         KeyCode::Enter => match modal {
             SettingsModal::PassphraseInput {
@@ -348,13 +370,12 @@ fn handle_modal_key<B: Backend>(
                         };
                         state.active_file = Some(active_file);
 
-                        let mut files = state.recent_files.clone();
-                        let _ = utils::push_recent_file(&mut files, &file_path);
-                        state.recent_files = files;
+                        let _ = utils::push_recent_file(&mut state.settings, &file_path);
 
                         let mut tree_state = crate::tree::widget::TreeState::new(node);
                         tree_state.active_file_path = Some(file_path);
                         tree_state.active_file_passphrase = pp_bytes;
+                        tree_state.display_full_path = state.settings.display_full_path;
                         crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
 
                         if !tree_state.return_to_menu {
@@ -375,13 +396,12 @@ fn handle_modal_key<B: Backend>(
                         };
                         state.active_file = Some(active_file);
 
-                        let mut files = state.recent_files.clone();
-                        let _ = utils::push_recent_file(&mut files, &file_path);
-                        state.recent_files = files;
+                        let _ = utils::push_recent_file(&mut state.settings, &file_path);
 
                         let mut tree_state = crate::tree::widget::TreeState::new(node);
                         tree_state.active_file_path = Some(file_path);
                         tree_state.active_file_passphrase = pp_bytes;
+                        tree_state.display_full_path = state.settings.display_full_path;
                         crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
 
                         if !tree_state.return_to_menu {
@@ -391,7 +411,7 @@ fn handle_modal_key<B: Backend>(
                 },
             },
             SettingsModal::Alert { .. } => {}
-            SettingsModal::FileBrowser(_) => unreachable!(),
+            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings => unreachable!(),
         },
         _ => {
             state.modal = Some(modal);
@@ -410,6 +430,7 @@ fn render(frame: &mut Frame, area: Rect, state: &SettingsState) {
             file_browser::render_file_browser(frame, area, browser);
         }
         Some(SettingsModal::PassphraseInput { .. }) => render_passphrase_modal(frame, area, state),
+        Some(SettingsModal::AppSettings) => render_app_settings_modal(frame, area, state),
         Some(SettingsModal::Alert { message }) => render_alert_modal(frame, area, message),
         None => {}
     }
@@ -427,7 +448,17 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
         .active_file
         .as_ref()
         .and_then(|af| af.path.as_deref())
-        .map(|p| format!(" Settings — {} ", p))
+        .map(|p| {
+            if state.settings.display_full_path {
+                format!(" Settings — {} ", p)
+            } else {
+                let name = std::path::Path::new(p)
+                    .file_name()
+                    .map(|n| n.to_string_lossy())
+                    .unwrap_or(std::borrow::Cow::Borrowed(p));
+                format!(" Settings — {} ", name)
+            }
+        })
         .unwrap_or_else(|| " Settings ".to_string());
 
     let block = Block::default()
@@ -460,7 +491,7 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
     lines.push(Line::from(""));
 
     let menu_len = MENU_ITEMS.len();
-    for (i, file) in state.recent_files.iter().enumerate() {
+    for (i, file) in state.settings.recent_files.iter().enumerate() {
         let idx = menu_len + i;
         let is_selected = state.selected == idx;
         let style = if is_selected {
@@ -469,7 +500,15 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
             Style::default().fg(Color::White)
         };
         let prefix = if is_selected { "▸ " } else { "  " };
-        lines.push(Line::from(Span::styled(format!("{}{}", prefix, file), style)));
+        let display = if state.settings.display_full_path {
+            file.clone()
+        } else {
+            std::path::Path::new(file)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| file.clone())
+        };
+        lines.push(Line::from(Span::styled(format!("{}{}", prefix, display), style)));
     }
 
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
@@ -486,6 +525,40 @@ fn make_overlay(area: Rect, height: u16) -> Rect {
         width: area.width * 3 / 5,
         height: overlay_height,
     }
+}
+
+fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsState) {
+    let overlay_area = make_overlay(area, 7);
+    let block = Block::default()
+        .title(" Settings ")
+        .borders(Borders::ALL)
+        .style(Style::default().bg(Color::Black).fg(Color::Cyan));
+
+    let inner = block.inner(overlay_area);
+
+    let checkbox = if state.settings.display_full_path {
+        "[X]"
+    } else {
+        "[ ]"
+    };
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(" ", Style::default()),
+            Span::styled(checkbox, Style::default().fg(Color::Green)),
+            Span::styled(" Display full path in title bar", Style::default().fg(Color::White)),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            " Enter/Space:toggle  Esc:close & save",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(block, overlay_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
 fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState) {
@@ -505,6 +578,15 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
         _ => return,
     };
 
+    let display_path = if state.settings.display_full_path {
+        file_path.clone()
+    } else {
+        std::path::Path::new(&file_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| file_path.clone())
+    };
+
     let overlay_area = make_overlay(area, if error.is_some() { 9 } else { 8 });
 
     let block = Block::default()
@@ -517,7 +599,7 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        format!("File: {}", file_path),
+        format!("File: {}", display_path),
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(""));

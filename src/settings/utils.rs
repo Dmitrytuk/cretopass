@@ -2,12 +2,35 @@ use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::crypt;
 use crate::file_handling;
 use crate::tree::node::Node;
 
 const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
-const RECENT_FILE_NAME: &str = "recent_files.json";
+const SETTINGS_FILE_NAME: &str = "settings.pwd";
+
+/// Persistent app settings stored in `~/.config/pwd-keeper/settings.pwd`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppSettings {
+    /// Recently opened secret files (most recent first).
+    pub recent_files: Vec<String>,
+    /// The last file the user opened or created.
+    pub last_opened_file: Option<String>,
+    /// If `true`, window title shows the full path; otherwise just the filename.
+    pub display_full_path: bool,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            recent_files: Vec::new(),
+            last_opened_file: None,
+            display_full_path: true,
+        }
+    }
+}
 
 /// Returns the platform-specific config directory for pwd-keeper.
 ///
@@ -118,38 +141,38 @@ pub fn save_tree(root: &Node, path: &str, passphrase: &[u8]) -> Result<(), Strin
     Ok(())
 }
 
-/// Saves the recent-files list to the config directory as a JSON array.
-pub fn save_recent_files(files: &[String]) -> Result<(), String> {
+/// Saves app settings to `~/.config/pwd-keeper/settings.pwd` as binary.
+pub fn save_settings(settings: &AppSettings) -> Result<(), String> {
     let dir = config_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("Cannot create config directory: {e}"))?;
 
-    let path = dir.join(RECENT_FILE_NAME);
-    let json = serde_json::to_string_pretty(files)
-        .map_err(|e| format!("Failed to serialise recent files: {e}"))?;
+    let path = dir.join(SETTINGS_FILE_NAME);
+    let bytes =
+        postcard::to_allocvec(settings).map_err(|e| format!("Failed to serialise settings: {e}"))?;
 
-    fs::write(&path, &json).map_err(|e| format!("Failed to write recent files: {e}"))?;
+    fs::write(&path, &bytes).map_err(|e| format!("Failed to write settings: {e}"))?;
 
     Ok(())
 }
 
-/// Loads the recent-files list from the config directory.
+/// Loads app settings from the config directory.
 ///
-/// Returns an empty list if the file does not exist or cannot be parsed.
-pub fn load_recent_files() -> Result<Vec<String>, String> {
-    let path = config_dir().join(RECENT_FILE_NAME);
+/// Returns default settings if the file does not exist.
+pub fn load_settings() -> Result<AppSettings, String> {
+    let path = config_dir().join(SETTINGS_FILE_NAME);
 
-    let json = match fs::read_to_string(&path) {
-        Ok(s) => s,
+    let bytes = match fs::read(&path) {
+        Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(Vec::new());
+            return Ok(AppSettings::default());
         }
-        Err(e) => return Err(format!("Failed to read recent files: {e}")),
+        Err(e) => return Err(format!("Failed to read settings: {e}")),
     };
 
-    let files: Vec<String> = serde_json::from_str(&json)
-        .map_err(|e| format!("Failed to parse recent files: {e}"))?;
+    let settings: AppSettings = postcard::from_bytes(&bytes)
+        .map_err(|e| format!("Failed to parse settings: {e}"))?;
 
-    Ok(files)
+    Ok(settings)
 }
 
 /// Attempts to open an OS-native file-selection dialog.
@@ -219,12 +242,13 @@ pub fn open_file_dialog() -> Option<String> {
     None
 }
 
-/// Inserts or moves `path` to the front of the files list and saves.
+/// Inserts or moves `path` to the front of the recent-files list and saves.
 /// Duplicates are removed first.
-pub fn push_recent_file(files: &mut Vec<String>, path: &str) -> Result<(), String> {
-    files.retain(|f| f != path);
-    files.insert(0, path.to_string());
-    save_recent_files(files)
+pub fn push_recent_file(settings: &mut AppSettings, path: &str) -> Result<(), String> {
+    settings.recent_files.retain(|f| f != path);
+    settings.recent_files.insert(0, path.to_string());
+    settings.last_opened_file = Some(path.to_string());
+    save_settings(settings)
 }
 
 /// Creates a new encrypted secret file at the given path.
@@ -415,67 +439,121 @@ mod tests {
         let _ = fs::remove_file(&format!("{}.bak", path));
     }
 
-    fn clean_recent_test_file() {
-        let path = config_dir().join(RECENT_FILE_NAME);
+    fn clean_settings_file() {
+        let path = config_dir().join(SETTINGS_FILE_NAME);
         if path.exists() {
             let _ = fs::remove_file(&path);
         }
     }
 
     #[test]
-    fn test_recents_save_load() {
-        clean_recent_test_file();
+    fn test_settings_save_load() {
+        clean_settings_file();
 
-        let files = vec![
-            "/home/user/vault.age".to_string(),
-            "/home/user/backup.age".to_string(),
-        ];
-        save_recent_files(&files).unwrap();
-        let loaded = load_recent_files().unwrap();
+        let settings = AppSettings {
+            recent_files: vec![
+                "/home/user/vault.age".to_string(),
+                "/home/user/backup.age".to_string(),
+            ],
+            last_opened_file: Some("/home/user/vault.age".to_string()),
+            display_full_path: false,
+        };
+        save_settings(&settings).unwrap();
+        let loaded = load_settings().unwrap();
 
-        assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded[0], "/home/user/vault.age");
-        assert_eq!(loaded[1], "/home/user/backup.age");
+        assert_eq!(loaded.recent_files.len(), 2);
+        assert_eq!(loaded.recent_files[0], "/home/user/vault.age");
+        assert_eq!(loaded.recent_files[1], "/home/user/backup.age");
+        assert_eq!(loaded.last_opened_file, Some("/home/user/vault.age".to_string()));
+        assert!(!loaded.display_full_path);
 
-        clean_recent_test_file();
+        clean_settings_file();
     }
 
     #[test]
-    fn test_recents_empty() {
-        clean_recent_test_file();
-
-        let files: Vec<String> = vec![];
-        save_recent_files(&files).unwrap();
-        let loaded = load_recent_files().unwrap();
-        assert!(loaded.is_empty());
-
-        clean_recent_test_file();
+    fn test_settings_default_display_full_path() {
+        let settings = AppSettings::default();
+        assert!(settings.display_full_path);
+        assert!(settings.recent_files.is_empty());
+        assert!(settings.last_opened_file.is_none());
     }
 
     #[test]
-    fn test_recents_no_file() {
-        clean_recent_test_file();
-        let loaded = load_recent_files().unwrap();
-        assert!(loaded.is_empty());
+    fn test_settings_save_empty() {
+        clean_settings_file();
+
+        let settings = AppSettings::default();
+        save_settings(&settings).unwrap();
+        let loaded = load_settings().unwrap();
+        assert!(loaded.recent_files.is_empty());
+        assert!(loaded.last_opened_file.is_none());
+        assert!(loaded.display_full_path);
+
+        clean_settings_file();
+    }
+
+    #[test]
+    fn test_settings_no_file_returns_defaults() {
+        clean_settings_file();
+        let loaded = load_settings().unwrap();
+        assert!(loaded.recent_files.is_empty());
+        assert!(loaded.display_full_path);
     }
 
     #[test]
     fn test_push_recent_file_dedup() {
-        clean_recent_test_file();
+        clean_settings_file();
 
-        let mut files = vec![
-            "/alpha.age".to_string(),
-            "/beta.age".to_string(),
-            "/gamma.age".to_string(),
-        ];
-        push_recent_file(&mut files, "/beta.age").unwrap();
+        let mut settings = AppSettings {
+            recent_files: vec![
+                "/alpha.age".to_string(),
+                "/beta.age".to_string(),
+                "/gamma.age".to_string(),
+            ],
+            last_opened_file: None,
+            display_full_path: true,
+        };
+        push_recent_file(&mut settings, "/beta.age").unwrap();
 
-        assert_eq!(files.len(), 3);
-        assert_eq!(files[0], "/beta.age");  // moved to front
-        assert_eq!(files[1], "/alpha.age");
-        assert_eq!(files[2], "/gamma.age");
+        assert_eq!(settings.recent_files.len(), 3);
+        assert_eq!(settings.recent_files[0], "/beta.age");  // moved to front
+        assert_eq!(settings.recent_files[1], "/alpha.age");
+        assert_eq!(settings.recent_files[2], "/gamma.age");
+        assert_eq!(
+            settings.last_opened_file,
+            Some("/beta.age".to_string())
+        );
 
-        clean_recent_test_file();
+        clean_settings_file();
+    }
+
+    #[test]
+    fn test_push_recent_file_sets_last_opened() {
+        clean_settings_file();
+
+        let mut settings = AppSettings::default();
+        push_recent_file(&mut settings, "/new.age").unwrap();
+
+        assert_eq!(settings.recent_files.len(), 1);
+        assert_eq!(settings.recent_files[0], "/new.age");
+        assert_eq!(settings.last_opened_file, Some("/new.age".to_string()));
+
+        clean_settings_file();
+    }
+
+    #[test]
+    fn test_settings_roundtrip_display_full_path_false() {
+        clean_settings_file();
+
+        let mut settings = AppSettings::default();
+        settings.display_full_path = false;
+        settings.recent_files.push("/a.age".to_string());
+        save_settings(&settings).unwrap();
+
+        let loaded = load_settings().unwrap();
+        assert!(!loaded.display_full_path);
+
+        clean_settings_file();
     }
 
     #[test]
