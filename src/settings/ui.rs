@@ -227,17 +227,21 @@ fn handle_file_browser_key<B: Backend>(
         }
         Some(FileBrowserAction::Cancelled) => {}
         Some(FileBrowserAction::Renamed { from, to }) => {
-            // Update active_file path if it was the renamed file
             if let Some(ref active_file) = state.active_file {
                 if active_file.path.as_deref() == Some(&from) {
                     state.active_file.as_mut().unwrap().path = Some(to.clone());
                 }
             }
-            // Update last_opened_file in settings if it was the renamed file
             if state.settings.last_opened_file.as_deref() == Some(&from) {
                 state.settings.last_opened_file = Some(to.clone());
-                let _ = utils::save_settings(&state.settings);
             }
+            for path in state.settings.recent_files.iter_mut() {
+                if *path == from {
+                    *path = to.clone();
+                    break;
+                }
+            }
+            let _ = utils::save_settings(&state.settings);
             state.modal = Some(SettingsModal::FileBrowser(modal));
         }
         Some(FileBrowserAction::Selected(path)) => {
