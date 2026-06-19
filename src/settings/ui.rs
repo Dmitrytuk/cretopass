@@ -38,12 +38,27 @@ pub struct SettingsState {
 impl SettingsState {
     pub fn new() -> Self {
         let settings = utils::load_settings();
+        let modal = if settings.open_last_opened_file_on_startup {
+            settings.last_opened_file.as_ref().and_then(|path| {
+                utils::validate_encrypted_file(path).ok().map(|data| {
+                    SettingsModal::PassphraseInput {
+                        file_path: path.clone(),
+                        file_data: Some(data),
+                        passphrase: String::new(),
+                        cursor: 0,
+                        error: None,
+                    }
+                })
+            })
+        } else {
+            None
+        };
         Self {
             selected: 0,
             settings,
             quit: false,
             active_file: None,
-            modal: None,
+            modal,
         }
     }
 
