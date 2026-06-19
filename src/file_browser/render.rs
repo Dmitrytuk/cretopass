@@ -12,6 +12,9 @@ const DEFAULT_HEIGHT: u16 = 18;
 pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     let overlay_area = make_overlay(area);
 
+    // Clear overlay area first, then draw block borders on top
+    frame.render_widget(Clear, overlay_area);
+
     let title = match state.mode {
         FileBrowserMode::OpenFile => " Open File ",
         FileBrowserMode::CreateFile => " Create New Secret File ",
@@ -21,6 +24,8 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
         .title(title)
         .borders(Borders::ALL)
         .style(Style::default().bg(Color::Black).fg(Color::Cyan));
+
+    frame.render_widget(&block, overlay_area);
 
     let inner = block.inner(overlay_area);
 
@@ -32,13 +37,14 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
     ];
 
     let has_error = state.error.is_some();
-    let has_file_input = state.mode == FileBrowserMode::CreateFile && state.focus == FocusTarget::Input;
+    let has_file_input =
+        state.mode == FileBrowserMode::CreateFile && state.focus == FocusTarget::Input;
 
     if has_file_input {
-        constraints.insert(3, Constraint::Length(1)); // file name input
+        constraints.push(Constraint::Length(1)); // file name input
     }
     if has_error {
-        constraints.insert(4, Constraint::Length(1)); // error bar
+        constraints.push(Constraint::Length(1)); // error bar
     }
 
     let layout = Layout::vertical(constraints).split(inner);
@@ -47,15 +53,14 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
     render_file_list(frame, layout[1], state);
     render_options_bar(frame, layout[2], state);
 
+    let mut next = 3;
     if has_file_input {
-        render_name_input(frame, layout[3], state);
+        render_name_input(frame, layout[next], state);
+        next += 1;
     }
     if has_error {
-        render_error_bar(frame, if has_file_input { layout[4] } else { layout[3] }, state);
+        render_error_bar(frame, layout[next], state);
     }
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
 }
 
 fn make_overlay(area: Rect) -> Rect {
@@ -241,5 +246,242 @@ fn render_error_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
             Style::default().bg(Color::Red).fg(Color::White),
         ));
         frame.render_widget(Paragraph::new(text), area);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    use super::*;
+    use crate::file_browser::fs;
+
+    /// Helper to create a terminal for testing.
+    fn make_terminal() -> Terminal<TestBackend> {
+        Terminal::new(TestBackend::new(80, 24)).unwrap()
+    }
+
+    /// Helper to populate state with entries from /tmp (known to exist).
+    fn populate_tmp(state: &mut FileBrowserState) {
+        state.current_dir = std::path::PathBuf::from("/tmp");
+        state.entries = fs::list_dir(std::path::Path::new("/tmp")).unwrap();
+        state.selected = 0;
+    }
+
+    /// Renders and returns the full buffer content as a single string.
+    fn render_to_text(state: &FileBrowserState) -> String {
+        let mut terminal = make_terminal();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                render_file_browser(f, area, state);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        buffer
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>()
+    }
+
+    #[test]
+    fn test_render_open_file_shows_path_bar() {
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("/tmp"),
+            "path bar should show '/tmp', got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_open_file_shows_entries() {
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        let text = render_to_text(&state);
+        // At least one entry name should appear in the output
+        let has_entry = state.entries.iter().any(|e| text.contains(&e.name));
+        assert!(has_entry, "no entry name found in rendered output:\n{text}");
+    }
+
+    #[test]
+    fn test_render_open_file_shows_filter_hint() {
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("Filter:"),
+            "options bar should show filter indicator:\n{text}"
+        );
+        assert!(
+            text.contains("[f]"),
+            "options bar should show filter toggle hint:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_open_file_shows_search_hint() {
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("[/]search") || text.contains("Search:"),
+            "options bar should have search hint:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_create_file_no_name_input_when_focus_is_list() {
+        // In CreateFile mode but focus is on list → no name input area
+        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        populate_tmp(&mut state);
+        state.focus = FocusTarget::List;
+        let text = render_to_text(&state);
+        // Title should be "Create New Secret File"
+        assert!(
+            text.contains("Create New Secret File"),
+            "title mismatch:\n{text}"
+        );
+        // Tab hint should mention switching to name input
+        assert!(
+            text.contains("[Tab]name"),
+            "should show Tab hint to switch to name input:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_create_file_shows_name_input_when_focused() {
+        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        populate_tmp(&mut state);
+        state.focus = FocusTarget::Input;
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("Name:"),
+            "should show Name: input when focused:\n{text}"
+        );
+        assert!(
+            text.contains("Enter:confirm"),
+            "should show Enter:confirm hint:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_create_file_with_partial_name() {
+        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        populate_tmp(&mut state);
+        state.focus = FocusTarget::Input;
+        state.creating_name = "myvault.age".to_string();
+        state.creating_cursor = 5;
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("myvault"),
+            "should show the typed name:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_search_active_shows_query() {
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        state.search_active = true;
+        state.search_query = "test".to_string();
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("Search: test"),
+            "should show search query:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_error_bar_shows_message() {
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        state.error = Some("Permission denied".to_string());
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("Permission denied"),
+            "should show error text:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_empty_filtered_list_shows_hint() {
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        // Use an empty directory if possible, or filter with PwdKeeperOnly
+        // and search for something that won't match
+        state.current_dir = std::path::PathBuf::from("/tmp");
+        // Create a known empty directory
+        let empty_dir = std::path::Path::new("/tmp/__test_empty_xyz__");
+        let _ = std::fs::create_dir_all(empty_dir);
+        state.entries =
+            fs::list_dir(empty_dir).unwrap();
+        state.filter = FileFilter::PwdKeeperOnly;
+        let text = render_to_text(&state);
+        // Searching for something non-existent
+        assert!(
+            text.contains("No matching files") || text.contains("(empty directory)"),
+            "should show empty state message:\n{text}"
+        );
+        let _ = std::fs::remove_dir(empty_dir);
+    }
+
+    #[test]
+    fn test_render_new_dir_hint_shown() {
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("[n]new dir"),
+            "should show new directory hint:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_dirs_marked_with_arrow_icon() {
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        let text = render_to_text(&state);
+        // The selected entry should show ▸ prefix
+        let has_arrow = text.contains('▸');
+        assert!(has_arrow, "should have selection arrow (▸):\n{text}");
+    }
+
+    #[test]
+    fn test_render_pwd_marker_shown_for_age_files() {
+        let dir = std::path::Path::new("/tmp/__test_render_pwd__");
+        let _ = std::fs::remove_dir_all(dir);
+        std::fs::create_dir_all(dir).unwrap();
+
+        // Create an age file
+        let age_path = dir.join("myvault.age");
+        let data = [b"age-encrypt".as_slice(), &[0u8, 1, 2, 3]].concat();
+        std::fs::write(&age_path, &data).unwrap();
+
+        // Create a regular file too
+        let txt_path = dir.join("notes.txt");
+        std::fs::write(&txt_path, b"hello").unwrap();
+
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        state.current_dir = dir.to_path_buf();
+        state.entries = fs::list_dir(dir).unwrap();
+        state.selected = state
+            .entries
+            .iter()
+            .position(|e| e.name == "myvault.age")
+            .unwrap_or(0);
+
+        let text = render_to_text(&state);
+
+        assert!(
+            text.contains("[PWD]"),
+            "should show [PWD] marker for age files:\n{text}"
+        );
+        assert!(text.contains("myvault.age"), "should show age filename:\n{text}");
+        assert!(text.contains("notes.txt"), "should show regular filename:\n{text}");
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
