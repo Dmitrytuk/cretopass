@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
 use ratatui::{
-    layout::{Alignment, Rect},
+    layout::Rect,
     style::{Color, Style},
     text::{Line, Span, Text},
-    widgets::{block::Title, Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 use uuid::Uuid;
@@ -456,7 +456,7 @@ pub struct TreeWidget;
 impl TreeWidget {
     /// Renders the tree view into the given area.
     pub fn render(frame: &mut Frame, area: Rect, state: &TreeState) {
-        let title = state
+        let base_title = state
             .active_file_path
             .as_deref()
             .map(|p| {
@@ -471,22 +471,25 @@ impl TreeWidget {
                 }
             })
             .unwrap_or_else(|| " File ".to_string());
-        let mut block = Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
 
-        if let Some(status) = state.status {
-            let color = match status {
+        let mut title_spans: Vec<Span> = Vec::new();
+        if let Some(s) = state.status {
+            let color = match s {
                 "Loading..." => Color::Green,
                 "Saving..." => Color::Red,
                 _ => Color::White,
             };
-            block = block.title(
-                Title::from(Line::from(Span::styled(status, Style::default().fg(color))))
-                    .alignment(Alignment::Right),
-            );
+            title_spans.push(Span::styled(
+                format!(" {}  ", s),
+                Style::default().fg(color),
+            ));
         }
+        title_spans.push(Span::raw(base_title));
+
+        let block = Block::default()
+            .title(Line::from(title_spans))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan));
 
         let inner = block.inner(area);
         frame.render_widget(block, area);

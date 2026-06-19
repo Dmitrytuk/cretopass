@@ -6,7 +6,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{block::Title, Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{backend::Backend, Frame, Terminal};
 
 use crate::file_browser::{self, FileBrowserAction, FileBrowserMode, FileBrowserState};
@@ -457,15 +457,17 @@ fn handle_modal_key<B: Backend>(
     {
         match key.code {
             KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => {
-                if let Some(SettingsModal::ChangePwInput { ref mut focused, .. }) =
-                    state.modal
+                if let Some(SettingsModal::ChangePwInput {
+                    ref mut focused, ..
+                }) = state.modal
                 {
                     *focused = (*focused + 1) % 3;
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                if let Some(SettingsModal::ChangePwInput { ref mut focused, .. }) =
-                    state.modal
+                if let Some(SettingsModal::ChangePwInput {
+                    ref mut focused, ..
+                }) = state.modal
                 {
                     *focused = focused.saturating_sub(1);
                 }
@@ -662,7 +664,13 @@ fn handle_modal_key<B: Backend>(
                         error,
                         ..
                     } => {
-                        let is_ok = if current.as_bytes() != state.active_file.as_ref().map(|af| af.passphrase.as_slice()).unwrap_or(&[]) {
+                        let is_ok = if current.as_bytes()
+                            != state
+                                .active_file
+                                .as_ref()
+                                .map(|af| af.passphrase.as_slice())
+                                .unwrap_or(&[])
+                        {
                             *error = Some("Current password is incorrect".to_string());
                             false
                         } else if new_pass.is_empty() || confirm.is_empty() {
@@ -711,8 +719,7 @@ fn handle_modal_key<B: Backend>(
                                         crate::tree::widget::TreeState::new(node.clone());
                                     tree_state.active_file_path = Some(path.clone());
                                     tree_state.active_file_passphrase = new_pass_bytes;
-                                    tree_state.display_full_path =
-                                        state.settings.display_full_path;
+                                    tree_state.display_full_path = state.settings.display_full_path;
                                     crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
                                     if !tree_state.return_to_menu {
                                         state.quit = true;
@@ -807,9 +814,9 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::FileBrowser(_)
             | SettingsModal::AppSettings { .. }
             | SettingsModal::DeleteConfirm { .. }
-             | SettingsModal::ChangePwConfirm
-             | SettingsModal::ConfirmNoPassphrase { .. }
-             | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwConfirm
+            | SettingsModal::ConfirmNoPassphrase { .. }
+            | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
         KeyCode::Backspace => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -827,9 +834,9 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::FileBrowser(_)
             | SettingsModal::AppSettings { .. }
             | SettingsModal::DeleteConfirm { .. }
-             | SettingsModal::ChangePwConfirm
-             | SettingsModal::ConfirmNoPassphrase { .. }
-             | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwConfirm
+            | SettingsModal::ConfirmNoPassphrase { .. }
+            | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
         KeyCode::Delete => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -846,9 +853,9 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::FileBrowser(_)
             | SettingsModal::AppSettings { .. }
             | SettingsModal::DeleteConfirm { .. }
-             | SettingsModal::ChangePwConfirm
-             | SettingsModal::ConfirmNoPassphrase { .. }
-             | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwConfirm
+            | SettingsModal::ConfirmNoPassphrase { .. }
+            | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
         KeyCode::Left => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
@@ -861,9 +868,9 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::FileBrowser(_)
             | SettingsModal::AppSettings { .. }
             | SettingsModal::DeleteConfirm { .. }
-             | SettingsModal::ChangePwConfirm
-             | SettingsModal::ConfirmNoPassphrase { .. }
-             | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwConfirm
+            | SettingsModal::ConfirmNoPassphrase { .. }
+            | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
         KeyCode::Right => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -880,9 +887,9 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::FileBrowser(_)
             | SettingsModal::AppSettings { .. }
             | SettingsModal::DeleteConfirm { .. }
-             | SettingsModal::ChangePwConfirm
-             | SettingsModal::ConfirmNoPassphrase { .. }
-             | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwConfirm
+            | SettingsModal::ConfirmNoPassphrase { .. }
+            | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
         KeyCode::Home => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
@@ -895,9 +902,9 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::FileBrowser(_)
             | SettingsModal::AppSettings { .. }
             | SettingsModal::DeleteConfirm { .. }
-             | SettingsModal::ChangePwConfirm
-             | SettingsModal::ConfirmNoPassphrase { .. }
-             | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwConfirm
+            | SettingsModal::ConfirmNoPassphrase { .. }
+            | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
         KeyCode::End => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -912,9 +919,9 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::FileBrowser(_)
             | SettingsModal::AppSettings { .. }
             | SettingsModal::DeleteConfirm { .. }
-             | SettingsModal::ChangePwConfirm
-             | SettingsModal::ConfirmNoPassphrase { .. }
-             | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwConfirm
+            | SettingsModal::ConfirmNoPassphrase { .. }
+            | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
         KeyCode::Enter => match modal {
             SettingsModal::PassphraseInput {
@@ -960,7 +967,7 @@ fn handle_modal_key<B: Backend>(
                             }
                         }
                     }
-                },
+                }
                 None => {
                     if passphrase.is_empty() {
                         state.modal = Some(SettingsModal::ConfirmNoPassphrase { file_path });
@@ -996,15 +1003,15 @@ fn handle_modal_key<B: Backend>(
                             }
                         }
                     }
-                },
+                }
             },
             SettingsModal::Alert { .. } => {}
             SettingsModal::FileBrowser(_)
             | SettingsModal::AppSettings { .. }
             | SettingsModal::DeleteConfirm { .. }
-             | SettingsModal::ChangePwConfirm
-             | SettingsModal::ConfirmNoPassphrase { .. }
-             | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwConfirm
+            | SettingsModal::ConfirmNoPassphrase { .. }
+            | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
         _ => {
             state.modal = Some(modal);
@@ -1047,7 +1054,7 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
     ])
     .split(area);
 
-    let title = state
+    let base_title = state
         .active_file
         .as_ref()
         .and_then(|af| af.path.as_deref())
@@ -1064,22 +1071,24 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
         })
         .unwrap_or_else(|| " Settings ".to_string());
 
-    let mut block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
-
-    if let Some(status) = state.status {
-        let color = match status {
+    let mut title_spans: Vec<Span> = Vec::new();
+    if let Some(s) = state.status {
+        let color = match s {
             "Loading..." => Color::Green,
             "Saving..." => Color::Red,
             _ => Color::White,
         };
-        block = block.title(
-            Title::from(Line::from(Span::styled(status, Style::default().fg(color))))
-                .alignment(Alignment::Right),
-        );
+        title_spans.push(Span::styled(
+            format!(" {}  ", s),
+            Style::default().fg(color),
+        ));
     }
+    title_spans.push(Span::raw(base_title));
+
+    let block = Block::default()
+        .title(Line::from(title_spans))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
 
     let inner = block.inner(layout[0]);
     frame.render_widget(block, layout[0]);
@@ -1341,10 +1350,7 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
             let cursor_char = if at.is_empty() { " " } else { &at };
 
             lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {}: ", label),
-                    Style::default().fg(Color::White),
-                ),
+                Span::styled(format!("  {}: ", label), Style::default().fg(Color::White)),
                 Span::raw(before.to_string()),
                 Span::styled(
                     cursor_char.to_string(),
@@ -1354,10 +1360,7 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
             ]));
         } else {
             lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {}: ", label),
-                    Style::default().fg(Color::White),
-                ),
+                Span::styled(format!("  {}: ", label), Style::default().fg(Color::White)),
                 Span::styled(masked, Style::default().fg(Color::White)),
             ]));
         }
