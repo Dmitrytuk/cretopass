@@ -112,6 +112,9 @@ pub fn save_tree(root: &Node, path: &str, passphrase: &[u8]) -> Result<(), Strin
     // Write new file
     fs::write(path, &encrypted).map_err(|e| format!("Failed to write file: {e}"))?;
 
+    // Remove backup on success
+    let _ = fs::remove_file(&backup_path);
+
     Ok(())
 }
 
@@ -353,8 +356,8 @@ mod tests {
         );
         save_tree(&mutated, &path, passphrase).unwrap();
 
-        // Verify backup exists
-        assert!(fs::metadata(&backup_path).is_ok());
+        // Verify backup was cleaned up
+        assert!(fs::metadata(&backup_path).is_err());
 
         // Verify new file can be read
         let data = fs::read(&path).unwrap();
@@ -364,7 +367,6 @@ mod tests {
         assert_eq!(decoded.children[0].name, "New Child");
 
         let _ = fs::remove_file(&path);
-        let _ = fs::remove_file(&backup_path);
     }
 
     #[test]
