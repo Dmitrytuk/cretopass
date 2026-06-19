@@ -204,10 +204,12 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
         ));
     }
 
-    spans.push(Span::styled(
-        " [n]new dir ",
-        Style::default().fg(Color::DarkGray),
-    ));
+    if state.mode == FileBrowserMode::CreateFile {
+        spans.push(Span::styled(
+            " [n]new dir ",
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
 
     // Show rename/delete hints when a PWD-marked file is selected
     if let Some(entry) = state.entries.get(state.selected) {
@@ -515,13 +517,24 @@ mod tests {
     }
 
     #[test]
-    fn test_render_new_dir_hint_shown() {
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+    fn test_render_new_dir_hint_shown_in_create_mode() {
+        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
         let text = render_to_text(&state);
         assert!(
             text.contains("[n]new dir"),
-            "should show new directory hint:\n{text}"
+            "should show new directory hint in CreateFile mode:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_new_dir_hint_hidden_in_open_mode() {
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        let text = render_to_text(&state);
+        assert!(
+            !text.contains("[n]new dir"),
+            "should NOT show new directory hint in OpenFile mode:\n{text}"
         );
     }
 

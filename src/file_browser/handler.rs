@@ -145,7 +145,7 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
             state.clamp_selection();
             None
         }
-        KeyCode::Char('n') => {
+        KeyCode::Char('n') if state.mode == FileBrowserMode::CreateFile => {
             create_new_folder(state);
             None
         }
