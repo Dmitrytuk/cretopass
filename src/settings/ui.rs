@@ -24,8 +24,15 @@ enum SettingsModal {
         cursor: usize,
         error: Option<String>,
     },
-    AppSettings { setting_idx: usize },
-    Alert { message: String },
+    AppSettings {
+        setting_idx: usize,
+    },
+    Alert {
+        message: String,
+    },
+    DeleteConfirm {
+        path: String,
+    },
 }
 
 pub struct SettingsState {
@@ -148,17 +155,19 @@ fn handle_settings_key<B: Backend>(
             if idx == 0 {
                 let mut fb = FileBrowserState::new(FileBrowserMode::OpenFile);
                 fb.set_active_file_path(
-                    state.active_file.as_ref().and_then(|af| {
-                        af.path.as_ref().map(|p| PathBuf::from(p))
-                    }),
+                    state
+                        .active_file
+                        .as_ref()
+                        .and_then(|af| af.path.as_ref().map(|p| PathBuf::from(p))),
                 );
                 state.modal = Some(SettingsModal::FileBrowser(fb));
             } else if idx == 1 {
                 let mut fb = FileBrowserState::new(FileBrowserMode::CreateFile);
                 fb.set_active_file_path(
-                    state.active_file.as_ref().and_then(|af| {
-                        af.path.as_ref().map(|p| PathBuf::from(p))
-                    }),
+                    state
+                        .active_file
+                        .as_ref()
+                        .and_then(|af| af.path.as_ref().map(|p| PathBuf::from(p))),
                 );
                 state.modal = Some(SettingsModal::FileBrowser(fb));
             } else if idx == 2 {
@@ -198,6 +207,25 @@ fn handle_settings_key<B: Backend>(
                                 error: None,
                             });
                         }
+                    }
+                }
+            }
+        }
+        KeyCode::Char('d') | KeyCode::Delete => {
+            let idx = state.selected;
+            if idx >= MENU_ITEMS.len() {
+                let file_idx = idx - MENU_ITEMS.len();
+                if file_idx < state.settings.recent_files.len() {
+                    let path = &state.settings.recent_files[file_idx];
+                    let is_active =
+                        state.active_file.as_ref().and_then(|af| af.path.as_deref()) == Some(path);
+                    if is_active {
+                        state.modal = Some(SettingsModal::Alert {
+                            message: "Cannot delete the currently open file from recent files"
+                                .to_string(),
+                        });
+                    } else {
+                        state.modal = Some(SettingsModal::DeleteConfirm { path: path.clone() });
                     }
                 }
             }
@@ -294,15 +322,25 @@ fn handle_modal_key<B: Backend>(
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     // ── AppSettings modal ──
-    if state.modal.as_ref().is_some_and(|m| matches!(m, SettingsModal::AppSettings { .. })) {
+    if state
+        .modal
+        .as_ref()
+        .is_some_and(|m| matches!(m, SettingsModal::AppSettings { .. }))
+    {
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => {
-                if let Some(SettingsModal::AppSettings { ref mut setting_idx }) = state.modal {
+                if let Some(SettingsModal::AppSettings {
+                    ref mut setting_idx,
+                }) = state.modal
+                {
                     *setting_idx = (*setting_idx + 1).min(1);
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                if let Some(SettingsModal::AppSettings { ref mut setting_idx }) = state.modal {
+                if let Some(SettingsModal::AppSettings {
+                    ref mut setting_idx,
+                }) = state.modal
+                {
                     *setting_idx = setting_idx.saturating_sub(1);
                 }
             }
@@ -333,6 +371,26 @@ fn handle_modal_key<B: Backend>(
         return Ok(());
     }
 
+    // ── DeleteConfirm modal ──
+    if state
+        .modal
+        .as_ref()
+        .is_some_and(|m| matches!(m, SettingsModal::DeleteConfirm { .. }))
+    {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                if let Some(SettingsModal::DeleteConfirm { path }) = state.modal.take() {
+                    state.settings.recent_files.retain(|f| f != &path);
+                    let _ = utils::save_settings(&state.settings);
+                }
+            }
+            _ => {
+                state.modal = None;
+            }
+        }
+        return Ok(());
+    }
+
     let mut modal = match state.modal.take() {
         Some(m) => m,
         None => return Ok(()),
@@ -342,7 +400,10 @@ fn handle_modal_key<B: Backend>(
         KeyCode::Esc => {}
         KeyCode::Char(c) => match &mut modal {
             SettingsModal::PassphraseInput {
-                passphrase, cursor, error, ..
+                passphrase,
+                cursor,
+                error,
+                ..
             } => {
                 passphrase.insert(*cursor, c);
                 *cursor += 1;
@@ -350,7 +411,9 @@ fn handle_modal_key<B: Backend>(
                 state.modal = Some(modal);
             }
             SettingsModal::Alert { .. } => {}
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
+            SettingsModal::FileBrowser(_)
+            | SettingsModal::AppSettings { .. }
+            | SettingsModal::DeleteConfirm { .. } => unreachable!(),
         },
         KeyCode::Backspace => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -365,7 +428,9 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
+            SettingsModal::FileBrowser(_)
+            | SettingsModal::AppSettings { .. }
+            | SettingsModal::DeleteConfirm { .. } => unreachable!(),
         },
         KeyCode::Left => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
@@ -375,10 +440,14 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
+            SettingsModal::FileBrowser(_)
+            | SettingsModal::AppSettings { .. }
+            | SettingsModal::DeleteConfirm { .. } => unreachable!(),
         },
         KeyCode::Right => match &mut modal {
-            SettingsModal::PassphraseInput { cursor, passphrase, .. } => {
+            SettingsModal::PassphraseInput {
+                cursor, passphrase, ..
+            } => {
                 if *cursor < passphrase.len() {
                     *cursor += 1;
                 }
@@ -387,7 +456,9 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
+            SettingsModal::FileBrowser(_)
+            | SettingsModal::AppSettings { .. }
+            | SettingsModal::DeleteConfirm { .. } => unreachable!(),
         },
         KeyCode::Home => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
@@ -397,17 +468,23 @@ fn handle_modal_key<B: Backend>(
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
+            SettingsModal::FileBrowser(_)
+            | SettingsModal::AppSettings { .. }
+            | SettingsModal::DeleteConfirm { .. } => unreachable!(),
         },
         KeyCode::End => match &mut modal {
-            SettingsModal::PassphraseInput { cursor, passphrase, .. } => {
+            SettingsModal::PassphraseInput {
+                cursor, passphrase, ..
+            } => {
                 *cursor = passphrase.len();
                 state.modal = Some(modal);
             }
             SettingsModal::Alert { .. } => {
                 state.modal = Some(modal);
             }
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
+            SettingsModal::FileBrowser(_)
+            | SettingsModal::AppSettings { .. }
+            | SettingsModal::DeleteConfirm { .. } => unreachable!(),
         },
         KeyCode::Enter => match modal {
             SettingsModal::PassphraseInput {
@@ -476,7 +553,9 @@ fn handle_modal_key<B: Backend>(
                 },
             },
             SettingsModal::Alert { .. } => {}
-            SettingsModal::FileBrowser(_) | SettingsModal::AppSettings { .. } => unreachable!(),
+            SettingsModal::FileBrowser(_)
+            | SettingsModal::AppSettings { .. }
+            | SettingsModal::DeleteConfirm { .. } => unreachable!(),
         },
         _ => {
             state.modal = Some(modal);
@@ -497,6 +576,9 @@ fn render(frame: &mut Frame, area: Rect, state: &SettingsState) {
         Some(SettingsModal::PassphraseInput { .. }) => render_passphrase_modal(frame, area, state),
         Some(SettingsModal::AppSettings { .. }) => render_app_settings_modal(frame, area, state),
         Some(SettingsModal::Alert { message }) => render_alert_modal(frame, area, message),
+        Some(SettingsModal::DeleteConfirm { path }) => {
+            render_delete_confirm_modal(frame, area, path)
+        }
         None => {}
     }
 }
@@ -545,7 +627,10 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
             Style::default().fg(Color::White)
         };
         let prefix = if is_selected { "▸ " } else { "  " };
-        lines.push(Line::from(Span::styled(format!("{}{}", prefix, item), style)));
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", prefix, item),
+            style,
+        )));
     }
 
     lines.push(Line::from(""));
@@ -573,7 +658,10 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| file.clone())
         };
-        lines.push(Line::from(Span::styled(format!("{}{}", prefix, display), style)));
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", prefix, display),
+            style,
+        )));
     }
 
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
@@ -607,8 +695,14 @@ fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsStat
     let inner = block.inner(overlay_area);
 
     let rows = [
-        ("Display full path in title bar", state.settings.display_full_path),
-        ("Start with last file", state.settings.open_last_opened_file_on_startup),
+        (
+            "Display full path in title bar",
+            state.settings.display_full_path,
+        ),
+        (
+            "Start with last file",
+            state.settings.open_last_opened_file_on_startup,
+        ),
     ];
 
     let mut lines: Vec<Line> = Vec::new();
@@ -634,6 +728,33 @@ fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsStat
         "Space:toggle  Enter:save  Esc:cancel",
         Style::default().fg(Color::DarkGray),
     )));
+
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(block, overlay_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+fn render_delete_confirm_modal(frame: &mut Frame, area: Rect, path: &str) {
+    let overlay_area = make_overlay(area, 7);
+    let block = Block::default()
+        .title(" Confirm Delete ")
+        .borders(Borders::ALL)
+        .style(Style::default().bg(Color::Black).fg(Color::Red));
+
+    let inner = block.inner(overlay_area);
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("Remove '{}' from recent files?", path),
+            Style::default().fg(Color::White),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "y/Enter:confirm  any key:cancel",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
@@ -750,21 +871,19 @@ fn render_alert_modal(frame: &mut Frame, area: Rect, message: &str) {
 }
 
 fn render_settings_status_bar(frame: &mut Frame, area: Rect, _state: &SettingsState) {
-    let text = Text::from(Line::from(vec![
-        Span::styled(
-            " SETTINGS ",
-            Style::default()
-                .bg(Color::Cyan)
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]));
+    let text = Text::from(Line::from(vec![Span::styled(
+        " SETTINGS ",
+        Style::default()
+            .bg(Color::Cyan)
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )]));
     frame.render_widget(Paragraph::new(text), area);
 }
 
 fn render_settings_help_bar(frame: &mut Frame, area: Rect) {
     let text = Text::from(Line::from(vec![Span::styled(
-        "j/k:navigate  Enter:select  q:quit",
+        "j/k:navigate  Enter:select  d:<delete path> q:quit",
         Style::default().fg(Color::DarkGray),
     )]));
     frame.render_widget(Paragraph::new(text), area);
