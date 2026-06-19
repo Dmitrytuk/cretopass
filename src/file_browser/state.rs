@@ -62,8 +62,8 @@ impl FileBrowserState {
         let home = dirs_home();
         Self {
             mode,
-            current_dir: home,
-            entries: Vec::new(),
+            current_dir: home.clone(),
+            entries: super::fs::list_dir(&home).unwrap_or_default(),
             selected: 0,
             scroll: 0,
             filter: FileFilter::All,
