@@ -381,6 +381,9 @@ fn handle_modal_key<B: Backend>(
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                 if let Some(SettingsModal::DeleteConfirm { path }) = state.modal.take() {
                     state.settings.recent_files.retain(|f| f != &path);
+                    if state.settings.last_opened_file.as_deref() == Some(&path) {
+                        state.settings.last_opened_file = None;
+                    }
                     let _ = utils::save_settings(&state.settings);
                 }
             }
