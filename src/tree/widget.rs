@@ -288,7 +288,13 @@ impl TreeState {
     }
 
     /// Finds a node by [`Uuid`] and replaces its name, description, and extra fields.
-    pub fn update_node(&mut self, node_id: Uuid, name: String, desc: String, extra_fields: Vec<ExtraField>) {
+    pub fn update_node(
+        &mut self,
+        node_id: Uuid,
+        name: String,
+        desc: String,
+        extra_fields: Vec<ExtraField>,
+    ) {
         if let Some(target) = self.root.find_mut(node_id) {
             target.name = name;
             target.description = desc;
@@ -299,12 +305,21 @@ impl TreeState {
     }
 
     /// Creates a new child node under the currently selected node.
-    pub fn add_child_to_selected(&mut self, name: String, desc: String, extra_fields: Vec<ExtraField>) {
+    pub fn add_child_to_selected(
+        &mut self,
+        name: String,
+        desc: String,
+        extra_fields: Vec<ExtraField>,
+    ) {
         let id = match self.selected_node_id() {
             Some(id) => id,
             None => return,
         };
-        let final_name = if name.is_empty() { "Untitled".to_string() } else { name };
+        let final_name = if name.is_empty() {
+            "Untitled".to_string()
+        } else {
+            name
+        };
         let mut node = Node::new(&final_name, &desc);
         node.extra_fields = extra_fields;
         if let Some(target) = self.root.find_mut(id) {
@@ -441,19 +456,21 @@ pub struct TreeWidget;
 impl TreeWidget {
     /// Renders the tree view into the given area.
     pub fn render(frame: &mut Frame, area: Rect, state: &TreeState) {
-        let title = state.active_file_path.as_deref()
+        let title = state
+            .active_file_path
+            .as_deref()
             .map(|p| {
                 if state.display_full_path {
-                    format!(" Tree — {} ", p)
+                    format!(" File — {} ", p)
                 } else {
                     let name = std::path::Path::new(p)
                         .file_name()
                         .map(|n| n.to_string_lossy())
                         .unwrap_or(std::borrow::Cow::Borrowed(p));
-                    format!(" Tree — {} ", name)
+                    format!(" File — {} ", name)
                 }
             })
-            .unwrap_or_else(|| " Tree ".to_string());
+            .unwrap_or_else(|| " File ".to_string());
         let mut block = Block::default()
             .title(title)
             .borders(Borders::ALL)
@@ -481,7 +498,11 @@ impl TreeWidget {
             .map(|(i, v)| {
                 let indent = "  ".repeat(v.depth);
                 let icon = if v.is_parent {
-                    if v.expanded { "▼ " } else { "▶ " }
+                    if v.expanded {
+                        "▼ "
+                    } else {
+                        "▶ "
+                    }
                 } else {
                     "  "
                 };
