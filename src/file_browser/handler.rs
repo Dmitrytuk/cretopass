@@ -53,6 +53,11 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
                 state.clamp_selection();
                 return None;
             }
+            KeyCode::Delete => {
+                state.search_query.pop();
+                state.clamp_selection();
+                return None;
+            }
             _ => {} // fall through to list navigation during search
         }
     }
@@ -199,6 +204,12 @@ fn handle_input_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileB
             }
             None
         }
+        KeyCode::Delete => {
+            if state.creating_cursor < state.creating_name.len() {
+                state.creating_name.remove(state.creating_cursor);
+            }
+            None
+        }
         KeyCode::Left => {
             if state.creating_cursor > 0 {
                 state.creating_cursor -= 1;
@@ -243,6 +254,12 @@ fn handle_rename_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<File
         KeyCode::Backspace => {
             if state.rename_cursor > 0 {
                 state.rename_cursor -= 1;
+                state.rename_name.remove(state.rename_cursor);
+            }
+            None
+        }
+        KeyCode::Delete => {
+            if state.rename_cursor < state.rename_name.len() {
                 state.rename_name.remove(state.rename_cursor);
             }
             None

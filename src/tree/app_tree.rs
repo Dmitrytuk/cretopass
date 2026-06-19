@@ -163,6 +163,11 @@ fn handle_search(key: event::KeyEvent, state: &mut TreeState) {
             q.pop();
             state.set_search(q);
         }
+        KeyCode::Delete => {
+            let mut q = state.search_query.clone();
+            q.pop();
+            state.set_search(q);
+        }
         KeyCode::Char(c) => {
             let mut q = state.search_query.clone();
             q.push(c);
@@ -421,6 +426,44 @@ fn handle_adding(key: event::KeyEvent, state: &mut TreeState) {
                 cursor: new_cursor,
             };
         }
+        KeyCode::Delete if !is_on_add_button => {
+            let total = total_fields(&extra_fields);
+            let is_on_extra = field >= 2 && field < total - 1;
+            let active_len = active_len_for_field(&name, &desc, &extra_fields, field);
+            if cursor >= active_len {
+                state.mode = InputMode::Adding {
+                    name,
+                    desc,
+                    extra_fields,
+                    field,
+                    cursor,
+                };
+                return;
+            }
+            let (new_name, new_desc, new_extra_fields, new_cursor) = if field == 0 {
+                let mut n = name;
+                n.remove(cursor);
+                (n, desc, extra_fields, cursor)
+            } else if field == 1 {
+                let mut d = desc;
+                d.remove(cursor);
+                (name, d, extra_fields, cursor)
+            } else if is_on_extra {
+                let mut ef = extra_fields;
+                let idx = field - 2;
+                ef[idx].value.remove(cursor);
+                (name, desc, ef, cursor)
+            } else {
+                (name, desc, extra_fields, cursor)
+            };
+            state.mode = InputMode::Adding {
+                name: new_name,
+                desc: new_desc,
+                extra_fields: new_extra_fields,
+                field,
+                cursor: new_cursor,
+            };
+        }
         KeyCode::Char(c) if !is_on_add_button => {
             let (new_name, new_desc, new_extra_fields, new_cursor) = if field == 0 {
                 let mut n = name;
@@ -621,6 +664,46 @@ fn handle_editing(key: event::KeyEvent, state: &mut TreeState) {
                 let idx = field - 2;
                 ef[idx].value.remove(cursor - 1);
                 (name, desc, ef, cursor - 1)
+            } else {
+                (name, desc, extra_fields, cursor)
+            };
+            state.mode = InputMode::Editing {
+                node_id,
+                name: new_name,
+                desc: new_desc,
+                extra_fields: new_extra_fields,
+                field,
+                cursor: new_cursor,
+            };
+        }
+        KeyCode::Delete if !is_on_add_button => {
+            let total = total_fields(&extra_fields);
+            let is_on_extra = field >= 2 && field < total - 1;
+            let active_len = active_len_for_field(&name, &desc, &extra_fields, field);
+            if cursor >= active_len {
+                state.mode = InputMode::Editing {
+                    node_id,
+                    name,
+                    desc,
+                    extra_fields,
+                    field,
+                    cursor,
+                };
+                return;
+            }
+            let (new_name, new_desc, new_extra_fields, new_cursor) = if field == 0 {
+                let mut n = name;
+                n.remove(cursor);
+                (n, desc, extra_fields, cursor)
+            } else if field == 1 {
+                let mut d = desc;
+                d.remove(cursor);
+                (name, d, extra_fields, cursor)
+            } else if is_on_extra {
+                let mut ef = extra_fields;
+                let idx = field - 2;
+                ef[idx].value.remove(cursor);
+                (name, desc, ef, cursor)
             } else {
                 (name, desc, extra_fields, cursor)
             };
@@ -854,6 +937,19 @@ fn handle_custom_field_name(key: event::KeyEvent, state: &mut TreeState) {
             state.mode = build_editing_mode(node_id, name, desc, ef, new_field, 0, is_adding);
         }
         KeyCode::Backspace => {
+            let mut new_input = input;
+            new_input.pop();
+            state.mode = InputMode::CustomFieldName {
+                node_id,
+                name,
+                desc,
+                extra_fields,
+                field,
+                cursor,
+                input: new_input,
+            };
+        }
+        KeyCode::Delete => {
             let mut new_input = input;
             new_input.pop();
             state.mode = InputMode::CustomFieldName {

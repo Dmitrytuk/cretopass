@@ -527,6 +527,33 @@ fn handle_modal_key<B: Backend>(
                     }
                 }
             }
+            KeyCode::Delete => {
+                if let Some(SettingsModal::ChangePwInput {
+                    ref mut current,
+                    ref mut current_cursor,
+                    ref mut new_pass,
+                    ref mut new_cursor,
+                    ref mut confirm,
+                    ref mut confirm_cursor,
+                    ref mut focused,
+                    ref mut error,
+                }) = state.modal
+                {
+                    *error = None;
+                    match *focused {
+                        0 if *current_cursor < current.len() => {
+                            current.remove(*current_cursor);
+                        }
+                        1 if *new_cursor < new_pass.len() => {
+                            new_pass.remove(*new_cursor);
+                        }
+                        2 if *confirm_cursor < confirm.len() => {
+                            confirm.remove(*confirm_cursor);
+                        }
+                        _ => {}
+                    }
+                }
+            }
             KeyCode::Left => {
                 if let Some(SettingsModal::ChangePwInput {
                     ref mut current_cursor,
@@ -780,6 +807,25 @@ fn handle_modal_key<B: Backend>(
             } => {
                 if *cursor > 0 {
                     *cursor -= 1;
+                    passphrase.remove(*cursor);
+                }
+                state.modal = Some(modal);
+            }
+            SettingsModal::Alert { .. } => {
+                state.modal = Some(modal);
+            }
+            SettingsModal::FileBrowser(_)
+            | SettingsModal::AppSettings { .. }
+            | SettingsModal::DeleteConfirm { .. }
+             | SettingsModal::ChangePwConfirm
+             | SettingsModal::ConfirmNoPassphrase { .. }
+             | SettingsModal::ChangePwInput { .. } => unreachable!(),
+        },
+        KeyCode::Delete => match &mut modal {
+            SettingsModal::PassphraseInput {
+                passphrase, cursor, ..
+            } => {
+                if *cursor < passphrase.len() {
                     passphrase.remove(*cursor);
                 }
                 state.modal = Some(modal);
