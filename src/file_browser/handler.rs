@@ -7,6 +7,26 @@ use super::state::{FileBrowserAction, FileBrowserMode, FileBrowserState, FileFil
 /// or cancelled the file browser.  Returns `None` when the browser
 /// state was just mutated (re-render needed).
 pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBrowserAction> {
+    // ── Delete confirmation mode ──
+    if state.confirm_delete.is_some() {
+        return match key.code {
+            KeyCode::Char('y') | KeyCode::Enter => {
+                if let Some(ref path_str) = state.confirm_delete.clone() {
+                    let path = std::path::Path::new(path_str);
+                    if fs::delete_file(path).is_ok() {
+                        state.refresh_entries();
+                    }
+                }
+                state.confirm_delete = None;
+                None
+            }
+            _ => {
+                state.confirm_delete = None;
+                None
+            }
+        };
+    }
+
     // ── Search-mode keys ──
     if state.search_active {
         match key.code {
@@ -48,6 +68,7 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
     match state.focus {
         FocusTarget::List => handle_list_key(key, state),
         FocusTarget::Input => handle_input_key(key, state),
+        FocusTarget::Rename => handle_rename_key(key, state),
     }
 }
 
@@ -68,7 +89,7 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
                 };
                 None
             }
-            KeyCode::Tab if state.mode == FileBrowserMode::CreateFile => {
+            KeyCode::Char('N') if state.mode == FileBrowserMode::CreateFile => {
                 state.focus = FocusTarget::Input;
                 None
             }
@@ -128,8 +149,23 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
             create_new_folder(state);
             None
         }
-        KeyCode::Tab if state.mode == FileBrowserMode::CreateFile => {
-            state.focus = FocusTarget::Input;
+        KeyCode::Char('r') => {
+            if let Some(entry) = state.entries.get(state.selected) {
+                if entry.is_age_file && !entry.is_dir {
+                    state.focus = FocusTarget::Rename;
+                    state.rename_name = entry.name.clone();
+                    state.rename_cursor = entry.name.len();
+                    state.rename_target = entry.path.to_string_lossy().to_string();
+                }
+            }
+            None
+        }
+        KeyCode::Char('d') | KeyCode::Delete => {
+            if let Some(entry) = state.entries.get(state.selected) {
+                if entry.is_age_file && !entry.is_dir {
+                    state.confirm_delete = Some(entry.path.to_string_lossy().to_string());
+                }
+            }
             None
         }
         _ => None,
@@ -137,6 +173,12 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
 }
 
 fn handle_input_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBrowserAction> {
+    // Check focus-switch key before general Char(c) to avoid unreachable pattern
+    if key.code == KeyCode::Char('N') || key.code == KeyCode::Esc {
+        state.focus = FocusTarget::List;
+        return None;
+    }
+
     match key.code {
         KeyCode::Char(c) => {
             state.creating_name.insert(state.creating_cursor, c);
@@ -170,10 +212,6 @@ fn handle_input_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileB
             state.creating_cursor = state.creating_name.len();
             None
         }
-        KeyCode::Tab | KeyCode::Esc => {
-            state.focus = FocusTarget::List;
-            None
-        }
         KeyCode::Enter => {
             let name = state.creating_name.trim().to_string();
             if name.is_empty() {
@@ -183,6 +221,72 @@ fn handle_input_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileB
             Some(FileBrowserAction::Selected(
                 full_path.to_string_lossy().to_string(),
             ))
+        }
+        _ => None,
+    }
+}
+
+fn handle_rename_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBrowserAction> {
+    match key.code {
+        KeyCode::Char(c) => {
+            state.rename_name.insert(state.rename_cursor, c);
+            state.rename_cursor += 1;
+            None
+        }
+        KeyCode::Backspace => {
+            if state.rename_cursor > 0 {
+                state.rename_cursor -= 1;
+                state.rename_name.remove(state.rename_cursor);
+            }
+            None
+        }
+        KeyCode::Left => {
+            if state.rename_cursor > 0 {
+                state.rename_cursor -= 1;
+            }
+            None
+        }
+        KeyCode::Right => {
+            if state.rename_cursor < state.rename_name.len() {
+                state.rename_cursor += 1;
+            }
+            None
+        }
+        KeyCode::Home => {
+            state.rename_cursor = 0;
+            None
+        }
+        KeyCode::End => {
+            state.rename_cursor = state.rename_name.len();
+            None
+        }
+        KeyCode::Esc => {
+            state.focus = FocusTarget::List;
+            state.rename_name.clear();
+            state.rename_cursor = 0;
+            state.rename_target.clear();
+            None
+        }
+        KeyCode::Enter => {
+            let new_name = state.rename_name.trim().to_string();
+            if new_name.is_empty() {
+                return None;
+            }
+            let from = std::path::Path::new(&state.rename_target);
+            let to = state.current_dir.join(&new_name);
+            match fs::rename_file(from, &to) {
+                Ok(()) => {
+                    state.focus = FocusTarget::List;
+                    state.rename_name.clear();
+                    state.rename_cursor = 0;
+                    state.rename_target.clear();
+                    state.refresh_entries();
+                }
+                Err(e) => {
+                    state.error = Some(e);
+                }
+            }
+            None
         }
         _ => None,
     }
@@ -229,7 +333,6 @@ fn create_new_folder(state: &mut FileBrowserState) {
         Ok(()) => {
             if let Ok(new_entries) = fs::list_dir(&state.current_dir) {
                 state.entries = new_entries;
-                // Select the newly created folder
                 state.selected = state
                     .entries
                     .iter()

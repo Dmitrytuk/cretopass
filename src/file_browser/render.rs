@@ -29,19 +29,27 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
 
     let inner = block.inner(overlay_area);
 
-    // Split the inner area: path bar, list, optional input, help bar
+    // Split the inner area: path bar, list, optional inputs/confirm, help bar
     let mut constraints = vec![
         Constraint::Length(1), // path bar
         Constraint::Min(1),    // file list
-        Constraint::Length(2), // options bar (filter + search)
+        Constraint::Length(2), // options bar (filter + search + actions)
     ];
 
     let has_error = state.error.is_some();
     let has_file_input =
         state.mode == FileBrowserMode::CreateFile && state.focus == FocusTarget::Input;
+    let has_rename = state.focus == FocusTarget::Rename;
+    let has_delete_confirm = state.confirm_delete.is_some();
 
     if has_file_input {
         constraints.push(Constraint::Length(1)); // file name input
+    }
+    if has_rename {
+        constraints.push(Constraint::Length(1)); // rename input
+    }
+    if has_delete_confirm {
+        constraints.push(Constraint::Length(1)); // delete confirmation
     }
     if has_error {
         constraints.push(Constraint::Length(1)); // error bar
@@ -56,6 +64,14 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
     let mut next = 3;
     if has_file_input {
         render_name_input(frame, layout[next], state);
+        next += 1;
+    }
+    if has_rename {
+        render_rename_input(frame, layout[next], state);
+        next += 1;
+    }
+    if has_delete_confirm {
+        render_delete_confirmation(frame, layout[next], state);
         next += 1;
     }
     if has_error {
@@ -193,15 +209,29 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
         Style::default().fg(Color::DarkGray),
     ));
 
+    // Show rename/delete hints when a PWD-marked file is selected
+    if let Some(entry) = state.entries.get(state.selected) {
+        if entry.is_age_file && !entry.is_dir {
+            spans.push(Span::styled(
+                " [r]rename ",
+                Style::default().fg(Color::DarkGray),
+            ));
+            spans.push(Span::styled(
+                " [d]delete ",
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+    }
+
     if state.mode == FileBrowserMode::CreateFile {
         if state.focus == FocusTarget::Input {
             spans.push(Span::styled(
-                " [Tab]list ",
+                " [N]list ",
                 Style::default().fg(Color::DarkGray),
             ));
         } else {
             spans.push(Span::styled(
-                " [Tab]name ",
+                " [N]name ",
                 Style::default().fg(Color::DarkGray),
             ));
         }
@@ -237,6 +267,62 @@ fn render_name_input(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     ]);
 
     frame.render_widget(Paragraph::new(Text::from(vec![line])), area);
+}
+
+fn render_rename_input(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
+    let name = &state.rename_name;
+    let cursor = state.rename_cursor;
+
+    let before = &name[..cursor.min(name.len())];
+    let at = name
+        .get(cursor..)
+        .and_then(|s| s.chars().next())
+        .map(|c| c.to_string())
+        .unwrap_or_default();
+    let after = &name[cursor + at.len()..];
+
+    let cursor_char = if at.is_empty() { " " } else { &at };
+
+    let line = Line::from(vec![
+        Span::styled(" Rename: ", Style::default().fg(Color::Cyan)),
+        Span::raw(before.to_string()),
+        Span::styled(
+            cursor_char.to_string(),
+            Style::default().bg(Color::White).fg(Color::Black),
+        ),
+        Span::raw(after.to_string()),
+        Span::raw("  "),
+        Span::styled("Enter:confirm", Style::default().fg(Color::DarkGray)),
+        Span::raw("  "),
+        Span::styled("Esc:cancel", Style::default().fg(Color::DarkGray)),
+    ]);
+
+    frame.render_widget(Paragraph::new(Text::from(vec![line])), area);
+}
+
+fn render_delete_confirmation(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
+    if let Some(ref path_str) = state.confirm_delete {
+        let filename = std::path::Path::new(path_str)
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or(std::borrow::Cow::Borrowed(path_str));
+
+        let text = Line::from(vec![
+            Span::styled(
+                format!(" Delete {}? ", filename),
+                Style::default()
+                    .bg(Color::Red)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " (y/N) ",
+                Style::default().bg(Color::Red).fg(Color::DarkGray),
+            ),
+        ]);
+
+        frame.render_widget(Paragraph::new(text), area);
+    }
 }
 
 fn render_error_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
@@ -345,10 +431,10 @@ mod tests {
             text.contains("Create New Secret File"),
             "title mismatch:\n{text}"
         );
-        // Tab hint should mention switching to name input
+        // N hint should mention switching to name input
         assert!(
-            text.contains("[Tab]name"),
-            "should show Tab hint to switch to name input:\n{text}"
+            text.contains("[N]name"),
+            "should show N hint to switch to name input:\n{text}"
         );
     }
 

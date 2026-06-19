@@ -81,6 +81,16 @@ pub fn create_dir(path: &Path) -> Result<(), String> {
     fs::create_dir_all(path).map_err(|e| format!("Cannot create directory: {e}"))
 }
 
+/// Deletes a file.
+pub fn delete_file(path: &Path) -> Result<(), String> {
+    fs::remove_file(path).map_err(|e| format!("Cannot delete file: {e}"))
+}
+
+/// Renames a file from `from` to `to`.
+pub fn rename_file(from: &Path, to: &Path) -> Result<(), String> {
+    fs::rename(from, to).map_err(|e| format!("Cannot rename file: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,5 +176,44 @@ mod tests {
         create_dir(path).unwrap();
         assert!(path.is_dir());
         let _ = fs::remove_dir_all(Path::new("/tmp/a"));
+    }
+
+    #[test]
+    fn test_delete_file_ok() {
+        let path = Path::new("/tmp/__test_delete_file__.tmp");
+        let _ = fs::remove_file(path);
+        fs::write(path, b"test").unwrap();
+        assert!(path.exists());
+        delete_file(path).unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_delete_file_nonexistent() {
+        let path = Path::new("/tmp/__test_delete_nonexistent__.tmp");
+        let _ = fs::remove_file(path);
+        assert!(delete_file(path).is_err());
+    }
+
+    #[test]
+    fn test_rename_file_ok() {
+        let from = Path::new("/tmp/__test_rename_from__.tmp");
+        let to = Path::new("/tmp/__test_rename_to__.tmp");
+        let _ = fs::remove_file(from);
+        let _ = fs::remove_file(to);
+        fs::write(from, b"data").unwrap();
+        rename_file(from, to).unwrap();
+        assert!(!from.exists());
+        assert!(to.exists());
+        let _ = fs::remove_file(to);
+    }
+
+    #[test]
+    fn test_rename_file_nonexistent_from() {
+        let from = Path::new("/tmp/__test_rename_nonexistent__.tmp");
+        let to = Path::new("/tmp/__test_rename_target__.tmp");
+        let _ = fs::remove_file(from);
+        let _ = fs::remove_file(to);
+        assert!(rename_file(from, to).is_err());
     }
 }

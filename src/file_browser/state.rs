@@ -19,6 +19,7 @@ pub enum FileFilter {
 pub enum FocusTarget {
     List,
     Input,
+    Rename,
 }
 
 /// A single entry in the file listing.
@@ -54,6 +55,10 @@ pub struct FileBrowserState {
     pub creating_cursor: usize,
     pub focus: FocusTarget,
     pub error: Option<String>,
+    pub rename_name: String,
+    pub rename_cursor: usize,
+    pub rename_target: String,
+    pub confirm_delete: Option<String>,
 }
 
 impl FileBrowserState {
@@ -73,6 +78,10 @@ impl FileBrowserState {
             creating_cursor: 0,
             focus: FocusTarget::List,
             error: None,
+            rename_name: String::new(),
+            rename_cursor: 0,
+            rename_target: String::new(),
+            confirm_delete: None,
         }
     }
 
@@ -98,6 +107,21 @@ impl FileBrowserState {
             })
             .map(|(i, _)| i)
             .collect()
+    }
+
+    /// Reloads entries from the current directory, preserving selection if possible.
+    pub fn refresh_entries(&mut self) {
+        let selected_name = self.entries.get(self.selected).map(|e| e.name.clone());
+        match super::fs::list_dir(&self.current_dir) {
+            Ok(new_entries) => {
+                self.entries = new_entries;
+                self.selected = selected_name
+                    .and_then(|name| self.entries.iter().position(|e| e.name == name))
+                    .unwrap_or(0);
+                self.clamp_selection();
+            }
+            Err(e) => self.error = Some(e),
+        }
     }
 
     /// Clamps `selected` to a valid filtered index.
