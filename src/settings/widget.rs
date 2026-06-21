@@ -1,4 +1,3 @@
-use std::fs;
 use std::io;
 use std::path::PathBuf;
 
@@ -10,6 +9,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{backend::Backend, Frame, Terminal};
 
 use crate::file_browser::{self, FileBrowserAction, FileBrowserMode, FileBrowserState};
+use crate::file_handling;
 use crate::settings::active_file::ActiveFileState;
 use crate::settings::utils::{self, AppSettings};
 
@@ -74,7 +74,7 @@ impl SettingsState {
         let settings = utils::load_settings();
         let modal = if settings.open_last_opened_file_on_startup {
             settings.last_opened_file.as_ref().and_then(|path| {
-                utils::validate_encrypted_file(path).ok().map(|data| {
+                file_handling::validate_encrypted_file(path).ok().map(|data| {
                     SettingsModal::PassphraseInput {
                         file_path: path.clone(),
                         file_data: Some(data),
@@ -229,9 +229,9 @@ fn handle_settings_key<B: Backend>(
                         }
                     }
 
-                    match utils::validate_encrypted_file(&file_path) {
+                    match file_handling::validate_encrypted_file(&file_path) {
                         Err(e) => {
-                            state.modal = Some(SettingsModal::Alert { message: e });
+                            state.modal = Some(SettingsModal::Alert { message: format!("{e}") });
                         }
                         Ok(data) => {
                             state.modal = Some(SettingsModal::PassphraseInput {
@@ -311,11 +311,7 @@ fn handle_file_browser_key<B: Backend>(
             let creating = modal.mode == FileBrowserMode::CreateFile;
 
             if creating {
-                let probe_path = format!("{}.tmp", path);
-                let writable = fs::write(&probe_path, b"").is_ok();
-                let _ = fs::remove_file(&probe_path);
-
-                if writable {
+                if file_handling::probe_path_writable(&path).is_ok() {
                     state.modal = Some(SettingsModal::PassphraseInput {
                         file_path: path,
                         file_data: None,
@@ -329,9 +325,9 @@ fn handle_file_browser_key<B: Backend>(
                     });
                 }
             } else {
-                match utils::validate_encrypted_file(&path) {
+                match file_handling::validate_encrypted_file(&path) {
                     Err(e) => {
-                        state.modal = Some(SettingsModal::Alert { message: e });
+                        state.modal = Some(SettingsModal::Alert { message: format!("{e}") });
                     }
                     Ok(data) => {
                         state.modal = Some(SettingsModal::PassphraseInput {
@@ -679,7 +675,7 @@ fn handle_change_pw_input_key<B: Backend>(
                         let new_pass_bytes = new_pass.into_bytes();
                         state.status = Some("Saving...");
                         terminal.draw(|f| render(f, f.area(), state))?;
-                        match utils::save_tree(node, path, &new_pass_bytes) {
+                        match file_handling::save_tree(node, path, &new_pass_bytes) {
                             Err(e) => {
                                 state.status = None;
                                 state.modal = Some(SettingsModal::ChangePwInput {
@@ -730,10 +726,10 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
             state.status = Some("Saving...");
             terminal.draw(|f| render(f, f.area(), state))?;
-            match utils::create_secret_file(&file_path, "") {
+            match file_handling::create_secret_file(&file_path, "") {
                 Err(e) => {
                     state.status = None;
-                    state.modal = Some(SettingsModal::Alert { message: e });
+                    state.modal = Some(SettingsModal::Alert { message: format!("{e}") });
                 }
                 Ok(node) => {
                     state.status = None;
@@ -948,7 +944,7 @@ fn handle_modal_key<B: Backend>(
                 Some(data) => {
                     state.status = Some("Loading...");
                     terminal.draw(|f| render(f, f.area(), state))?;
-                    match utils::decrypt_to_node(&data, &passphrase) {
+                    match file_handling::decrypt_to_node(&data, &passphrase) {
                         Err(e) => {
                             state.status = None;
                             state.modal = Some(SettingsModal::PassphraseInput {
@@ -990,10 +986,10 @@ fn handle_modal_key<B: Backend>(
                     }
                     state.status = Some("Saving...");
                     terminal.draw(|f| render(f, f.area(), state))?;
-                    match utils::create_secret_file(&file_path, &passphrase) {
+                    match file_handling::create_secret_file(&file_path, &passphrase) {
                         Err(e) => {
                             state.status = None;
-                            state.modal = Some(SettingsModal::Alert { message: e });
+                            state.modal = Some(SettingsModal::Alert { message: format!("{e}") });
                         }
                         Ok(node) => {
                             state.status = None;

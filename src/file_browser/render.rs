@@ -307,7 +307,7 @@ mod tests {
     use ratatui::Terminal;
 
     use super::*;
-    use crate::file_browser::fs;
+    use crate::file_handling;
 
     /// Helper to create a terminal for testing.
     fn make_terminal() -> Terminal<TestBackend> {
@@ -317,7 +317,7 @@ mod tests {
     /// Helper to populate state with entries from /tmp (known to exist).
     fn populate_tmp(state: &mut FileBrowserState) {
         state.current_dir = std::path::PathBuf::from("/tmp");
-        state.entries = fs::list_dir(std::path::Path::new("/tmp")).unwrap();
+        state.entries = file_handling::list_dir(std::path::Path::new("/tmp")).unwrap();
         state.selected = 0;
     }
 
@@ -469,7 +469,7 @@ mod tests {
         let empty_dir = std::path::Path::new("/tmp/__test_empty_xyz__");
         let _ = std::fs::create_dir_all(empty_dir);
         state.entries =
-            fs::list_dir(empty_dir).unwrap();
+            file_handling::list_dir(empty_dir).unwrap();
         state.filter = FileFilter::PwdKeeperOnly;
         let text = render_to_text(&state);
         // Searching for something non-existent
@@ -529,7 +529,7 @@ mod tests {
 
         let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
         state.current_dir = dir.to_path_buf();
-        state.entries = fs::list_dir(dir).unwrap();
+        state.entries = file_handling::list_dir(dir).unwrap();
         state.selected = state
             .entries
             .iter()

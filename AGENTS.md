@@ -45,18 +45,18 @@ Password field values display as `*****` in the detail overlay and when unfocuse
   - `src/tree/mod.rs`: module decl
   - `src/tree/node.rs`: Node struct
   - `src/tree/widget.rs`: `TreeState`, `InputMode`, `TreeWidget` — also `current_node_ref()`, `find_node_ref()`
-  - `src/tree/app_tree.rs`: event loop, key handlers, overlay rendering — uses merged `handle_form()` (replaces `handle_adding`/`handle_editing`), `handle_text_edit()` helper, `render_file_input()`, `current_node_ref()` for borrow-safe subtree access
+  - `src/tree/app_tree.rs`: event loop, key handlers, overlay rendering — uses `file_handling::save_tree` for auto-save
   - `src/settings.rs`: module root, re-exports `ui`, `active_file`, and `utils`
   - `src/settings/ui.rs`: settings GUI — `SettingsState`, `run()`, `render()`
-  - `src/settings/widget.rs`: `handle_modal_key` dispatch, 5 per-modal handlers (`handle_app_settings_key`, `handle_delete_confirm_key`, `handle_change_pw_confirm_key`, `handle_change_pw_input_key`, `handle_confirm_no_passphrase_key`), cursor helpers from `crate::cursor`
+  - `src/settings/widget.rs`: `handle_modal_key` dispatch, 5 per-modal handlers, uses `file_handling` for all I/O
   - `src/settings/active_file.rs`: opened-file state — path, passphrase, Node
-  - `src/settings/utils.rs`: orchestration — file validation, decrypt, save, recents, file dialog, settings persistence
-  - `src/file_browser.rs`: module root
-  - `src/file_browser/state.rs`: `FileBrowserState`, `FileBrowserMode`
-  - `src/file_browser/render.rs`: all file browser rendering, `render_file_input()`
-  - `src/file_browser/handler.rs`: file browser key handling — `handle_text_edit()` helper, input/rename handlers
-  - `src/file_browser/fs.rs`: filesystem operations, `is_age_file()` header check
-  - `src/file_handling/mod.rs`: JSON serialization, file I/O
+  - `src/settings/utils.rs`: `AppSettings`, `config_dir`, `open_file_dialog`, `push_recent_file`, `save_settings`/`load_settings` (rkyv format, raw I/O via `file_handling`)
+  - `src/file_browser.rs`: module root, re-exports `FileEntry` from `file_handling`
+  - `src/file_browser/state.rs`: `FileBrowserState`, `FileBrowserMode` — uses `file_handling::list_dir`
+  - `src/file_browser/render.rs`: all file browser rendering
+  - `src/file_browser/handler.rs`: file browser key handling — uses `file_handling` for all I/O
+  - `src/file_handling/error.rs`: `FileHandlingError` enum — wraps `io`, `serde`, `crypt` errors + domain errors
+  - `src/file_handling/mod.rs`: ALL filesystem operations — JSON serde, raw I/O, encrypted file ops, directory listing, age-header detection, file create/delete/rename, writability probe, `FileEntry` struct. Uses `crypt` internally. Only file in the codebase importing `std::fs`.
   - `src/crypt/mod.rs`: age-based encrypt/decrypt
 - **Node**: carries `id: Uuid`, `name`, `description`, `extra_fields: Vec<ExtraField>`, `children: Vec<Node>`
 - **ExtraField/FieldType**: `{field_type: Login|Password|Custom(String), value: String}` — `display_value()` masks Password as `*****`

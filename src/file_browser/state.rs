@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::file_handling::FileEntry;
+
 /// Whether the file browser is used to open an existing file or create a new one.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FileBrowserMode {
@@ -20,15 +22,6 @@ pub enum FocusTarget {
     List,
     Input,
     Rename,
-}
-
-/// A single entry in the file listing.
-#[derive(Debug, Clone)]
-pub struct FileEntry {
-    pub name: String,
-    pub path: PathBuf,
-    pub is_dir: bool,
-    pub is_age_file: bool,
 }
 
 /// Result returned by the key handler when the user completes or cancels.
@@ -73,7 +66,7 @@ impl FileBrowserState {
         Self {
             mode,
             current_dir: home.clone(),
-            entries: super::fs::list_dir(&home).unwrap_or_default(),
+            entries: crate::file_handling::list_dir(&home).unwrap_or_default(),
             selected: 0,
             scroll: 0,
             filter: FileFilter::All,
@@ -123,7 +116,7 @@ impl FileBrowserState {
     /// Reloads entries from the current directory, preserving selection if possible.
     pub fn refresh_entries(&mut self) {
         let selected_name = self.entries.get(self.selected).map(|e| e.name.clone());
-        match super::fs::list_dir(&self.current_dir) {
+        match crate::file_handling::list_dir(&self.current_dir) {
             Ok(new_entries) => {
                 self.entries = new_entries;
                 self.selected = selected_name
@@ -131,7 +124,7 @@ impl FileBrowserState {
                     .unwrap_or(0);
                 self.clamp_selection();
             }
-            Err(e) => self.error = Some(e),
+            Err(e) => self.error = Some(format!("{e}")),
         }
     }
 
