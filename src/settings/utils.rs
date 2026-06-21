@@ -433,7 +433,7 @@ mod tests {
         assert_eq!(decoded.extra_fields[0].value, "admin");
 
         let _ = fs::remove_file(&path);
-        let _ = fs::remove_file(&format!("{}.bak", path));
+        let _ = fs::remove_file(format!("{}.bak", path));
     }
 
     #[test]
@@ -441,7 +441,7 @@ mod tests {
         // Save when there is no existing file — backup step should no-op
         let path = format!("/tmp/test_no_backup_{}.age", uuid::Uuid::new_v4());
         let _ = fs::remove_file(&path);
-        let _ = fs::remove_file(&format!("{}.bak", path));
+        let _ = fs::remove_file(format!("{}.bak", path));
 
         let node = Node::new("New", "first save");
         save_tree(&node, &path, b"pass").unwrap();
@@ -449,7 +449,7 @@ mod tests {
         assert!(fs::metadata(&path).is_ok());
 
         let _ = fs::remove_file(&path);
-        let _ = fs::remove_file(&format!("{}.bak", path));
+        let _ = fs::remove_file(format!("{}.bak", path));
     }
 
     fn clean_settings_file() {
@@ -572,10 +572,12 @@ mod tests {
     fn test_settings_roundtrip_display_full_path_false() {
         clean_settings_file();
 
-        let mut settings = AppSettings::default();
-        settings.display_full_path = false;
-        settings.open_last_opened_file_on_startup = false;
-        settings.recent_files.push("/a.age".to_string());
+        let settings = AppSettings {
+            recent_files: vec!["/a.age".to_string()],
+            display_full_path: false,
+            open_last_opened_file_on_startup: false,
+            ..Default::default()
+        };
         save_settings(&settings).unwrap();
 
         let loaded = load_settings();

@@ -289,7 +289,7 @@ fn handle_adding(key: event::KeyEvent, state: &mut TreeState) {
     };
 
     let total = total_fields(&extra_fields);
-    let is_on_extra = extra_field_index(field).map_or(false, |i| i < extra_fields.len());
+    let is_on_extra = extra_field_index(field).is_some_and(|i| i < extra_fields.len());
     let is_on_add_button = field == 2 + extra_fields.len();
     let active_len = active_len_for_field(&name, &desc, &extra_fields, field);
 
@@ -525,7 +525,7 @@ fn handle_editing(key: event::KeyEvent, state: &mut TreeState) {
     };
 
     let total = total_fields(&extra_fields);
-    let is_on_extra = extra_field_index(field).map_or(false, |i| i < extra_fields.len());
+    let is_on_extra = extra_field_index(field).is_some_and(|i| i < extra_fields.len());
     let is_on_add_button = field == 2 + extra_fields.len();
     let active_len = active_len_for_field(&name, &desc, &extra_fields, field);
 
@@ -1329,7 +1329,7 @@ fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         InputMode::Detail { ref alert, .. } if alert.is_some() => "Press any key to continue",
         InputMode::Detail { .. } => "j/k:navigate  Enter:copy  i:edit  Esc:close",
         InputMode::Editing { extra_fields, field, .. } => {
-            let is_on_extra = extra_field_index(*field).map_or(false, |i| i < extra_fields.len());
+            let is_on_extra = extra_field_index(*field).is_some_and(|i| i < extra_fields.len());
             if is_on_extra {
                 "Tab:switch  Del:delete  Enter:save  Esc:cancel"
             } else if *field == 2 + extra_fields.len() {
@@ -1339,7 +1339,7 @@ fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
             }
         }
         InputMode::Adding { extra_fields, field, .. } => {
-            let is_on_extra = extra_field_index(*field).map_or(false, |i| i < extra_fields.len());
+            let is_on_extra = extra_field_index(*field).is_some_and(|i| i < extra_fields.len());
             if is_on_extra {
                 "Tab:switch  Del:delete  Enter:save  Esc:cancel"
             } else if *field == 2 + extra_fields.len() {
@@ -1458,6 +1458,7 @@ fn render_extra_field_line(
     Line::from(cursor_field_spans(&prefix, &display_val, cursor, is_active))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_edit_overlay_common(
     frame: &mut Frame,
     area: Rect,

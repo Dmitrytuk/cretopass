@@ -63,6 +63,12 @@ pub struct SettingsState {
     pub status: Option<&'static str>,
 }
 
+impl Default for SettingsState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SettingsState {
     pub fn new() -> Self {
         let settings = utils::load_settings();
@@ -179,7 +185,7 @@ fn handle_settings_key<B: Backend>(
                     state
                         .active_file
                         .as_ref()
-                        .and_then(|af| af.path.as_ref().map(|p| PathBuf::from(p))),
+                        .and_then(|af| af.path.as_ref().map(PathBuf::from)),
                 );
                 state.modal = Some(SettingsModal::FileBrowser(fb));
             } else if idx == 1 {
@@ -188,7 +194,7 @@ fn handle_settings_key<B: Backend>(
                     state
                         .active_file
                         .as_ref()
-                        .and_then(|af| af.path.as_ref().map(|p| PathBuf::from(p))),
+                        .and_then(|af| af.path.as_ref().map(PathBuf::from)),
                 );
                 state.modal = Some(SettingsModal::FileBrowser(fb));
             } else if idx == 2 {

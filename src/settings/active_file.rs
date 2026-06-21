@@ -14,6 +14,12 @@ pub struct ActiveFileState {
     pub node: Option<Node>,
 }
 
+impl Default for ActiveFileState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ActiveFileState {
     pub fn new() -> Self {
         Self {

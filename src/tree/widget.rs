@@ -370,7 +370,7 @@ impl TreeState {
     }
 }
 
-fn find_node<'a>(root: &'a Node, id: Uuid) -> Option<Node> {
+fn find_node(root: &Node, id: Uuid) -> Option<Node> {
     if root.id == id {
         return Some(root.clone());
     }
@@ -438,7 +438,7 @@ fn insert_after(root: &mut Node, target_id: Uuid, node: Node) -> bool {
     false
 }
 
-fn find_parent_mut<'a>(root: &'a mut Node, id: Uuid) -> Option<&'a mut Node> {
+fn find_parent_mut(root: &mut Node, id: Uuid) -> Option<&mut Node> {
     if root.children.iter().any(|c| c.id == id) {
         return Some(root);
     }
