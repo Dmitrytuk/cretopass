@@ -8,6 +8,7 @@ pub mod tree;
 pub mod settings;
 pub mod file_handling;
 pub mod crypt;
+pub mod cursor;
 pub mod file_browser;
 
 pub use tree::node::{ExtraField, FieldType, Node};

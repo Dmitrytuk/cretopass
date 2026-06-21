@@ -4,6 +4,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
+use crate::cursor::cursor_field_spans;
 use super::state::{FileBrowserMode, FileBrowserState, FileFilter, FocusTarget};
 
 const DEFAULT_HEIGHT: u16 = 18;
@@ -63,11 +64,25 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
 
     let mut next = 3;
     if has_file_input {
-        render_name_input(frame, layout[next], state);
+        render_file_input(
+            frame,
+            layout[next],
+            " Name: ",
+            &state.creating_name,
+            state.creating_cursor,
+            &["Enter:confirm"],
+        );
         next += 1;
     }
     if has_rename {
-        render_rename_input(frame, layout[next], state);
+        render_file_input(
+            frame,
+            layout[next],
+            " Rename: ",
+            &state.rename_name,
+            state.rename_cursor,
+            &["Enter:confirm", "Esc:cancel"],
+        );
         next += 1;
     }
     if has_delete_confirm {
@@ -242,64 +257,13 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     frame.render_widget(Paragraph::new(Text::from(Line::from(spans))), area);
 }
 
-fn render_name_input(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
-    let name = &state.creating_name;
-    let cursor = state.creating_cursor;
-
-    let before = &name[..cursor.min(name.len())];
-    let at = name
-        .get(cursor..)
-        .and_then(|s| s.chars().next())
-        .map(|c| c.to_string())
-        .unwrap_or_default();
-    let after = &name[cursor + at.len()..];
-
-    let cursor_char = if at.is_empty() { " " } else { &at };
-
-    let line = Line::from(vec![
-        Span::styled(" Name: ", Style::default().fg(Color::Cyan)),
-        Span::raw(before.to_string()),
-        Span::styled(
-            cursor_char.to_string(),
-            Style::default().bg(Color::White).fg(Color::Black),
-        ),
-        Span::raw(after.to_string()),
-        Span::raw("  "),
-        Span::styled("Enter:confirm", Style::default().fg(Color::DarkGray)),
-    ]);
-
-    frame.render_widget(Paragraph::new(Text::from(vec![line])), area);
-}
-
-fn render_rename_input(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
-    let name = &state.rename_name;
-    let cursor = state.rename_cursor;
-
-    let before = &name[..cursor.min(name.len())];
-    let at = name
-        .get(cursor..)
-        .and_then(|s| s.chars().next())
-        .map(|c| c.to_string())
-        .unwrap_or_default();
-    let after = &name[cursor + at.len()..];
-
-    let cursor_char = if at.is_empty() { " " } else { &at };
-
-    let line = Line::from(vec![
-        Span::styled(" Rename: ", Style::default().fg(Color::Cyan)),
-        Span::raw(before.to_string()),
-        Span::styled(
-            cursor_char.to_string(),
-            Style::default().bg(Color::White).fg(Color::Black),
-        ),
-        Span::raw(after.to_string()),
-        Span::raw("  "),
-        Span::styled("Enter:confirm", Style::default().fg(Color::DarkGray)),
-        Span::raw("  "),
-        Span::styled("Esc:cancel", Style::default().fg(Color::DarkGray)),
-    ]);
-
-    frame.render_widget(Paragraph::new(Text::from(vec![line])), area);
+fn render_file_input(frame: &mut Frame, area: Rect, label: &str, text: &str, cursor: usize, hints: &[&str]) {
+    let mut spans = cursor_field_spans(label, text, cursor, true);
+    for hint in hints {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(*hint, Style::default().fg(Color::DarkGray)));
+    }
+    frame.render_widget(Paragraph::new(Text::from(vec![Line::from(spans)])), area);
 }
 
 fn render_delete_confirmation(frame: &mut Frame, area: Rect, state: &FileBrowserState) {

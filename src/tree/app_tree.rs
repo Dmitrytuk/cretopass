@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 
+use crate::cursor::{cursor_field_spans, selected_span};
 use crate::settings::utils::save_tree;
 use crate::tree::node::{ExtraField, FieldType};
 use crate::tree::widget::{InputMode, TreeState, TreeWidget};
@@ -33,8 +34,7 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) ->
                         state.cut_selected();
                     }
                 }
-                InputMode::Adding { .. } => handle_adding(key, state),
-                InputMode::Editing { .. } => handle_editing(key, state),
+                InputMode::Adding { .. } | InputMode::Editing { .. } => handle_form(key, state),
                 InputMode::SelectFieldType { .. } => handle_select_field_type(key, state),
                 InputMode::CustomFieldName { .. } => handle_custom_field_name(key, state),
                 InputMode::ConfirmDeleteField { .. } => handle_confirm_delete(key, state),
@@ -42,14 +42,16 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) ->
                 InputMode::Detail { .. } => handle_detail(key, state),
             }
 
-            let path = state.active_file_path.clone();
-            let passphrase = state.active_file_passphrase.clone();
             if state.dirty {
                 state.status = Some("Saving...");
                 terminal.draw(|f| ui(f, state))?;
-                if let Some(ref p) = path {
+                if let Some(ref p) = state.active_file_path {
                     state.dirty = false;
-                    if let Err(e) = save_tree(&state.root, p, &passphrase) {
+                    if let Err(e) = save_tree(
+                        &state.root,
+                        p,
+                        &state.active_file_passphrase,
+                    ) {
                         eprintln!("Save failed: {e}");
                     }
                 }
@@ -270,8 +272,9 @@ fn build_editing_mode(
     }
 }
 
-fn handle_adding(key: event::KeyEvent, state: &mut TreeState) {
-    let (name, desc, extra_fields, field, cursor) = match &state.mode {
+fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
+    let is_adding = matches!(state.mode, InputMode::Adding { .. });
+    let (node_id, name, desc, extra_fields, field, cursor) = match &state.mode {
         InputMode::Adding {
             name,
             desc,
@@ -279,233 +282,13 @@ fn handle_adding(key: event::KeyEvent, state: &mut TreeState) {
             field,
             cursor,
         } => (
+            None,
             name.clone(),
             desc.clone(),
             extra_fields.clone(),
             *field,
             *cursor,
         ),
-        _ => return,
-    };
-
-    let total = total_fields(&extra_fields);
-    let is_on_extra = extra_field_index(field).is_some_and(|i| i < extra_fields.len());
-    let is_on_add_button = field == 2 + extra_fields.len();
-    let active_len = active_len_for_field(&name, &desc, &extra_fields, field);
-
-    match key.code {
-        KeyCode::Delete if is_on_extra => {
-            state.mode = InputMode::ConfirmDeleteField {
-                node_id: None,
-                name,
-                desc,
-                extra_fields,
-                field,
-                cursor,
-                target_index: field - 2,
-            };
-        }
-        KeyCode::Enter if is_on_add_button => {
-            state.mode = InputMode::SelectFieldType {
-                node_id: None,
-                name,
-                desc,
-                extra_fields,
-                field,
-                cursor,
-                selected_type: 0,
-            };
-        }
-        KeyCode::Enter => {
-            state.add_child_to_selected(name, desc, extra_fields);
-            state.mode = InputMode::Normal;
-        }
-        KeyCode::Esc => {
-            if adding_has_changes(&name, &desc, &extra_fields) {
-                state.mode = InputMode::ConfirmDiscardChanges {
-                    node_id: None,
-                    name,
-                    desc,
-                    extra_fields,
-                    field,
-                    cursor,
-                };
-            } else {
-                state.mode = InputMode::Normal;
-            }
-        }
-        KeyCode::Tab | KeyCode::Down => {
-            let new_field = (field + 1) % total;
-            let new_cursor = cursor_on_new_field(new_field, &name, &desc, &extra_fields);
-            state.mode = InputMode::Adding {
-                name,
-                desc,
-                extra_fields,
-                field: new_field,
-                cursor: new_cursor,
-            };
-        }
-        KeyCode::Up => {
-            let new_field = (field + total - 1) % total;
-            let new_cursor = cursor_on_new_field(new_field, &name, &desc, &extra_fields);
-            state.mode = InputMode::Adding {
-                name,
-                desc,
-                extra_fields,
-                field: new_field,
-                cursor: new_cursor,
-            };
-        }
-        KeyCode::Left if !is_on_add_button => {
-            let new_cursor = cursor.saturating_sub(1);
-            state.mode = InputMode::Adding {
-                name,
-                desc,
-                extra_fields,
-                field,
-                cursor: new_cursor,
-            };
-        }
-        KeyCode::Right if !is_on_add_button => {
-            let new_cursor = (cursor + 1).min(active_len);
-            state.mode = InputMode::Adding {
-                name,
-                desc,
-                extra_fields,
-                field,
-                cursor: new_cursor,
-            };
-        }
-        KeyCode::Home if !is_on_add_button => {
-            state.mode = InputMode::Adding {
-                name,
-                desc,
-                extra_fields,
-                field,
-                cursor: 0,
-            };
-        }
-        KeyCode::End if !is_on_add_button => {
-            state.mode = InputMode::Adding {
-                name,
-                desc,
-                extra_fields,
-                field,
-                cursor: active_len,
-            };
-        }
-        KeyCode::Backspace if !is_on_add_button => {
-            if cursor == 0 {
-                state.mode = InputMode::Adding {
-                    name,
-                    desc,
-                    extra_fields,
-                    field,
-                    cursor,
-                };
-                return;
-            }
-            let (new_name, new_desc, new_extra_fields, new_cursor) = if field == 0 {
-                let mut n = name;
-                n.remove(cursor - 1);
-                (n, desc, extra_fields, cursor - 1)
-            } else if field == 1 {
-                let mut d = desc;
-                d.remove(cursor - 1);
-                (name, d, extra_fields, cursor - 1)
-            } else if is_on_extra {
-                let mut ef = extra_fields;
-                let idx = field - 2;
-                ef[idx].value.remove(cursor - 1);
-                (name, desc, ef, cursor - 1)
-            } else {
-                (name, desc, extra_fields, cursor)
-            };
-            state.mode = InputMode::Adding {
-                name: new_name,
-                desc: new_desc,
-                extra_fields: new_extra_fields,
-                field,
-                cursor: new_cursor,
-            };
-        }
-        KeyCode::Delete if !is_on_add_button => {
-            let total = total_fields(&extra_fields);
-            let is_on_extra = field >= 2 && field < total - 1;
-            let active_len = active_len_for_field(&name, &desc, &extra_fields, field);
-            if cursor >= active_len {
-                state.mode = InputMode::Adding {
-                    name,
-                    desc,
-                    extra_fields,
-                    field,
-                    cursor,
-                };
-                return;
-            }
-            let (new_name, new_desc, new_extra_fields, new_cursor) = if field == 0 {
-                let mut n = name;
-                n.remove(cursor);
-                (n, desc, extra_fields, cursor)
-            } else if field == 1 {
-                let mut d = desc;
-                d.remove(cursor);
-                (name, d, extra_fields, cursor)
-            } else if is_on_extra {
-                let mut ef = extra_fields;
-                let idx = field - 2;
-                ef[idx].value.remove(cursor);
-                (name, desc, ef, cursor)
-            } else {
-                (name, desc, extra_fields, cursor)
-            };
-            state.mode = InputMode::Adding {
-                name: new_name,
-                desc: new_desc,
-                extra_fields: new_extra_fields,
-                field,
-                cursor: new_cursor,
-            };
-        }
-        KeyCode::Char(c) if !is_on_add_button => {
-            let (new_name, new_desc, new_extra_fields, new_cursor) = if field == 0 {
-                let mut n = name;
-                n.insert(cursor, c);
-                (n, desc, extra_fields, cursor + 1)
-            } else if field == 1 {
-                let mut d = desc;
-                d.insert(cursor, c);
-                (name, d, extra_fields, cursor + 1)
-            } else if is_on_extra {
-                let mut ef = extra_fields;
-                let idx = field - 2;
-                ef[idx].value.insert(cursor, c);
-                (name, desc, ef, cursor + 1)
-            } else {
-                (name, desc, extra_fields, cursor)
-            };
-            state.mode = InputMode::Adding {
-                name: new_name,
-                desc: new_desc,
-                extra_fields: new_extra_fields,
-                field,
-                cursor: new_cursor,
-            };
-        }
-        _ => {
-            state.mode = InputMode::Adding {
-                name,
-                desc,
-                extra_fields,
-                field,
-                cursor,
-            };
-        }
-    }
-}
-
-fn handle_editing(key: event::KeyEvent, state: &mut TreeState) {
-    let (node_id, name, desc, extra_fields, field, cursor) = match &state.mode {
         InputMode::Editing {
             node_id,
             name,
@@ -514,7 +297,7 @@ fn handle_editing(key: event::KeyEvent, state: &mut TreeState) {
             field,
             cursor,
         } => (
-            *node_id,
+            Some(*node_id),
             name.clone(),
             desc.clone(),
             extra_fields.clone(),
@@ -522,6 +305,27 @@ fn handle_editing(key: event::KeyEvent, state: &mut TreeState) {
             *cursor,
         ),
         _ => return,
+    };
+
+    let build_mode = |n: String, d: String, ef: Vec<ExtraField>, f: usize, cur: usize| {
+        if let Some(id) = node_id {
+            InputMode::Editing {
+                node_id: id,
+                name: n,
+                desc: d,
+                extra_fields: ef,
+                field: f,
+                cursor: cur,
+            }
+        } else {
+            InputMode::Adding {
+                name: n,
+                desc: d,
+                extra_fields: ef,
+                field: f,
+                cursor: cur,
+            }
+        }
     };
 
     let total = total_fields(&extra_fields);
@@ -532,7 +336,7 @@ fn handle_editing(key: event::KeyEvent, state: &mut TreeState) {
     match key.code {
         KeyCode::Delete if is_on_extra => {
             state.mode = InputMode::ConfirmDeleteField {
-                node_id: Some(node_id),
+                node_id,
                 name,
                 desc,
                 extra_fields,
@@ -543,7 +347,7 @@ fn handle_editing(key: event::KeyEvent, state: &mut TreeState) {
         }
         KeyCode::Enter if is_on_add_button => {
             state.mode = InputMode::SelectFieldType {
-                node_id: Some(node_id),
+                node_id,
                 name,
                 desc,
                 extra_fields,
@@ -553,22 +357,34 @@ fn handle_editing(key: event::KeyEvent, state: &mut TreeState) {
             };
         }
         KeyCode::Enter => {
-            state.update_node(node_id, name, desc, extra_fields);
-            state.mode = InputMode::Detail {
-                selected: 0,
-                alert: None,
-            };
+            if is_adding {
+                state.add_child_to_selected(name, desc, extra_fields);
+                state.mode = InputMode::Normal;
+            } else {
+                state.update_node(node_id.unwrap(), name, desc, extra_fields);
+                state.mode = InputMode::Detail {
+                    selected: 0,
+                    alert: None,
+                };
+            }
         }
         KeyCode::Esc => {
-            if editing_has_changes(state, node_id, &name, &desc, &extra_fields) {
+            let has_changes = if is_adding {
+                adding_has_changes(&name, &desc, &extra_fields)
+            } else {
+                editing_has_changes(state, node_id.unwrap(), &name, &desc, &extra_fields)
+            };
+            if has_changes {
                 state.mode = InputMode::ConfirmDiscardChanges {
-                    node_id: Some(node_id),
+                    node_id,
                     name,
                     desc,
                     extra_fields,
                     field,
                     cursor,
                 };
+            } else if is_adding {
+                state.mode = InputMode::Normal;
             } else {
                 state.mode = InputMode::Detail {
                     selected: 0,
@@ -579,79 +395,30 @@ fn handle_editing(key: event::KeyEvent, state: &mut TreeState) {
         KeyCode::Tab | KeyCode::Down => {
             let new_field = (field + 1) % total;
             let new_cursor = cursor_on_new_field(new_field, &name, &desc, &extra_fields);
-            state.mode = InputMode::Editing {
-                node_id,
-                name,
-                desc,
-                extra_fields,
-                field: new_field,
-                cursor: new_cursor,
-            };
+            state.mode = build_mode(name, desc, extra_fields, new_field, new_cursor);
         }
         KeyCode::Up => {
             let new_field = (field + total - 1) % total;
             let new_cursor = cursor_on_new_field(new_field, &name, &desc, &extra_fields);
-            state.mode = InputMode::Editing {
-                node_id,
-                name,
-                desc,
-                extra_fields,
-                field: new_field,
-                cursor: new_cursor,
-            };
+            state.mode = build_mode(name, desc, extra_fields, new_field, new_cursor);
         }
         KeyCode::Left if !is_on_add_button => {
             let new_cursor = cursor.saturating_sub(1);
-            state.mode = InputMode::Editing {
-                node_id,
-                name,
-                desc,
-                extra_fields,
-                field,
-                cursor: new_cursor,
-            };
+            state.mode = build_mode(name, desc, extra_fields, field, new_cursor);
         }
         KeyCode::Right if !is_on_add_button => {
             let new_cursor = (cursor + 1).min(active_len);
-            state.mode = InputMode::Editing {
-                node_id,
-                name,
-                desc,
-                extra_fields,
-                field,
-                cursor: new_cursor,
-            };
+            state.mode = build_mode(name, desc, extra_fields, field, new_cursor);
         }
         KeyCode::Home if !is_on_add_button => {
-            state.mode = InputMode::Editing {
-                node_id,
-                name,
-                desc,
-                extra_fields,
-                field,
-                cursor: 0,
-            };
+            state.mode = build_mode(name, desc, extra_fields, field, 0);
         }
         KeyCode::End if !is_on_add_button => {
-            state.mode = InputMode::Editing {
-                node_id,
-                name,
-                desc,
-                extra_fields,
-                field,
-                cursor: active_len,
-            };
+            state.mode = build_mode(name, desc, extra_fields, field, active_len);
         }
         KeyCode::Backspace if !is_on_add_button => {
             if cursor == 0 {
-                state.mode = InputMode::Editing {
-                    node_id,
-                    name,
-                    desc,
-                    extra_fields,
-                    field,
-                    cursor,
-                };
+                state.mode = build_mode(name, desc, extra_fields, field, cursor);
                 return;
             }
             let (new_name, new_desc, new_extra_fields, new_cursor) = if field == 0 {
@@ -670,28 +437,11 @@ fn handle_editing(key: event::KeyEvent, state: &mut TreeState) {
             } else {
                 (name, desc, extra_fields, cursor)
             };
-            state.mode = InputMode::Editing {
-                node_id,
-                name: new_name,
-                desc: new_desc,
-                extra_fields: new_extra_fields,
-                field,
-                cursor: new_cursor,
-            };
+            state.mode = build_mode(new_name, new_desc, new_extra_fields, field, new_cursor);
         }
         KeyCode::Delete if !is_on_add_button => {
-            let total = total_fields(&extra_fields);
-            let is_on_extra = field >= 2 && field < total - 1;
-            let active_len = active_len_for_field(&name, &desc, &extra_fields, field);
             if cursor >= active_len {
-                state.mode = InputMode::Editing {
-                    node_id,
-                    name,
-                    desc,
-                    extra_fields,
-                    field,
-                    cursor,
-                };
+                state.mode = build_mode(name, desc, extra_fields, field, cursor);
                 return;
             }
             let (new_name, new_desc, new_extra_fields, new_cursor) = if field == 0 {
@@ -710,14 +460,7 @@ fn handle_editing(key: event::KeyEvent, state: &mut TreeState) {
             } else {
                 (name, desc, extra_fields, cursor)
             };
-            state.mode = InputMode::Editing {
-                node_id,
-                name: new_name,
-                desc: new_desc,
-                extra_fields: new_extra_fields,
-                field,
-                cursor: new_cursor,
-            };
+            state.mode = build_mode(new_name, new_desc, new_extra_fields, field, new_cursor);
         }
         KeyCode::Char(c) if !is_on_add_button => {
             let (new_name, new_desc, new_extra_fields, new_cursor) = if field == 0 {
@@ -736,24 +479,10 @@ fn handle_editing(key: event::KeyEvent, state: &mut TreeState) {
             } else {
                 (name, desc, extra_fields, cursor)
             };
-            state.mode = InputMode::Editing {
-                node_id,
-                name: new_name,
-                desc: new_desc,
-                extra_fields: new_extra_fields,
-                field,
-                cursor: new_cursor,
-            };
+            state.mode = build_mode(new_name, new_desc, new_extra_fields, field, new_cursor);
         }
         _ => {
-            state.mode = InputMode::Editing {
-                node_id,
-                name,
-                desc,
-                extra_fields,
-                field,
-                cursor,
-            };
+            state.mode = build_mode(name, desc, extra_fields, field, cursor);
         }
     }
 }
@@ -1173,8 +902,7 @@ fn handle_detail(key: event::KeyEvent, state: &mut TreeState) {
             state.mode = InputMode::Normal;
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            let node = state.current_node();
-            let max = node.map_or(0, |n| n.extra_fields.len());
+            let max = state.current_node_ref().map_or(0, |n| n.extra_fields.len());
             let new_sel = (selected + 1).min(max);
             state.mode = InputMode::Detail {
                 selected: new_sel,
@@ -1189,7 +917,7 @@ fn handle_detail(key: event::KeyEvent, state: &mut TreeState) {
             };
         }
         KeyCode::Enter => {
-            let text = state.current_node().and_then(|node| {
+            let text = state.current_node_ref().and_then(|node| {
                 if selected == 0 {
                     Some(node.description.clone())
                 } else {
@@ -1208,13 +936,13 @@ fn handle_detail(key: event::KeyEvent, state: &mut TreeState) {
             };
         }
         KeyCode::Char('i') | KeyCode::Char('I') => {
-            if let Some(node) = state.current_node() {
+            if let Some(node) = state.current_node_ref() {
                 let cursor = node.name.len();
                 state.mode = InputMode::Editing {
                     node_id: node.id,
-                    name: node.name,
-                    desc: node.description,
-                    extra_fields: node.extra_fields,
+                    name: node.name.clone(),
+                    desc: node.description.clone(),
+                    extra_fields: node.extra_fields.clone(),
                     field: 0,
                     cursor,
                 };
@@ -1240,8 +968,30 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
 
     match &state.mode {
         InputMode::Search => render_search_overlay(frame, area, state),
-        InputMode::Adding { .. } => render_add_overlay(frame, area, state),
-        InputMode::Editing { .. } => render_edit_overlay(frame, area, state),
+        InputMode::Adding { name, desc, extra_fields, field, cursor } => {
+            render_edit_overlay_common(
+                frame,
+                area,
+                name,
+                desc,
+                extra_fields,
+                *field,
+                *cursor,
+                "Add Node",
+            );
+        }
+        InputMode::Editing { name, desc, extra_fields, field, cursor, .. } => {
+            render_edit_overlay_common(
+                frame,
+                area,
+                name,
+                desc,
+                extra_fields,
+                *field,
+                *cursor,
+                "Edit Node",
+            );
+        }
         InputMode::SelectFieldType { .. } => render_select_field_type_overlay(frame, area, state),
         InputMode::CustomFieldName { .. } => render_custom_field_name_overlay(frame, area, state),
         InputMode::ConfirmDeleteField { .. } => render_confirm_delete_overlay(frame, area, state),
@@ -1386,49 +1136,6 @@ fn render_search_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
     frame.render_widget(Paragraph::new(text), inner);
 }
 
-fn cursor_field_spans(
-    label: &str,
-    text: &str,
-    cursor: usize,
-    is_active: bool,
-) -> Vec<Span<'static>> {
-    let label_style = Style::default().fg(Color::DarkGray);
-    let dim_style = Style::default().fg(Color::DarkGray);
-    let normal_style = Style::default().fg(Color::White);
-    let inverted_style = Style::default().bg(Color::White).fg(Color::Black);
-
-    if !is_active {
-        return vec![
-            Span::styled(label.to_string(), label_style),
-            Span::styled(text.to_string(), dim_style),
-        ];
-    }
-
-    let pos = cursor.min(text.len());
-    let (before, rest) = text.split_at(pos);
-    let ch = rest.chars().next();
-    let after = &rest[ch.map(|c| c.len_utf8()).unwrap_or(0)..];
-
-    let mut spans = vec![Span::styled(label.to_string(), label_style)];
-    if !before.is_empty() {
-        spans.push(Span::styled(before.to_string(), normal_style));
-    }
-    match ch {
-        Some(c) => {
-            let mut s = String::new();
-            s.push(c);
-            spans.push(Span::styled(s, inverted_style));
-        }
-        None => {
-            spans.push(Span::styled(" ".to_string(), inverted_style));
-        }
-    }
-    if !after.is_empty() {
-        spans.push(Span::styled(after.to_string(), normal_style));
-    }
-    spans
-}
-
 fn make_overlay_area(area: Rect, extra_fields_len: usize, base_content: u16) -> Rect {
     let n = extra_fields_len as u16;
     let content_height = base_content.saturating_add(n);
@@ -1523,67 +1230,6 @@ fn render_edit_overlay_common(
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-fn render_add_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let (name, desc, extra_fields, field, cursor) = match &state.mode {
-        InputMode::Adding {
-            name,
-            desc,
-            extra_fields,
-            field,
-            cursor,
-        } => (
-            name.clone(),
-            desc.clone(),
-            extra_fields.clone(),
-            *field,
-            *cursor,
-        ),
-        _ => return,
-    };
-
-    render_edit_overlay_common(
-        frame,
-        area,
-        &name,
-        &desc,
-        &extra_fields,
-        field,
-        cursor,
-        "Add Node",
-    );
-}
-
-fn render_edit_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let (name, desc, extra_fields, field, cursor) = match &state.mode {
-        InputMode::Editing {
-            name,
-            desc,
-            extra_fields,
-            field,
-            cursor,
-            ..
-        } => (
-            name.clone(),
-            desc.clone(),
-            extra_fields.clone(),
-            *field,
-            *cursor,
-        ),
-        _ => return,
-    };
-
-    render_edit_overlay_common(
-        frame,
-        area,
-        &name,
-        &desc,
-        &extra_fields,
-        field,
-        cursor,
-        "Edit Node",
-    );
-}
-
 fn render_select_field_type_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
     let selected_type = match &state.mode {
         InputMode::SelectFieldType { selected_type, .. } => *selected_type,
@@ -1607,16 +1253,7 @@ fn render_select_field_type_overlay(frame: &mut Frame, area: Rect, state: &TreeS
     let mut lines: Vec<Line> = Vec::new();
 
     for (i, item) in items.iter().enumerate() {
-        let style = if i == selected_type {
-            Style::default().bg(Color::DarkGray).fg(Color::White)
-        } else {
-            Style::default().fg(Color::White)
-        };
-        let prefix = if i == selected_type { "▸ " } else { "  " };
-        lines.push(Line::from(Span::styled(
-            format!("{}{}", prefix, item),
-            style,
-        )));
+        lines.push(Line::from(selected_span(item, i == selected_type)));
     }
 
     lines.push(Line::from(""));
@@ -1773,7 +1410,7 @@ fn render_confirm_discard_overlay(frame: &mut Frame, area: Rect, _state: &TreeSt
 }
 
 fn render_detail_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let node = match state.current_node() {
+    let node = match state.current_node_ref() {
         Some(n) => n,
         None => return,
     };
@@ -1781,12 +1418,6 @@ fn render_detail_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
     let selected = match &state.mode {
         InputMode::Detail { selected, .. } => *selected,
         _ => 0,
-    };
-
-    let desc = if node.description.is_empty() {
-        "No description.".to_string()
-    } else {
-        node.description.clone()
     };
 
     let overlay_area = make_overlay_area(area, node.extra_fields.len(), 4);
@@ -1801,31 +1432,19 @@ fn render_detail_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
 
     lines.push(Line::from(""));
 
-    let desc_style = if selected == 0 {
-        Style::default().bg(Color::DarkGray).fg(Color::White)
+    let desc = if node.description.is_empty() {
+        "No description."
     } else {
-        Style::default().fg(Color::White)
+        node.description.as_str()
     };
-    let desc_prefix = if selected == 0 { "▸ " } else { "  " };
-    lines.push(Line::from(Span::styled(
-        format!("{}{}", desc_prefix, desc),
-        desc_style,
-    )));
+    lines.push(Line::from(selected_span(desc, selected == 0)));
 
     for (i, ef) in node.extra_fields.iter().enumerate() {
         let ef_index = i + 1;
         let display_val = ef.field_type.display_value(&ef.value);
         let is_sel = selected == ef_index;
-        let style = if is_sel {
-            Style::default().bg(Color::DarkGray).fg(Color::White)
-        } else {
-            Style::default().fg(Color::White)
-        };
-        let prefix = if is_sel { "▸ " } else { "  " };
-        lines.push(Line::from(Span::styled(
-            format!("{}{}: {}", prefix, ef.field_type.label(), display_val),
-            style,
-        )));
+        let text = format!("{}: {}", ef.field_type.label(), display_val);
+        lines.push(Line::from(selected_span(&text, is_sel)));
     }
 
     lines.push(Line::from(""));

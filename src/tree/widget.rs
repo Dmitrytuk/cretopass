@@ -351,6 +351,12 @@ impl TreeState {
         find_node(&self.root, id)
     }
 
+    /// Returns a reference to the [`Node`] for the currently selected item.
+    pub fn current_node_ref(&self) -> Option<&Node> {
+        let id = self.visible.get(self.selected)?.id;
+        find_node_ref(&self.root, id)
+    }
+
     /// Activates search for the given query string.
     pub fn set_search(&mut self, query: String) {
         self.search_active = true;
@@ -376,6 +382,18 @@ fn find_node(root: &Node, id: Uuid) -> Option<Node> {
     }
     for child in &root.children {
         if let Some(found) = find_node(child, id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn find_node_ref(root: &Node, id: Uuid) -> Option<&Node> {
+    if root.id == id {
+        return Some(root);
+    }
+    for child in &root.children {
+        if let Some(found) = find_node_ref(child, id) {
             return Some(found);
         }
     }

@@ -38,7 +38,26 @@ Password field values display as `*****` in the detail overlay and when unfocuse
 ## Architecture
 
 - **Crate**: library + binary. `src/lib.rs` is the crate root, re-exporting public API. `src/main.rs` is a thin binary that launches the TUI and can be consumed as a dependency by other crates.
-- **12 source files**: `src/lib.rs` (crate root, re-exports, `build_demo_tree()`, terminal helpers, `run()`/`run_with_root()`), `src/main.rs` (just calls `tree_tui::run()`), `src/tree/mod.rs` (module decl), `src/tree/node.rs` (Node struct), `src/tree/widget.rs` (TreeState, InputMode, TreeWidget), `src/tree/app_tree.rs` (event loop, key handlers, all overlay rendering), `src/settings.rs` (module root, re-exports `ui`, `active_file`, and `utils`), `src/settings/ui.rs` (settings GUI: `SettingsState`, `run()`, `render()`), `src/settings/active_file.rs` (opened-file state: path, passphrase, Node), `src/settings/utils.rs` (orchestration: file validation, decrypt, save, recents, file dialog), `src/file_handling/mod.rs` (JSON serialization, file I/O), `src/crypt/mod.rs` (age-based encrypt/decrypt)
+- **16 source files**:
+  - `src/lib.rs`: crate root, re-exports, `build_demo_tree()`, terminal helpers, `run()`/`run_with_root()`
+  - `src/main.rs`: calls `tree_tui::run()`
+  - `src/cursor.rs`: shared UI helpers — `cursor_field_spans()`, `selected_span()`, `selected_style()`
+  - `src/tree/mod.rs`: module decl
+  - `src/tree/node.rs`: Node struct
+  - `src/tree/widget.rs`: `TreeState`, `InputMode`, `TreeWidget` — also `current_node_ref()`, `find_node_ref()`
+  - `src/tree/app_tree.rs`: event loop, key handlers, overlay rendering — uses merged `handle_form()` (replaces `handle_adding`/`handle_editing`), `handle_text_edit()` helper, `render_file_input()`, `current_node_ref()` for borrow-safe subtree access
+  - `src/settings.rs`: module root, re-exports `ui`, `active_file`, and `utils`
+  - `src/settings/ui.rs`: settings GUI — `SettingsState`, `run()`, `render()`
+  - `src/settings/widget.rs`: `handle_modal_key` dispatch, 5 per-modal handlers (`handle_app_settings_key`, `handle_delete_confirm_key`, `handle_change_pw_confirm_key`, `handle_change_pw_input_key`, `handle_confirm_no_passphrase_key`), cursor helpers from `crate::cursor`
+  - `src/settings/active_file.rs`: opened-file state — path, passphrase, Node
+  - `src/settings/utils.rs`: orchestration — file validation, decrypt, save, recents, file dialog, settings persistence
+  - `src/file_browser.rs`: module root
+  - `src/file_browser/state.rs`: `FileBrowserState`, `FileBrowserMode`
+  - `src/file_browser/render.rs`: all file browser rendering, `render_file_input()`
+  - `src/file_browser/handler.rs`: file browser key handling — `handle_text_edit()` helper, input/rename handlers
+  - `src/file_browser/fs.rs`: filesystem operations, `is_age_file()` header check
+  - `src/file_handling/mod.rs`: JSON serialization, file I/O
+  - `src/crypt/mod.rs`: age-based encrypt/decrypt
 - **Node**: carries `id: Uuid`, `name`, `description`, `extra_fields: Vec<ExtraField>`, `children: Vec<Node>`
 - **ExtraField/FieldType**: `{field_type: Login|Password|Custom(String), value: String}` — `display_value()` masks Password as `*****`
 - **TreeState**: owns root Node, `expanded: HashSet<Uuid>`, `selected: usize`, clipboard, search state, `mode: InputMode`, `active_file_path`, `active_file_passphrase`, `dirty` flag

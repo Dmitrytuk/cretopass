@@ -184,6 +184,52 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
     }
 }
 
+/// Handles common text-editing key events (Char, Backspace, Delete, Left,
+/// Right, Home, End).  Returns `true` if the key was consumed by editing.
+fn handle_text_edit(cursor: &mut usize, text: &mut String, key: KeyCode) -> bool {
+    match key {
+        KeyCode::Char(c) => {
+            text.insert(*cursor, c);
+            *cursor += 1;
+            true
+        }
+        KeyCode::Backspace => {
+            if *cursor > 0 {
+                *cursor -= 1;
+                text.remove(*cursor);
+            }
+            true
+        }
+        KeyCode::Delete => {
+            if *cursor < text.len() {
+                text.remove(*cursor);
+            }
+            true
+        }
+        KeyCode::Left => {
+            if *cursor > 0 {
+                *cursor -= 1;
+            }
+            true
+        }
+        KeyCode::Right => {
+            if *cursor < text.len() {
+                *cursor += 1;
+            }
+            true
+        }
+        KeyCode::Home => {
+            *cursor = 0;
+            true
+        }
+        KeyCode::End => {
+            *cursor = text.len();
+            true
+        }
+        _ => false,
+    }
+}
+
 fn handle_input_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBrowserAction> {
     // Check focus-switch key before general Char(c) to avoid unreachable pattern
     if key.code == KeyCode::Char('N') || key.code == KeyCode::Esc {
@@ -191,45 +237,11 @@ fn handle_input_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileB
         return None;
     }
 
+    if handle_text_edit(&mut state.creating_cursor, &mut state.creating_name, key.code) {
+        return None;
+    }
+
     match key.code {
-        KeyCode::Char(c) => {
-            state.creating_name.insert(state.creating_cursor, c);
-            state.creating_cursor += 1;
-            None
-        }
-        KeyCode::Backspace => {
-            if state.creating_cursor > 0 {
-                state.creating_cursor -= 1;
-                state.creating_name.remove(state.creating_cursor);
-            }
-            None
-        }
-        KeyCode::Delete => {
-            if state.creating_cursor < state.creating_name.len() {
-                state.creating_name.remove(state.creating_cursor);
-            }
-            None
-        }
-        KeyCode::Left => {
-            if state.creating_cursor > 0 {
-                state.creating_cursor -= 1;
-            }
-            None
-        }
-        KeyCode::Right => {
-            if state.creating_cursor < state.creating_name.len() {
-                state.creating_cursor += 1;
-            }
-            None
-        }
-        KeyCode::Home => {
-            state.creating_cursor = 0;
-            None
-        }
-        KeyCode::End => {
-            state.creating_cursor = state.creating_name.len();
-            None
-        }
         KeyCode::Enter => {
             let name = state.creating_name.trim().to_string();
             if name.is_empty() {
@@ -245,45 +257,11 @@ fn handle_input_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileB
 }
 
 fn handle_rename_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBrowserAction> {
+    if handle_text_edit(&mut state.rename_cursor, &mut state.rename_name, key.code) {
+        return None;
+    }
+
     match key.code {
-        KeyCode::Char(c) => {
-            state.rename_name.insert(state.rename_cursor, c);
-            state.rename_cursor += 1;
-            None
-        }
-        KeyCode::Backspace => {
-            if state.rename_cursor > 0 {
-                state.rename_cursor -= 1;
-                state.rename_name.remove(state.rename_cursor);
-            }
-            None
-        }
-        KeyCode::Delete => {
-            if state.rename_cursor < state.rename_name.len() {
-                state.rename_name.remove(state.rename_cursor);
-            }
-            None
-        }
-        KeyCode::Left => {
-            if state.rename_cursor > 0 {
-                state.rename_cursor -= 1;
-            }
-            None
-        }
-        KeyCode::Right => {
-            if state.rename_cursor < state.rename_name.len() {
-                state.rename_cursor += 1;
-            }
-            None
-        }
-        KeyCode::Home => {
-            state.rename_cursor = 0;
-            None
-        }
-        KeyCode::End => {
-            state.rename_cursor = state.rename_name.len();
-            None
-        }
         KeyCode::Esc => {
             state.focus = FocusTarget::List;
             state.rename_name.clear();
@@ -302,8 +280,7 @@ fn handle_rename_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<File
             match fs::rename_file(from, &to) {
                 Ok(()) => {
                     let new_path_str = to.to_string_lossy().to_string();
-                    let is_active =
-                        state.active_file_path.as_deref() == Some(from);
+                    let is_active = state.active_file_path.as_deref() == Some(from);
                     if is_active {
                         state.active_file_path = Some(to);
                     }
