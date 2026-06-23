@@ -10,10 +10,10 @@ use ratatui::{backend::Backend, Frame, Terminal};
 
 use crate::file_browser::{self, FileBrowserAction, FileBrowserMode, FileBrowserState};
 use crate::file_handling;
-use crate::theming::{ElementStyle, Icon, texts};
-use crate::theming::Action;
 use crate::settings::active_file::ActiveFileState;
 use crate::settings::utils::{self, AppSettings};
+use crate::theming::Action;
+use crate::theming::{texts, ElementStyle, Icon};
 
 enum SettingsModal {
     FileBrowser(FileBrowserState),
@@ -69,15 +69,15 @@ impl SettingsState {
         let settings = utils::load_settings();
         let modal = if settings.open_last_opened_file_on_startup {
             settings.last_opened_file.as_ref().and_then(|path| {
-                file_handling::validate_encrypted_file(path).ok().map(|data| {
-                    SettingsModal::PassphraseInput {
+                file_handling::validate_encrypted_file(path)
+                    .ok()
+                    .map(|data| SettingsModal::PassphraseInput {
                         file_path: path.clone(),
                         file_data: Some(data),
                         passphrase: String::new(),
                         cursor: 0,
                         error: None,
-                    }
-                })
+                    })
             })
         } else {
             None
@@ -204,7 +204,7 @@ fn handle_settings_key<B: Backend>(
             } else {
                 let file_idx = idx - texts::MENU_ITEMS.len();
                 if file_idx < state.settings.recent_files.len() {
-                    let file_path = state.settings.recent_files[file_idx].clone();
+                    let file_path: String = state.settings.recent_files[file_idx].clone();
 
                     if let Some(ref active_file) = state.active_file {
                         if active_file.path.as_deref() == Some(&file_path) {
@@ -225,7 +225,9 @@ fn handle_settings_key<B: Backend>(
 
                     match file_handling::validate_encrypted_file(&file_path) {
                         Err(e) => {
-                            state.modal = Some(SettingsModal::Alert { message: format!("{e}") });
+                            state.modal = Some(SettingsModal::Alert {
+                                message: format!("{e}"),
+                            });
                         }
                         Ok(data) => {
                             state.modal = Some(SettingsModal::PassphraseInput {
@@ -320,7 +322,9 @@ fn handle_file_browser_key<B: Backend>(
             } else {
                 match file_handling::validate_encrypted_file(&path) {
                     Err(e) => {
-                        state.modal = Some(SettingsModal::Alert { message: format!("{e}") });
+                        state.modal = Some(SettingsModal::Alert {
+                            message: format!("{e}"),
+                        });
                     }
                     Ok(data) => {
                         state.modal = Some(SettingsModal::PassphraseInput {
@@ -662,8 +666,7 @@ fn handle_change_pw_input_key<B: Backend>(
             } else {
                 // Save with new passphrase and reopen
                 if let Some(ref active_file) = state.active_file.clone() {
-                    if let (Some(ref path), Some(ref node)) =
-                        (&active_file.path, &active_file.node)
+                    if let (Some(ref path), Some(ref node)) = (&active_file.path, &active_file.node)
                     {
                         let new_pass_bytes = new_pass.into_bytes();
                         state.status = Some(texts::STATUS_SAVING);
@@ -722,7 +725,9 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
             match file_handling::create_secret_file(&file_path, "") {
                 Err(e) => {
                     state.status = None;
-                    state.modal = Some(SettingsModal::Alert { message: format!("{e}") });
+                    state.modal = Some(SettingsModal::Alert {
+                        message: format!("{e}"),
+                    });
                 }
                 Ok(node) => {
                     state.status = None;
@@ -984,7 +989,9 @@ fn handle_modal_key<B: Backend>(
                     match file_handling::create_secret_file(&file_path, &passphrase) {
                         Err(e) => {
                             state.status = None;
-                            state.modal = Some(SettingsModal::Alert { message: format!("{e}") });
+                            state.modal = Some(SettingsModal::Alert {
+                                message: format!("{e}"),
+                            });
                         }
                         Ok(node) => {
                             state.status = None;
@@ -1085,10 +1092,7 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
             STATUS_SAVING => ElementStyle::StatusSaving,
             _ => ElementStyle::StatusInfo,
         };
-        title_spans.push(Span::styled(
-            format!(" {}  ", s),
-            el.style(),
-        ));
+        title_spans.push(Span::styled(format!(" {}  ", s), el.style()));
     }
     title_spans.push(Span::raw(base_title));
 
@@ -1188,7 +1192,10 @@ fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsStat
 
     let rows = [
         (texts::SETTING_FULL_PATH, state.settings.display_full_path),
-        (texts::SETTING_LAST_FILE, state.settings.open_last_opened_file_on_startup),
+        (
+            texts::SETTING_LAST_FILE,
+            state.settings.open_last_opened_file_on_startup,
+        ),
     ];
 
     let mut lines: Vec<Line> = Vec::new();
@@ -1240,7 +1247,12 @@ fn render_delete_confirm_modal(frame: &mut Frame, area: Rect, path: &str) {
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
-            format!("{}{}{}", texts::PROMPT_DELETE_RECENT_START, path, texts::PROMPT_DELETE_RECENT_END),
+            format!(
+                "{}{}{}",
+                texts::PROMPT_DELETE_RECENT_START,
+                path,
+                texts::PROMPT_DELETE_RECENT_END
+            ),
             ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),
@@ -1367,7 +1379,10 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
             let cursor_char = if at.is_empty() { " " } else { &at };
 
             lines.push(Line::from(vec![
-                Span::styled(format!("  {}: ", label), ElementStyle::SettingsFieldLabel.style()),
+                Span::styled(
+                    format!("  {}: ", label),
+                    ElementStyle::SettingsFieldLabel.style(),
+                ),
                 Span::raw(before.to_string()),
                 Span::styled(
                     cursor_char.to_string(),
@@ -1377,7 +1392,10 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
             ]));
         } else {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {}: ", label), ElementStyle::SettingsFieldLabel.style()),
+                Span::styled(
+                    format!("  {}: ", label),
+                    ElementStyle::SettingsFieldLabel.style(),
+                ),
                 Span::styled(masked, ElementStyle::SettingsFieldLabel.style()),
             ]));
         }
@@ -1400,9 +1418,6 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
     frame.render_widget(block, overlay_area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
-
-
-
 
 fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState) {
     let (file_path, passphrase, cursor, error) = match &state.modal {
@@ -1454,7 +1469,10 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
     let cursor_char = if at.is_empty() { " " } else { &at };
 
     lines.push(Line::from(vec![
-        Span::styled(texts::LABEL_PASSPHRASE, ElementStyle::SettingsPassLabel.style()),
+        Span::styled(
+            texts::LABEL_PASSPHRASE,
+            ElementStyle::SettingsPassLabel.style(),
+        ),
         Span::raw(before.to_string()),
         Span::styled(
             cursor_char.to_string(),
