@@ -1412,22 +1412,17 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
             cursor,
             error,
             ..
-        }) => (
-            file_path.clone(),
-            passphrase.clone(),
-            *cursor,
-            error.clone(),
-        ),
+        }) => (file_path, passphrase, *cursor, error),
         _ => return,
     };
 
     let display_path = if state.settings.display_full_path {
-        file_path.clone()
+        file_path.to_string()
     } else {
-        std::path::Path::new(&file_path)
+        std::path::Path::new(file_path.as_str())
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| file_path.clone())
+            .unwrap_or_else(|| file_path.to_string())
     };
 
     let overlay_area = make_overlay(area, if error.is_some() { 9 } else { 8 });
