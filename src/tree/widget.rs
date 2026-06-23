@@ -8,7 +8,7 @@ use ratatui::{
 };
 use uuid::Uuid;
 
-use crate::theming::{ElementStyle, Icon};
+use crate::theming::{ElementStyle, Icon, texts};
 use super::node::{ExtraField, Node};
 
 /// A single visible row in the flattened tree display.
@@ -316,7 +316,7 @@ impl TreeState {
             None => return,
         };
         let final_name = if name.is_empty() {
-            "Untitled".to_string()
+            texts::DEFAULT_NAME.to_string()
         } else {
             name
         };
@@ -491,10 +491,9 @@ impl TreeWidget {
 
         let mut title_spans: Vec<Span> = Vec::new();
         if let Some(s) = state.status {
-            use crate::theming::texts::{STATUS_LOADING, STATUS_SAVING};
             let el = match s {
-                STATUS_LOADING => ElementStyle::StatusLoading,
-                STATUS_SAVING => ElementStyle::StatusSaving,
+                texts::STATUS_LOADING => ElementStyle::StatusLoading,
+                texts::STATUS_SAVING => ElementStyle::StatusSaving,
                 _ => ElementStyle::StatusInfo,
             };
             title_spans.push(Span::styled(

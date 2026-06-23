@@ -67,10 +67,10 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
         render_file_input(
             frame,
             layout[next],
-            " Name: ",
+            texts::LABEL_NAME_INLINE,
             &state.creating_name,
             state.creating_cursor,
-            &["Enter:confirm"],
+            &[texts::FB_HINT_CONFIRM],
         );
         next += 1;
     }
@@ -78,10 +78,10 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
         render_file_input(
             frame,
             layout[next],
-            " Rename: ",
+            texts::LABEL_RENAME,
             &state.rename_name,
             state.rename_cursor,
-            &["Enter:confirm", "Esc:cancel"],
+            &[texts::FB_HINT_CONFIRM, texts::FB_HINT_CANCEL],
         );
         next += 1;
     }
@@ -196,8 +196,8 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
 
 fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     let filter_text = match state.filter {
-        FileFilter::All => "All",
-        FileFilter::PwdKeeperOnly => "PwdKeeper",
+        FileFilter::All => texts::FB_FILTER_ALL,
+        FileFilter::PwdKeeperOnly => texts::FB_FILTER_PWDKEEPER,
     };
 
     let hint_style = ElementStyle::FbHintText.style();
@@ -208,7 +208,7 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
             format!(" Filter: {} ", filter_text),
             hint_style,
         ),
-        Span::styled(" [f] ", hint_style),
+        Span::styled(texts::FB_HINT_FILTER, hint_style),
     ];
 
     if state.search_active {
@@ -218,14 +218,14 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
         ));
     } else {
         spans.push(Span::styled(
-            " [/]search ",
+            texts::FB_HINT_SEARCH,
             hint_style,
         ));
     }
 
     if state.mode == FileBrowserMode::CreateFile {
         spans.push(Span::styled(
-            " [n]new dir ",
+            texts::FB_HINT_NEW_DIR,
             hint_style,
         ));
     }
@@ -234,11 +234,11 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     if let Some(entry) = state.entries.get(state.selected) {
         if entry.is_age_file && !entry.is_dir {
             spans.push(Span::styled(
-                " [r]rename ",
+                texts::FB_HINT_RENAME,
                 hint_style,
             ));
             spans.push(Span::styled(
-                " [d]delete ",
+                texts::FB_HINT_DELETE,
                 hint_style,
             ));
         }
@@ -247,12 +247,12 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     if state.mode == FileBrowserMode::CreateFile {
         if state.focus == FocusTarget::Input {
             spans.push(Span::styled(
-                " [N]list ",
+                texts::FB_HINT_LIST,
                 hint_style,
             ));
         } else {
             spans.push(Span::styled(
-                " [N]name ",
+                texts::FB_HINT_NAME,
                 hint_style,
             ));
         }
@@ -283,7 +283,7 @@ fn render_delete_confirmation(frame: &mut Frame, area: Rect, state: &FileBrowser
                 ElementStyle::FbDeleteConfirm.style(),
             ),
             Span::styled(
-                " (y/N) ",
+                texts::FB_DELETE_CONFIRM_SUFFIX,
                 ElementStyle::FbDeleteHint.style(),
             ),
         ]);
