@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::file_handling;
+use crate::theming::texts;
 use super::state::{FileBrowserAction, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget};
 
 /// Processes a key event and returns an action if the user completed
@@ -15,7 +16,7 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
                     let path = std::path::Path::new(path_str);
                     if Some(path) == state.active_file_path.as_deref() {
                         state.error =
-                            Some("Cannot delete the currently open file".to_string());
+                            Some(texts::MSG_CANNOT_DELETE_FILE.to_string());
                     } else if file_handling::delete_file(path).is_ok() {
                         state.refresh_entries();
                     }
@@ -337,11 +338,11 @@ fn go_to_parent(state: &mut FileBrowserState) {
 }
 
 fn create_new_folder(state: &mut FileBrowserState) {
-    let mut name = "New Folder".to_string();
+    let mut name = texts::NEW_FOLDER_DEFAULT.to_string();
     let mut counter = 1;
     while state.current_dir.join(&name).exists() {
         counter += 1;
-        name = format!("New Folder ({})", counter);
+        name = format!("{} ({})", texts::NEW_FOLDER_DEFAULT, counter);
     }
 
     let new_path = state.current_dir.join(&name);

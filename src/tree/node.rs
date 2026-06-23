@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::theming::texts;
+
 /// The type of an extra field attached to a node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FieldType {
@@ -13,8 +15,8 @@ impl FieldType {
     /// The display label for this field type.
     pub fn label(&self) -> String {
         match self {
-            FieldType::Login => "Login".to_string(),
-            FieldType::Password => "Password".to_string(),
+            FieldType::Login => texts::FIELD_LOGIN.to_string(),
+            FieldType::Password => texts::FIELD_PASSWORD.to_string(),
             FieldType::Custom(name) => name.clone(),
         }
     }
@@ -24,7 +26,7 @@ impl FieldType {
     /// Password fields are masked as `*****`; all other types show the raw value.
     pub fn display_value(&self, value: &str) -> String {
         match self {
-            FieldType::Password => "****".to_string(),
+            FieldType::Password => texts::PASSWORD_MASK.to_string(),
             _ => value.to_string(),
         }
     }

@@ -2,13 +2,13 @@ use std::collections::HashSet;
 
 use ratatui::{
     layout::Rect,
-    style::{Color, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
 use uuid::Uuid;
 
+use crate::theming::{ElementStyle, Icon, texts};
 use super::node::{ExtraField, Node};
 
 /// A single visible row in the flattened tree display.
@@ -316,7 +316,7 @@ impl TreeState {
             None => return,
         };
         let final_name = if name.is_empty() {
-            "Untitled".to_string()
+            texts::DEFAULT_NAME.to_string()
         } else {
             name
         };
@@ -472,34 +472,33 @@ fn find_parent_mut(root: &mut Node, id: Uuid) -> Option<&mut Node> {
 pub struct TreeWidget;
 
 impl TreeWidget {
-    /// Renders the tree view into the given area.
     pub fn render(frame: &mut Frame, area: Rect, state: &TreeState) {
         let base_title = state
             .active_file_path
             .as_deref()
             .map(|p| {
                 if state.display_full_path {
-                    format!(" File — {} ", p)
+                    format!("{} {} ", crate::theming::texts::TITLE_TREE_PREFIX, p)
                 } else {
                     let name = std::path::Path::new(p)
                         .file_name()
                         .map(|n| n.to_string_lossy())
                         .unwrap_or(std::borrow::Cow::Borrowed(p));
-                    format!(" File — {} ", name)
+                    format!("{} {} ", crate::theming::texts::TITLE_TREE_PREFIX, name)
                 }
             })
-            .unwrap_or_else(|| " File ".to_string());
+            .unwrap_or_else(|| crate::theming::texts::TITLE_TREE_DEFAULT.to_string());
 
         let mut title_spans: Vec<Span> = Vec::new();
         if let Some(s) = state.status {
-            let color = match s {
-                "Loading..." => Color::Green,
-                "Saving..." => Color::Red,
-                _ => Color::White,
+            let el = match s {
+                texts::STATUS_LOADING => ElementStyle::StatusLoading,
+                texts::STATUS_SAVING => ElementStyle::StatusSaving,
+                _ => ElementStyle::StatusInfo,
             };
             title_spans.push(Span::styled(
                 format!(" {}  ", s),
-                Style::default().fg(color),
+                el.style(),
             ));
         }
         title_spans.push(Span::raw(base_title));
@@ -507,7 +506,7 @@ impl TreeWidget {
         let block = Block::default()
             .title(Line::from(title_spans))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
+            .border_style(ElementStyle::TreeBorder.style());
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -520,21 +519,25 @@ impl TreeWidget {
                 let indent = "  ".repeat(v.depth);
                 let icon = if v.is_parent {
                     if v.expanded {
-                        "▼ "
+                        Icon::Expanded.as_str()
                     } else {
-                        "▶ "
+                        Icon::Collapsed.as_str()
                     }
                 } else {
-                    "  "
+                    Icon::LeafPad.as_str()
                 };
-                let prefix = if i == state.selected { "▸ " } else { "  " };
+                let prefix = if i == state.selected {
+                    Icon::SelectionArrow.as_str()
+                } else {
+                    Icon::SelectionPad.as_str()
+                };
                 let text = format!("{}{}{}{}", prefix, indent, icon, v.name);
 
                 let is_matched = state.matched.contains(&i);
                 let style = if is_matched {
-                    Style::default().bg(Color::DarkGray).fg(Color::White)
+                    ElementStyle::TreeRowMatched.style()
                 } else {
-                    Style::default().fg(Color::White)
+                    ElementStyle::TreeRow.style()
                 };
                 Line::from(Span::styled(text, style))
             })
@@ -546,7 +549,7 @@ impl TreeWidget {
             .selected
             .saturating_sub(inner_height.saturating_sub(1) / 2);
         let paragraph = Paragraph::new(text)
-            .style(Style::default().fg(Color::White))
+            .style(ElementStyle::TreeRow.style())
             .scroll((scroll_row as u16, 0));
         frame.render_widget(paragraph, inner);
     }

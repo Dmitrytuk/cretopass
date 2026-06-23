@@ -1,10 +1,10 @@
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::cursor::cursor_field_spans;
+use crate::theming::{ElementStyle, Icon, texts};
 use super::state::{FileBrowserMode, FileBrowserState, FileFilter, FocusTarget};
 
 const DEFAULT_HEIGHT: u16 = 18;
@@ -17,14 +17,14 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
     frame.render_widget(Clear, overlay_area);
 
     let title = match state.mode {
-        FileBrowserMode::OpenFile => " Open File ",
-        FileBrowserMode::CreateFile => " Create New Secret File ",
+        FileBrowserMode::OpenFile => texts::BROWSER_OPEN,
+        FileBrowserMode::CreateFile => texts::BROWSER_CREATE,
     };
 
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black).fg(Color::Cyan));
+        .style(ElementStyle::DetailBlock.style());
 
     frame.render_widget(&block, overlay_area);
 
@@ -67,10 +67,10 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
         render_file_input(
             frame,
             layout[next],
-            " Name: ",
+            texts::LABEL_NAME_INLINE,
             &state.creating_name,
             state.creating_cursor,
-            &["Enter:confirm"],
+            &[texts::FB_HINT_CONFIRM],
         );
         next += 1;
     }
@@ -78,10 +78,10 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
         render_file_input(
             frame,
             layout[next],
-            " Rename: ",
+            texts::LABEL_RENAME,
             &state.rename_name,
             state.rename_cursor,
-            &["Enter:confirm", "Esc:cancel"],
+            &[texts::FB_HINT_CONFIRM, texts::FB_HINT_CANCEL],
         );
         next += 1;
     }
@@ -108,10 +108,7 @@ fn render_path_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     let path_str = state.current_dir.to_string_lossy();
     let text = Line::from(Span::styled(
         format!(" {}", path_str),
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD)
-            .bg(Color::DarkGray),
+        ElementStyle::FbPathBar.style(),
     ));
     frame.render_widget(Paragraph::new(text), area);
 }
@@ -141,36 +138,40 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
         .map(|&idx| {
             let entry = &state.entries[idx];
             let is_selected = idx == state.selected;
-            let prefix = if is_selected { "▸ " } else { "  " };
+            let prefix = if is_selected {
+                Icon::SelectionArrow.as_str()
+            } else {
+                Icon::SelectionPad.as_str()
+            };
 
             let name_style = if entry.is_dir {
-                Style::default().fg(Color::Blue)
+                ElementStyle::FbDirName.style()
             } else if entry.is_age_file {
-                Style::default().fg(Color::Cyan)
+                ElementStyle::FbAgeFileName.style()
             } else {
-                Style::default().fg(Color::White)
+                ElementStyle::FbRegularFileName.style()
             };
 
             let name_style = if is_selected {
-                name_style.bg(Color::DarkGray).fg(Color::White)
+                ElementStyle::FbSelectionOverlay.style()
             } else {
                 name_style
             };
 
             let marker = if entry.is_age_file && !entry.is_dir {
-                "[PWD] "
+                Icon::PwdMarker.as_str()
             } else {
                 ""
             };
 
             let marker_style = if is_selected {
-                Style::default().fg(Color::White).bg(Color::DarkGray)
+                ElementStyle::FbPwdMarkerSelected.style()
             } else {
-                Style::default().fg(Color::Cyan)
+                ElementStyle::FbPwdMarker.style()
             };
 
             Line::from(vec![
-                Span::styled(prefix, Style::default().fg(Color::White)),
+                Span::styled(prefix, ElementStyle::FbPrefix.style()),
                 Span::styled(marker, marker_style),
                 Span::styled(&entry.name, name_style),
             ])
@@ -179,13 +180,13 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
 
     if visible.is_empty() {
         let empty_msg = if state.search_active || !state.search_query.is_empty() {
-            "  No matching files"
+            texts::NO_MATCHING_FILES
         } else {
-            "  (empty directory)"
+            texts::EMPTY_DIR
         };
         let empty = vec![Line::from(Span::styled(
             empty_msg,
-            Style::default().fg(Color::DarkGray),
+            ElementStyle::FbEmptyText.style(),
         ))];
         frame.render_widget(Paragraph::new(Text::from(empty)), area);
     } else {
@@ -195,34 +196,37 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
 
 fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     let filter_text = match state.filter {
-        FileFilter::All => "All",
-        FileFilter::PwdKeeperOnly => "PwdKeeper",
+        FileFilter::All => texts::FB_FILTER_ALL,
+        FileFilter::PwdKeeperOnly => texts::FB_FILTER_PWDKEEPER,
     };
+
+    let hint_style = ElementStyle::FbHintText.style();
+    let search_style = ElementStyle::FbActiveSearch.style();
 
     let mut spans = vec![
         Span::styled(
             format!(" Filter: {} ", filter_text),
-            Style::default().fg(Color::DarkGray),
+            hint_style,
         ),
-        Span::styled(" [f] ", Style::default().fg(Color::DarkGray)),
+        Span::styled(texts::FB_HINT_FILTER, hint_style),
     ];
 
     if state.search_active {
         spans.push(Span::styled(
             format!(" Search: {}█", state.search_query),
-            Style::default().fg(Color::Yellow),
+            search_style,
         ));
     } else {
         spans.push(Span::styled(
-            " [/]search ",
-            Style::default().fg(Color::DarkGray),
+            texts::FB_HINT_SEARCH,
+            hint_style,
         ));
     }
 
     if state.mode == FileBrowserMode::CreateFile {
         spans.push(Span::styled(
-            " [n]new dir ",
-            Style::default().fg(Color::DarkGray),
+            texts::FB_HINT_NEW_DIR,
+            hint_style,
         ));
     }
 
@@ -230,12 +234,12 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     if let Some(entry) = state.entries.get(state.selected) {
         if entry.is_age_file && !entry.is_dir {
             spans.push(Span::styled(
-                " [r]rename ",
-                Style::default().fg(Color::DarkGray),
+                texts::FB_HINT_RENAME,
+                hint_style,
             ));
             spans.push(Span::styled(
-                " [d]delete ",
-                Style::default().fg(Color::DarkGray),
+                texts::FB_HINT_DELETE,
+                hint_style,
             ));
         }
     }
@@ -243,13 +247,13 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     if state.mode == FileBrowserMode::CreateFile {
         if state.focus == FocusTarget::Input {
             spans.push(Span::styled(
-                " [N]list ",
-                Style::default().fg(Color::DarkGray),
+                texts::FB_HINT_LIST,
+                hint_style,
             ));
         } else {
             spans.push(Span::styled(
-                " [N]name ",
-                Style::default().fg(Color::DarkGray),
+                texts::FB_HINT_NAME,
+                hint_style,
             ));
         }
     }
@@ -261,7 +265,7 @@ fn render_file_input(frame: &mut Frame, area: Rect, label: &str, text: &str, cur
     let mut spans = cursor_field_spans(label, text, cursor, true);
     for hint in hints {
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(*hint, Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(*hint, ElementStyle::FbHintText.style()));
     }
     frame.render_widget(Paragraph::new(Text::from(vec![Line::from(spans)])), area);
 }
@@ -276,14 +280,11 @@ fn render_delete_confirmation(frame: &mut Frame, area: Rect, state: &FileBrowser
         let text = Line::from(vec![
             Span::styled(
                 format!(" Delete {}? ", filename),
-                Style::default()
-                    .bg(Color::Red)
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
+                ElementStyle::FbDeleteConfirm.style(),
             ),
             Span::styled(
-                " (y/N) ",
-                Style::default().bg(Color::Red).fg(Color::DarkGray),
+                texts::FB_DELETE_CONFIRM_SUFFIX,
+                ElementStyle::FbDeleteHint.style(),
             ),
         ]);
 
@@ -295,7 +296,7 @@ fn render_error_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     if let Some(ref err) = state.error {
         let text = Line::from(Span::styled(
             format!(" {}", err),
-            Style::default().bg(Color::Red).fg(Color::White),
+            ElementStyle::FbErrorBar.style(),
         ));
         frame.render_widget(Paragraph::new(text), area);
     }

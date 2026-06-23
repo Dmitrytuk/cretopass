@@ -4,6 +4,7 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScree
 use crossterm::ExecutableCommand;
 use ratatui::{backend::CrosstermBackend, Terminal};
 
+pub mod theming;
 pub mod tree;
 pub mod settings;
 pub mod file_handling;
