@@ -87,19 +87,6 @@ impl Node {
         self.children.push(child);
     }
 
-    /// Removes and returns the child with the given [`Uuid`], if present.
-    #[allow(dead_code)]
-    pub fn remove_child(&mut self, id: Uuid) -> Option<Node> {
-        let pos = self.children.iter().position(|c| c.id == id)?;
-        Some(self.children.remove(pos))
-    }
-
-    /// Inserts a child at the given position in the children list.
-    #[allow(dead_code)]
-    pub fn insert_child(&mut self, index: usize, child: Node) {
-        self.children.insert(index, child);
-    }
-
     /// Recursively finds a descendant node by [`Uuid`], returning a shared
     /// reference to it.
     pub fn find(&self, id: Uuid) -> Option<&Node> {

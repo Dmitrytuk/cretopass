@@ -128,7 +128,6 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
                             state.current_dir = entry.path.clone();
                             state.entries = new_entries;
                             state.selected = 0;
-                            state.scroll = 0;
                             state.search_active = false;
                             state.search_query.clear();
                         }

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 pub use error::FileHandlingError;
 
 use crate::crypt;
+use crate::theming::texts;
 use crate::tree::node::Node;
 
 const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024;
@@ -124,7 +125,7 @@ pub fn create_secret_file(path: &str, passphrase: &str) -> Result<Node, FileHand
         .map_err(|_| FileHandlingError::PathNotWritable(path.to_string()))?;
     let _ = fs::remove_file(&probe_path);
 
-    let node = Node::new("Secrets", "");
+    let node = Node::new(texts::DEFAULT_ROOT_NAME, "");
     let json = node_to_json(&node)?;
     let encrypted = crypt::encrypt(&json, passphrase)
         .map_err(|e| FileHandlingError::Crypt(format!("Encryption failed: {e}")))?;

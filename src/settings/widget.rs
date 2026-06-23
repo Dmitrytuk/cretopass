@@ -679,7 +679,7 @@ fn handle_change_pw_input_key<B: Backend>(
                                     confirm: String::new(),
                                     confirm_cursor: 0,
                                     focused: 0,
-                                    error: Some(format!("{} {e}", texts::MSG_SAVE_FAILED)),
+                                    error: Some(format!("{}{e}", texts::MSG_SAVE_FAILED)),
                                 });
                             }
                             Ok(()) => {
@@ -947,7 +947,7 @@ fn handle_modal_key<B: Backend>(
                                 file_data: Some(data),
                                 passphrase,
                                 cursor: 0,
-                                error: Some(format!("wrong password: {e}")),
+                                error: Some(format!("{}{e}", texts::MSG_WRONG_PW)),
                             });
                         }
                         Ok(node) => {
@@ -1240,7 +1240,7 @@ fn render_delete_confirm_modal(frame: &mut Frame, area: Rect, path: &str) {
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
-            format!("Remove '{}' from recent files?", path),
+            format!("{}{}{}", texts::PROMPT_DELETE_RECENT_START, path, texts::PROMPT_DELETE_RECENT_END),
             ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),

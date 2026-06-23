@@ -1290,7 +1290,7 @@ fn render_confirm_delete_overlay(frame: &mut Frame, area: Rect, state: &TreeStat
     let inner = block.inner(overlay_area);
     let lines = vec![
         Line::from(Span::styled(
-            format!("Delete \"{}\" field? (y/N)", label),
+            format!("{}{}{}", texts::PROMPT_DELETE_FIELD_START, label, texts::PROMPT_DELETE_FIELD_END),
             ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),
