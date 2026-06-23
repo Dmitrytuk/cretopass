@@ -1353,8 +1353,7 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
 
     for (i, (label, value, cursor_pos)) in fields.iter().enumerate() {
         let is_focused = i == focused;
-        let pwd_marker = Icon::PwdMarker.as_str();
-        let masked = pwd_marker.repeat(value.len());
+        let masked = "*".repeat(value.len());
 
         if is_focused {
             let pos = *cursor_pos;
@@ -1448,8 +1447,7 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
     )));
     lines.push(Line::from(""));
 
-    let pwd_marker = Icon::PwdMarker.as_str();
-    let display = pwd_marker.repeat(passphrase.len());
+    let display = "*".repeat(passphrase.len());
     let before = &display[..cursor.min(display.len())];
     let at = display
         .get(cursor..)
