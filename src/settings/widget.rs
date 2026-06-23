@@ -1,24 +1,19 @@
-use std::fs;
 use std::io;
 use std::path::PathBuf;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{backend::Backend, Frame, Terminal};
 
 use crate::file_browser::{self, FileBrowserAction, FileBrowserMode, FileBrowserState};
+use crate::file_handling;
 use crate::settings::active_file::ActiveFileState;
 use crate::settings::utils::{self, AppSettings};
-
-const MENU_ITEMS: &[&str] = &[
-    "Open secret file",
-    "Create new secret file",
-    "Settings",
-    "Change file password",
-];
+use crate::theming::Action;
+use crate::theming::{texts, ElementStyle, Icon};
 
 enum SettingsModal {
     FileBrowser(FileBrowserState),
@@ -63,20 +58,26 @@ pub struct SettingsState {
     pub status: Option<&'static str>,
 }
 
+impl Default for SettingsState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SettingsState {
     pub fn new() -> Self {
         let settings = utils::load_settings();
         let modal = if settings.open_last_opened_file_on_startup {
             settings.last_opened_file.as_ref().and_then(|path| {
-                utils::validate_encrypted_file(path).ok().map(|data| {
-                    SettingsModal::PassphraseInput {
+                file_handling::validate_encrypted_file(path)
+                    .ok()
+                    .map(|data| SettingsModal::PassphraseInput {
                         file_path: path.clone(),
                         file_data: Some(data),
                         passphrase: String::new(),
                         cursor: 0,
                         error: None,
-                    }
-                })
+                    })
             })
         } else {
             None
@@ -92,7 +93,7 @@ impl SettingsState {
     }
 
     fn total_navigable(&self) -> usize {
-        MENU_ITEMS.len() + self.settings.recent_files.len()
+        texts::MENU_ITEMS.len() + self.settings.recent_files.len()
     }
 
     fn select_next(&mut self) {
@@ -152,12 +153,11 @@ fn handle_settings_key<B: Backend>(
     state: &mut SettingsState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
-    match key.code {
-        KeyCode::Char('q') | KeyCode::Char('Q') => state.quit = true,
-        KeyCode::Esc => state.quit = true,
-        KeyCode::Char('j') | KeyCode::Down => state.select_next(),
-        KeyCode::Char('k') | KeyCode::Up => state.select_prev(),
-        KeyCode::Char('H') => {
+    match Action::from_settings_menu(&key) {
+        Action::Quit => state.quit = true,
+        Action::NavDown => state.select_next(),
+        Action::NavUp => state.select_prev(),
+        Action::ReturnToMenu => {
             if let Some(ref active_file) = state.active_file {
                 if let Some(ref node) = active_file.node {
                     let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
@@ -171,7 +171,7 @@ fn handle_settings_key<B: Backend>(
                 }
             }
         }
-        KeyCode::Enter => {
+        Action::Confirm => {
             let idx = state.selected;
             if idx == 0 {
                 let mut fb = FileBrowserState::new(FileBrowserMode::OpenFile);
@@ -179,7 +179,7 @@ fn handle_settings_key<B: Backend>(
                     state
                         .active_file
                         .as_ref()
-                        .and_then(|af| af.path.as_ref().map(|p| PathBuf::from(p))),
+                        .and_then(|af| af.path.as_ref().map(PathBuf::from)),
                 );
                 state.modal = Some(SettingsModal::FileBrowser(fb));
             } else if idx == 1 {
@@ -188,7 +188,7 @@ fn handle_settings_key<B: Backend>(
                     state
                         .active_file
                         .as_ref()
-                        .and_then(|af| af.path.as_ref().map(|p| PathBuf::from(p))),
+                        .and_then(|af| af.path.as_ref().map(PathBuf::from)),
                 );
                 state.modal = Some(SettingsModal::FileBrowser(fb));
             } else if idx == 2 {
@@ -198,13 +198,13 @@ fn handle_settings_key<B: Backend>(
                     state.modal = Some(SettingsModal::ChangePwConfirm);
                 } else {
                     state.modal = Some(SettingsModal::Alert {
-                        message: "No file is currently open".to_string(),
+                        message: texts::MSG_NO_OPEN_FILE.to_string(),
                     });
                 }
             } else {
-                let file_idx = idx - MENU_ITEMS.len();
+                let file_idx = idx - texts::MENU_ITEMS.len();
                 if file_idx < state.settings.recent_files.len() {
-                    let file_path = state.settings.recent_files[file_idx].clone();
+                    let file_path: String = state.settings.recent_files[file_idx].clone();
 
                     if let Some(ref active_file) = state.active_file {
                         if active_file.path.as_deref() == Some(&file_path) {
@@ -223,9 +223,11 @@ fn handle_settings_key<B: Backend>(
                         }
                     }
 
-                    match utils::validate_encrypted_file(&file_path) {
+                    match file_handling::validate_encrypted_file(&file_path) {
                         Err(e) => {
-                            state.modal = Some(SettingsModal::Alert { message: e });
+                            state.modal = Some(SettingsModal::Alert {
+                                message: format!("{e}"),
+                            });
                         }
                         Ok(data) => {
                             state.modal = Some(SettingsModal::PassphraseInput {
@@ -240,18 +242,17 @@ fn handle_settings_key<B: Backend>(
                 }
             }
         }
-        KeyCode::Char('d') | KeyCode::Delete => {
+        Action::SettingsDelete => {
             let idx = state.selected;
-            if idx >= MENU_ITEMS.len() {
-                let file_idx = idx - MENU_ITEMS.len();
+            if idx >= texts::MENU_ITEMS.len() {
+                let file_idx = idx - texts::MENU_ITEMS.len();
                 if file_idx < state.settings.recent_files.len() {
                     let path = &state.settings.recent_files[file_idx];
                     let is_active =
                         state.active_file.as_ref().and_then(|af| af.path.as_deref()) == Some(path);
                     if is_active {
                         state.modal = Some(SettingsModal::Alert {
-                            message: "Cannot delete the currently open file from recent files"
-                                .to_string(),
+                            message: texts::MSG_CANNOT_DELETE_OPEN.to_string(),
                         });
                     } else {
                         state.modal = Some(SettingsModal::DeleteConfirm { path: path.clone() });
@@ -305,11 +306,7 @@ fn handle_file_browser_key<B: Backend>(
             let creating = modal.mode == FileBrowserMode::CreateFile;
 
             if creating {
-                let probe_path = format!("{}.tmp", path);
-                let writable = fs::write(&probe_path, b"").is_ok();
-                let _ = fs::remove_file(&probe_path);
-
-                if writable {
+                if file_handling::probe_path_writable(&path).is_ok() {
                     state.modal = Some(SettingsModal::PassphraseInput {
                         file_path: path,
                         file_data: None,
@@ -319,13 +316,15 @@ fn handle_file_browser_key<B: Backend>(
                     });
                 } else {
                     state.modal = Some(SettingsModal::Alert {
-                        message: "Cannot write to this path".to_string(),
+                        message: texts::MSG_CANNOT_WRITE.to_string(),
                     });
                 }
             } else {
-                match utils::validate_encrypted_file(&path) {
+                match file_handling::validate_encrypted_file(&path) {
                     Err(e) => {
-                        state.modal = Some(SettingsModal::Alert { message: e });
+                        state.modal = Some(SettingsModal::Alert {
+                            message: format!("{e}"),
+                        });
                     }
                     Ok(data) => {
                         state.modal = Some(SettingsModal::PassphraseInput {
@@ -343,452 +342,462 @@ fn handle_file_browser_key<B: Backend>(
     Ok(())
 }
 
-// ── Modal key handling (Passphrase, Alert, AppSettings) ──
+// ── Per-modal key handlers ──
 
-fn handle_modal_key<B: Backend>(
+fn handle_app_settings_key(key: event::KeyEvent, state: &mut SettingsState) {
+    match Action::from_app_settings(&key) {
+        Action::NavDown => {
+            if let Some(SettingsModal::AppSettings {
+                ref mut setting_idx,
+            }) = state.modal
+            {
+                *setting_idx = (*setting_idx + 1).min(1);
+            }
+        }
+        Action::NavUp => {
+            if let Some(SettingsModal::AppSettings {
+                ref mut setting_idx,
+            }) = state.modal
+            {
+                *setting_idx = setting_idx.saturating_sub(1);
+            }
+        }
+        Action::ToggleSetting => {
+            let idx = match state.modal.as_ref() {
+                Some(SettingsModal::AppSettings { setting_idx }) => *setting_idx,
+                _ => unreachable!(),
+            };
+            if idx == 0 {
+                state.settings.display_full_path = !state.settings.display_full_path;
+            } else {
+                state.settings.open_last_opened_file_on_startup =
+                    !state.settings.open_last_opened_file_on_startup;
+            }
+        }
+        Action::SaveSettings => {
+            let _ = utils::save_settings(&state.settings);
+            state.modal = Some(SettingsModal::Alert {
+                message: texts::MSG_SETTINGS_SAVED.to_string(),
+            });
+        }
+        Action::Cancel => {
+            state.settings = utils::load_settings();
+            state.modal = None;
+        }
+        _ => {}
+    }
+}
+
+fn handle_delete_confirm_key(key: event::KeyEvent, state: &mut SettingsState) {
+    match Action::from_confirm(&key) {
+        Action::Yes => {
+            if let Some(SettingsModal::DeleteConfirm { path }) = state.modal.take() {
+                state.settings.recent_files.retain(|f| f != &path);
+                if state.settings.last_opened_file.as_deref() == Some(&path) {
+                    state.settings.last_opened_file = None;
+                }
+                let _ = utils::save_settings(&state.settings);
+            }
+        }
+        _ => {
+            state.modal = None;
+        }
+    }
+}
+
+fn handle_change_pw_confirm_key(key: event::KeyEvent, state: &mut SettingsState) {
+    match Action::from_confirm(&key) {
+        Action::Yes => {
+            state.modal = Some(SettingsModal::ChangePwInput {
+                current: String::new(),
+                current_cursor: 0,
+                new_pass: String::new(),
+                new_cursor: 0,
+                confirm: String::new(),
+                confirm_cursor: 0,
+                focused: 0,
+                error: None,
+            });
+        }
+        _ => {
+            state.modal = None;
+        }
+    }
+}
+
+fn handle_change_pw_input_key<B: Backend>(
     key: event::KeyEvent,
     state: &mut SettingsState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
-    // ── AppSettings modal ──
-    if state
-        .modal
-        .as_ref()
-        .is_some_and(|m| matches!(m, SettingsModal::AppSettings { .. }))
-    {
-        match key.code {
-            KeyCode::Down | KeyCode::Char('j') => {
-                if let Some(SettingsModal::AppSettings {
-                    ref mut setting_idx,
-                }) = state.modal
-                {
-                    *setting_idx = (*setting_idx + 1).min(1);
-                }
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                if let Some(SettingsModal::AppSettings {
-                    ref mut setting_idx,
-                }) = state.modal
-                {
-                    *setting_idx = setting_idx.saturating_sub(1);
-                }
-            }
-            KeyCode::Char(' ') => {
-                let idx = match state.modal.as_ref() {
-                    Some(SettingsModal::AppSettings { setting_idx }) => *setting_idx,
-                    _ => unreachable!(),
-                };
-                if idx == 0 {
-                    state.settings.display_full_path = !state.settings.display_full_path;
-                } else {
-                    state.settings.open_last_opened_file_on_startup =
-                        !state.settings.open_last_opened_file_on_startup;
-                }
-            }
-            KeyCode::Enter => {
-                let _ = utils::save_settings(&state.settings);
-                state.modal = Some(SettingsModal::Alert {
-                    message: "Settings saved".to_string(),
-                });
-            }
-            KeyCode::Esc => {
-                state.settings = utils::load_settings();
-                state.modal = None;
-            }
-            _ => {}
-        }
-        return Ok(());
-    }
-
-    // ── DeleteConfirm modal ──
-    if state
-        .modal
-        .as_ref()
-        .is_some_and(|m| matches!(m, SettingsModal::DeleteConfirm { .. }))
-    {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                if let Some(SettingsModal::DeleteConfirm { path }) = state.modal.take() {
-                    state.settings.recent_files.retain(|f| f != &path);
-                    if state.settings.last_opened_file.as_deref() == Some(&path) {
-                        state.settings.last_opened_file = None;
-                    }
-                    let _ = utils::save_settings(&state.settings);
-                }
-            }
-            _ => {
-                state.modal = None;
+    match Action::from_change_pw_input(&key) {
+        Action::NextField => {
+            if let Some(SettingsModal::ChangePwInput {
+                ref mut focused, ..
+            }) = state.modal
+            {
+                *focused = (*focused + 1) % 3;
             }
         }
-        return Ok(());
-    }
-
-    // ── ChangePwConfirm modal ──
-    if state
-        .modal
-        .as_ref()
-        .is_some_and(|m| matches!(m, SettingsModal::ChangePwConfirm))
-    {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                state.modal = Some(SettingsModal::ChangePwInput {
-                    current: String::new(),
-                    current_cursor: 0,
-                    new_pass: String::new(),
-                    new_cursor: 0,
-                    confirm: String::new(),
-                    confirm_cursor: 0,
-                    focused: 0,
-                    error: None,
-                });
-            }
-            _ => {
-                state.modal = None;
+        Action::PrevField => {
+            if let Some(SettingsModal::ChangePwInput {
+                ref mut focused, ..
+            }) = state.modal
+            {
+                *focused = focused.saturating_sub(1);
             }
         }
-        return Ok(());
-    }
-
-    // ── ChangePwInput modal ──
-    if state
-        .modal
-        .as_ref()
-        .is_some_and(|m| matches!(m, SettingsModal::ChangePwInput { .. }))
-    {
-        match key.code {
-            KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => {
-                if let Some(SettingsModal::ChangePwInput {
-                    ref mut focused, ..
-                }) = state.modal
-                {
-                    *focused = (*focused + 1) % 3;
-                }
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                if let Some(SettingsModal::ChangePwInput {
-                    ref mut focused, ..
-                }) = state.modal
-                {
-                    *focused = focused.saturating_sub(1);
-                }
-            }
-            KeyCode::Char(c) => {
-                if let Some(SettingsModal::ChangePwInput {
-                    ref mut current,
-                    ref mut current_cursor,
-                    ref mut new_pass,
-                    ref mut new_cursor,
-                    ref mut confirm,
-                    ref mut confirm_cursor,
-                    ref mut focused,
-                    ref mut error,
-                }) = state.modal
-                {
-                    *error = None;
-                    match *focused {
-                        0 => {
-                            current.insert(*current_cursor, c);
-                            *current_cursor += 1;
-                        }
-                        1 => {
-                            new_pass.insert(*new_cursor, c);
-                            *new_cursor += 1;
-                        }
-                        _ => {
-                            confirm.insert(*confirm_cursor, c);
-                            *confirm_cursor += 1;
-                        }
+        Action::InsertChar(c) => {
+            if let Some(SettingsModal::ChangePwInput {
+                ref mut current,
+                ref mut current_cursor,
+                ref mut new_pass,
+                ref mut new_cursor,
+                ref mut confirm,
+                ref mut confirm_cursor,
+                ref mut focused,
+                ref mut error,
+            }) = state.modal
+            {
+                *error = None;
+                match *focused {
+                    0 => {
+                        current.insert(*current_cursor, c);
+                        *current_cursor += 1;
+                    }
+                    1 => {
+                        new_pass.insert(*new_cursor, c);
+                        *new_cursor += 1;
+                    }
+                    _ => {
+                        confirm.insert(*confirm_cursor, c);
+                        *confirm_cursor += 1;
                     }
                 }
             }
-            KeyCode::Backspace => {
-                if let Some(SettingsModal::ChangePwInput {
-                    ref mut current,
-                    ref mut current_cursor,
-                    ref mut new_pass,
-                    ref mut new_cursor,
-                    ref mut confirm,
-                    ref mut confirm_cursor,
-                    ref mut focused,
-                    ref mut error,
-                }) = state.modal
-                {
-                    *error = None;
-                    match *focused {
-                        0 if *current_cursor > 0 => {
-                            *current_cursor -= 1;
-                            current.remove(*current_cursor);
-                        }
-                        1 if *new_cursor > 0 => {
-                            *new_cursor -= 1;
-                            new_pass.remove(*new_cursor);
-                        }
-                        2 if *confirm_cursor > 0 => {
-                            *confirm_cursor -= 1;
-                            confirm.remove(*confirm_cursor);
-                        }
-                        _ => {}
+        }
+        Action::Backspace => {
+            if let Some(SettingsModal::ChangePwInput {
+                ref mut current,
+                ref mut current_cursor,
+                ref mut new_pass,
+                ref mut new_cursor,
+                ref mut confirm,
+                ref mut confirm_cursor,
+                ref mut focused,
+                ref mut error,
+            }) = state.modal
+            {
+                *error = None;
+                match *focused {
+                    0 if *current_cursor > 0 => {
+                        *current_cursor -= 1;
+                        current.remove(*current_cursor);
                     }
+                    1 if *new_cursor > 0 => {
+                        *new_cursor -= 1;
+                        new_pass.remove(*new_cursor);
+                    }
+                    2 if *confirm_cursor > 0 => {
+                        *confirm_cursor -= 1;
+                        confirm.remove(*confirm_cursor);
+                    }
+                    _ => {}
                 }
             }
-            KeyCode::Delete => {
-                if let Some(SettingsModal::ChangePwInput {
-                    ref mut current,
-                    ref mut current_cursor,
-                    ref mut new_pass,
-                    ref mut new_cursor,
-                    ref mut confirm,
-                    ref mut confirm_cursor,
-                    ref mut focused,
-                    ref mut error,
-                }) = state.modal
-                {
-                    *error = None;
-                    match *focused {
-                        0 if *current_cursor < current.len() => {
-                            current.remove(*current_cursor);
-                        }
-                        1 if *new_cursor < new_pass.len() => {
-                            new_pass.remove(*new_cursor);
-                        }
-                        2 if *confirm_cursor < confirm.len() => {
-                            confirm.remove(*confirm_cursor);
-                        }
-                        _ => {}
+        }
+        Action::DeleteChar => {
+            if let Some(SettingsModal::ChangePwInput {
+                ref mut current,
+                ref mut current_cursor,
+                ref mut new_pass,
+                ref mut new_cursor,
+                ref mut confirm,
+                ref mut confirm_cursor,
+                ref mut focused,
+                ref mut error,
+            }) = state.modal
+            {
+                *error = None;
+                match *focused {
+                    0 if *current_cursor < current.len() => {
+                        current.remove(*current_cursor);
                     }
+                    1 if *new_cursor < new_pass.len() => {
+                        new_pass.remove(*new_cursor);
+                    }
+                    2 if *confirm_cursor < confirm.len() => {
+                        confirm.remove(*confirm_cursor);
+                    }
+                    _ => {}
                 }
             }
-            KeyCode::Left => {
-                if let Some(SettingsModal::ChangePwInput {
-                    ref mut current_cursor,
-                    ref mut new_cursor,
-                    ref mut confirm_cursor,
-                    ref mut focused,
+        }
+        Action::CursorLeft => {
+            if let Some(SettingsModal::ChangePwInput {
+                ref mut current_cursor,
+                ref mut new_cursor,
+                ref mut confirm_cursor,
+                ref mut focused,
+                ..
+            }) = state.modal
+            {
+                match *focused {
+                    0 if *current_cursor > 0 => *current_cursor -= 1,
+                    1 if *new_cursor > 0 => *new_cursor -= 1,
+                    2 if *confirm_cursor > 0 => *confirm_cursor -= 1,
+                    _ => {}
+                }
+            }
+        }
+        Action::CursorRight => {
+            if let Some(SettingsModal::ChangePwInput {
+                ref mut current,
+                ref mut current_cursor,
+                ref mut new_pass,
+                ref mut new_cursor,
+                ref mut confirm,
+                ref mut confirm_cursor,
+                ref mut focused,
+                ..
+            }) = state.modal
+            {
+                match *focused {
+                    0 if *current_cursor < current.len() => *current_cursor += 1,
+                    1 if *new_cursor < new_pass.len() => *new_cursor += 1,
+                    2 if *confirm_cursor < confirm.len() => *confirm_cursor += 1,
+                    _ => {}
+                }
+            }
+        }
+        Action::CursorHome => {
+            if let Some(SettingsModal::ChangePwInput {
+                ref mut current_cursor,
+                ref mut new_cursor,
+                ref mut confirm_cursor,
+                ref mut focused,
+                ..
+            }) = state.modal
+            {
+                match *focused {
+                    0 => *current_cursor = 0,
+                    1 => *new_cursor = 0,
+                    _ => *confirm_cursor = 0,
+                }
+            }
+        }
+        Action::CursorEnd => {
+            if let Some(SettingsModal::ChangePwInput {
+                ref mut current,
+                ref mut current_cursor,
+                ref mut new_pass,
+                ref mut new_cursor,
+                ref mut confirm,
+                ref mut confirm_cursor,
+                ref mut focused,
+                ..
+            }) = state.modal
+            {
+                match *focused {
+                    0 => *current_cursor = current.len(),
+                    1 => *new_cursor = new_pass.len(),
+                    _ => *confirm_cursor = confirm.len(),
+                }
+            }
+        }
+        Action::Cancel => {
+            state.modal = None;
+        }
+        Action::Confirm => {
+            let mut modal = match state.modal.take() {
+                Some(SettingsModal::ChangePwInput {
+                    current,
+                    current_cursor,
+                    new_pass,
+                    new_cursor,
+                    confirm,
+                    confirm_cursor,
+                    focused,
+                    error,
+                }) => SettingsModal::ChangePwInput {
+                    current,
+                    current_cursor,
+                    new_pass,
+                    new_cursor,
+                    confirm,
+                    confirm_cursor,
+                    focused,
+                    error,
+                },
+                _ => return Ok(()),
+            };
+            let (_current, new_pass, _confirm, has_error) = match &mut modal {
+                SettingsModal::ChangePwInput {
+                    current,
+                    new_pass,
+                    confirm,
+                    error,
                     ..
-                }) = state.modal
-                {
-                    match *focused {
-                        0 if *current_cursor > 0 => *current_cursor -= 1,
-                        1 if *new_cursor > 0 => *new_cursor -= 1,
-                        2 if *confirm_cursor > 0 => *confirm_cursor -= 1,
-                        _ => {}
-                    }
+                } => {
+                    let is_ok = if current.as_bytes()
+                        != state
+                            .active_file
+                            .as_ref()
+                            .map(|af| af.passphrase.as_slice())
+                            .unwrap_or(&[])
+                    {
+                        *error = Some(texts::MSG_CURRENT_PW_INCORRECT.to_string());
+                        false
+                    } else if new_pass.is_empty() || confirm.is_empty() {
+                        *error = Some(texts::MSG_PW_EMPTY.to_string());
+                        false
+                    } else if new_pass != confirm {
+                        *error = Some(texts::MSG_PW_MISMATCH.to_string());
+                        false
+                    } else {
+                        true
+                    };
+                    (current.clone(), new_pass.clone(), confirm.clone(), !is_ok)
                 }
-            }
-            KeyCode::Right => {
-                if let Some(SettingsModal::ChangePwInput {
-                    ref mut current,
-                    ref mut current_cursor,
-                    ref mut new_pass,
-                    ref mut new_cursor,
-                    ref mut confirm,
-                    ref mut confirm_cursor,
-                    ref mut focused,
-                    ..
-                }) = state.modal
-                {
-                    match *focused {
-                        0 if *current_cursor < current.len() => *current_cursor += 1,
-                        1 if *new_cursor < new_pass.len() => *new_cursor += 1,
-                        2 if *confirm_cursor < confirm.len() => *confirm_cursor += 1,
-                        _ => {}
-                    }
-                }
-            }
-            KeyCode::Home => {
-                if let Some(SettingsModal::ChangePwInput {
-                    ref mut current_cursor,
-                    ref mut new_cursor,
-                    ref mut confirm_cursor,
-                    ref mut focused,
-                    ..
-                }) = state.modal
-                {
-                    match *focused {
-                        0 => *current_cursor = 0,
-                        1 => *new_cursor = 0,
-                        _ => *confirm_cursor = 0,
-                    }
-                }
-            }
-            KeyCode::End => {
-                if let Some(SettingsModal::ChangePwInput {
-                    ref mut current,
-                    ref mut current_cursor,
-                    ref mut new_pass,
-                    ref mut new_cursor,
-                    ref mut confirm,
-                    ref mut confirm_cursor,
-                    ref mut focused,
-                    ..
-                }) = state.modal
-                {
-                    match *focused {
-                        0 => *current_cursor = current.len(),
-                        1 => *new_cursor = new_pass.len(),
-                        _ => *confirm_cursor = confirm.len(),
-                    }
-                }
-            }
-            KeyCode::Esc => {
-                state.modal = None;
-            }
-            KeyCode::Enter => {
-                let mut modal = match state.modal.take() {
-                    Some(SettingsModal::ChangePwInput {
-                        current,
-                        current_cursor,
-                        new_pass,
-                        new_cursor,
-                        confirm,
-                        confirm_cursor,
-                        focused,
-                        error,
-                    }) => SettingsModal::ChangePwInput {
-                        current,
-                        current_cursor,
-                        new_pass,
-                        new_cursor,
-                        confirm,
-                        confirm_cursor,
-                        focused,
-                        error,
-                    },
-                    _ => return Ok(()),
-                };
-                let (_current, new_pass, _confirm, has_error) = match &mut modal {
-                    SettingsModal::ChangePwInput {
-                        current,
-                        new_pass,
-                        confirm,
-                        error,
-                        ..
-                    } => {
-                        let is_ok = if current.as_bytes()
-                            != state
-                                .active_file
-                                .as_ref()
-                                .map(|af| af.passphrase.as_slice())
-                                .unwrap_or(&[])
-                        {
-                            *error = Some("Current password is incorrect".to_string());
-                            false
-                        } else if new_pass.is_empty() || confirm.is_empty() {
-                            *error = Some("New password fields cannot be empty".to_string());
-                            false
-                        } else if new_pass != confirm {
-                            *error = Some("New passwords do not match".to_string());
-                            false
-                        } else {
-                            true
-                        };
-                        (current.clone(), new_pass.clone(), confirm.clone(), !is_ok)
-                    }
-                    _ => unreachable!(),
-                };
-                if has_error {
-                    state.modal = Some(modal);
-                } else {
-                    // Save with new passphrase and reopen
-                    if let Some(ref active_file) = state.active_file.clone() {
-                        if let (Some(ref path), Some(ref node)) =
-                            (&active_file.path, &active_file.node)
-                        {
-                            let new_pass_bytes = new_pass.into_bytes();
-                            state.status = Some("Saving...");
-                            terminal.draw(|f| render(f, f.area(), state))?;
-                            match utils::save_tree(node, path, &new_pass_bytes) {
-                                Err(e) => {
-                                    state.status = None;
-                                    state.modal = Some(SettingsModal::ChangePwInput {
-                                        current: String::new(),
-                                        current_cursor: 0,
-                                        new_pass: String::new(),
-                                        new_cursor: 0,
-                                        confirm: String::new(),
-                                        confirm_cursor: 0,
-                                        focused: 0,
-                                        error: Some(format!("Failed to save: {e}")),
-                                    });
-                                }
-                                Ok(()) => {
-                                    state.status = None;
-                                    state.active_file.as_mut().unwrap().passphrase =
-                                        new_pass_bytes.clone();
-                                    let mut tree_state =
-                                        crate::tree::widget::TreeState::new(node.clone());
-                                    tree_state.active_file_path = Some(path.clone());
-                                    tree_state.active_file_passphrase = new_pass_bytes;
-                                    tree_state.display_full_path = state.settings.display_full_path;
-                                    crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
-                                    if !tree_state.return_to_menu {
-                                        state.quit = true;
-                                    }
+                _ => unreachable!(),
+            };
+            if has_error {
+                state.modal = Some(modal);
+            } else {
+                // Save with new passphrase and reopen
+                if let Some(ref active_file) = state.active_file.clone() {
+                    if let (Some(ref path), Some(ref node)) = (&active_file.path, &active_file.node)
+                    {
+                        let new_pass_bytes = new_pass.into_bytes();
+                        state.status = Some(texts::STATUS_SAVING);
+                        terminal.draw(|f| render(f, f.area(), state))?;
+                        match file_handling::save_tree(node, path, &new_pass_bytes) {
+                            Err(e) => {
+                                state.status = None;
+                                state.modal = Some(SettingsModal::ChangePwInput {
+                                    current: String::new(),
+                                    current_cursor: 0,
+                                    new_pass: String::new(),
+                                    new_cursor: 0,
+                                    confirm: String::new(),
+                                    confirm_cursor: 0,
+                                    focused: 0,
+                                    error: Some(format!("{}{e}", texts::MSG_SAVE_FAILED)),
+                                });
+                            }
+                            Ok(()) => {
+                                state.status = None;
+                                state.active_file.as_mut().unwrap().passphrase =
+                                    new_pass_bytes.clone();
+                                let mut tree_state =
+                                    crate::tree::widget::TreeState::new(node.clone());
+                                tree_state.active_file_path = Some(path.clone());
+                                tree_state.active_file_passphrase = new_pass_bytes;
+                                tree_state.display_full_path = state.settings.display_full_path;
+                                crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
+                                if !tree_state.return_to_menu {
+                                    state.quit = true;
                                 }
                             }
                         }
                     }
                 }
             }
-            _ => {}
         }
-        return Ok(());
+        _ => {}
     }
+    Ok(())
+}
 
-    // ── ConfirmNoPassphrase modal ──
-    if state
-        .modal
-        .as_ref()
-        .is_some_and(|m| matches!(m, SettingsModal::ConfirmNoPassphrase { .. }))
-    {
-        let file_path = match state.modal.take() {
-            Some(SettingsModal::ConfirmNoPassphrase { file_path }) => file_path,
-            _ => unreachable!(),
-        };
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                state.status = Some("Saving...");
-                terminal.draw(|f| render(f, f.area(), state))?;
-                match utils::create_secret_file(&file_path, "") {
-                    Err(e) => {
-                        state.status = None;
-                        state.modal = Some(SettingsModal::Alert { message: e });
-                    }
-                    Ok(node) => {
-                        state.status = None;
-                        let pp_bytes = Vec::new();
-                        let active_file = ActiveFileState {
-                            path: Some(file_path.clone()),
-                            passphrase: pp_bytes.clone(),
-                            node: Some(node.clone()),
-                        };
-                        state.active_file = Some(active_file);
+fn handle_confirm_no_passphrase_key<B: Backend>(
+    key: event::KeyEvent,
+    state: &mut SettingsState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
+    let file_path = match state.modal.take() {
+        Some(SettingsModal::ConfirmNoPassphrase { file_path }) => file_path,
+        _ => unreachable!(),
+    };
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+            state.status = Some(texts::STATUS_SAVING);
+            terminal.draw(|f| render(f, f.area(), state))?;
+            match file_handling::create_secret_file(&file_path, "") {
+                Err(e) => {
+                    state.status = None;
+                    state.modal = Some(SettingsModal::Alert {
+                        message: format!("{e}"),
+                    });
+                }
+                Ok(node) => {
+                    state.status = None;
+                    let pp_bytes = Vec::new();
+                    let active_file = ActiveFileState {
+                        path: Some(file_path.clone()),
+                        passphrase: pp_bytes.clone(),
+                        node: Some(node.clone()),
+                    };
+                    state.active_file = Some(active_file);
 
-                        let _ = utils::push_recent_file(&mut state.settings, &file_path);
+                    let _ = utils::push_recent_file(&mut state.settings, &file_path);
 
-                        let mut tree_state = crate::tree::widget::TreeState::new(node);
-                        tree_state.active_file_path = Some(file_path);
-                        tree_state.active_file_passphrase = pp_bytes;
-                        tree_state.display_full_path = state.settings.display_full_path;
-                        crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
+                    let mut tree_state = crate::tree::widget::TreeState::new(node);
+                    tree_state.active_file_path = Some(file_path);
+                    tree_state.active_file_passphrase = pp_bytes;
+                    tree_state.display_full_path = state.settings.display_full_path;
+                    crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
 
-                        if !tree_state.return_to_menu {
-                            state.quit = true;
-                        }
+                    if !tree_state.return_to_menu {
+                        state.quit = true;
                     }
                 }
             }
-            _ => {
-                state.modal = Some(SettingsModal::PassphraseInput {
-                    file_path,
-                    file_data: None,
-                    passphrase: String::new(),
-                    cursor: 0,
-                    error: None,
-                });
-            }
         }
-        return Ok(());
+        _ => {
+            state.modal = Some(SettingsModal::PassphraseInput {
+                file_path,
+                file_data: None,
+                passphrase: String::new(),
+                cursor: 0,
+                error: None,
+            });
+        }
+    }
+    Ok(())
+}
+
+// ── Modal key handling (Passphrase, Alert, FileBrowser) ──
+
+fn handle_modal_key<B: Backend>(
+    key: event::KeyEvent,
+    state: &mut SettingsState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
+    use SettingsModal::*;
+    let kind: u8 = match state.modal.as_ref() {
+        Some(AppSettings { .. }) => 0,
+        Some(DeleteConfirm { .. }) => 1,
+        Some(ChangePwConfirm) => 2,
+        Some(ChangePwInput { .. }) => 3,
+        Some(ConfirmNoPassphrase { .. }) => 4,
+        _ => 255,
+    };
+    match kind {
+        0 => {
+            handle_app_settings_key(key, state);
+            return Ok(());
+        }
+        1 => {
+            handle_delete_confirm_key(key, state);
+            return Ok(());
+        }
+        2 => {
+            handle_change_pw_confirm_key(key, state);
+            return Ok(());
+        }
+        3 => return handle_change_pw_input_key(key, state, terminal),
+        4 => return handle_confirm_no_passphrase_key(key, state, terminal),
+        _ => {}
     }
 
     let mut modal = match state.modal.take() {
@@ -796,9 +805,9 @@ fn handle_modal_key<B: Backend>(
         None => return Ok(()),
     };
 
-    match key.code {
-        KeyCode::Esc => {}
-        KeyCode::Char(c) => match &mut modal {
+    match Action::from_passphrase_input(&key) {
+        Action::Cancel => {}
+        Action::InsertChar(c) => match &mut modal {
             SettingsModal::PassphraseInput {
                 passphrase,
                 cursor,
@@ -810,7 +819,9 @@ fn handle_modal_key<B: Backend>(
                 *error = None;
                 state.modal = Some(modal);
             }
-            SettingsModal::Alert { .. } => {}
+            SettingsModal::Alert { .. } => {
+                state.modal = Some(modal);
+            }
             SettingsModal::FileBrowser(_)
             | SettingsModal::AppSettings { .. }
             | SettingsModal::DeleteConfirm { .. }
@@ -818,7 +829,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
-        KeyCode::Backspace => match &mut modal {
+        Action::Backspace => match &mut modal {
             SettingsModal::PassphraseInput {
                 passphrase, cursor, ..
             } => {
@@ -838,7 +849,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
-        KeyCode::Delete => match &mut modal {
+        Action::DeleteChar => match &mut modal {
             SettingsModal::PassphraseInput {
                 passphrase, cursor, ..
             } => {
@@ -857,7 +868,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
-        KeyCode::Left => match &mut modal {
+        Action::CursorLeft => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
                 *cursor = cursor.saturating_sub(1);
                 state.modal = Some(modal);
@@ -872,7 +883,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
-        KeyCode::Right => match &mut modal {
+        Action::CursorRight => match &mut modal {
             SettingsModal::PassphraseInput {
                 cursor, passphrase, ..
             } => {
@@ -891,7 +902,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
-        KeyCode::Home => match &mut modal {
+        Action::CursorHome => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
                 *cursor = 0;
                 state.modal = Some(modal);
@@ -906,7 +917,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
-        KeyCode::End => match &mut modal {
+        Action::CursorEnd => match &mut modal {
             SettingsModal::PassphraseInput {
                 cursor, passphrase, ..
             } => {
@@ -923,7 +934,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. } => unreachable!(),
         },
-        KeyCode::Enter => match modal {
+        Action::Confirm => match modal {
             SettingsModal::PassphraseInput {
                 file_path,
                 file_data,
@@ -931,9 +942,9 @@ fn handle_modal_key<B: Backend>(
                 ..
             } => match file_data {
                 Some(data) => {
-                    state.status = Some("Loading...");
+                    state.status = Some(texts::STATUS_LOADING);
                     terminal.draw(|f| render(f, f.area(), state))?;
-                    match utils::decrypt_to_node(&data, &passphrase) {
+                    match file_handling::decrypt_to_node(&data, &passphrase) {
                         Err(e) => {
                             state.status = None;
                             state.modal = Some(SettingsModal::PassphraseInput {
@@ -941,7 +952,7 @@ fn handle_modal_key<B: Backend>(
                                 file_data: Some(data),
                                 passphrase,
                                 cursor: 0,
-                                error: Some(format!("wrong password: {e}")),
+                                error: Some(format!("{}{e}", texts::MSG_WRONG_PW)),
                             });
                         }
                         Ok(node) => {
@@ -973,12 +984,14 @@ fn handle_modal_key<B: Backend>(
                         state.modal = Some(SettingsModal::ConfirmNoPassphrase { file_path });
                         return Ok(());
                     }
-                    state.status = Some("Saving...");
+                    state.status = Some(texts::STATUS_SAVING);
                     terminal.draw(|f| render(f, f.area(), state))?;
-                    match utils::create_secret_file(&file_path, &passphrase) {
+                    match file_handling::create_secret_file(&file_path, &passphrase) {
                         Err(e) => {
                             state.status = None;
-                            state.modal = Some(SettingsModal::Alert { message: e });
+                            state.modal = Some(SettingsModal::Alert {
+                                message: format!("{e}"),
+                            });
                         }
                         Ok(node) => {
                             state.status = None;
@@ -1060,35 +1073,33 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
         .and_then(|af| af.path.as_deref())
         .map(|p| {
             if state.settings.display_full_path {
-                format!(" Settings — {} ", p)
+                format!("{} {} ", texts::TITLE_SETTINGS_PREFIX, p)
             } else {
                 let name = std::path::Path::new(p)
                     .file_name()
                     .map(|n| n.to_string_lossy())
                     .unwrap_or(std::borrow::Cow::Borrowed(p));
-                format!(" Settings — {} ", name)
+                format!("{} {} ", texts::TITLE_SETTINGS_PREFIX, name)
             }
         })
-        .unwrap_or_else(|| " Settings ".to_string());
+        .unwrap_or_else(|| texts::TITLE_SETTINGS_DEFAULT.to_string());
 
     let mut title_spans: Vec<Span> = Vec::new();
     if let Some(s) = state.status {
-        let color = match s {
-            "Loading..." => Color::Green,
-            "Saving..." => Color::Red,
-            _ => Color::White,
+        use crate::theming::texts::{STATUS_LOADING, STATUS_SAVING};
+        let el = match s {
+            STATUS_LOADING => ElementStyle::StatusLoading,
+            STATUS_SAVING => ElementStyle::StatusSaving,
+            _ => ElementStyle::StatusInfo,
         };
-        title_spans.push(Span::styled(
-            format!(" {}  ", s),
-            Style::default().fg(color),
-        ));
+        title_spans.push(Span::styled(format!(" {}  ", s), el.style()));
     }
     title_spans.push(Span::raw(base_title));
 
     let block = Block::default()
         .title(Line::from(title_spans))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(ElementStyle::SettingsBlockBorder.style());
 
     let inner = block.inner(layout[0]);
     frame.render_widget(block, layout[0]);
@@ -1096,14 +1107,18 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
 
-    for (i, item) in MENU_ITEMS.iter().enumerate() {
+    for (i, item) in texts::MENU_ITEMS.iter().enumerate() {
         let is_selected = state.selected == i;
         let style = if is_selected {
-            Style::default().bg(Color::DarkGray).fg(Color::White)
+            ElementStyle::SettingsSelected.style()
         } else {
-            Style::default().fg(Color::White)
+            ElementStyle::SettingsNormal.style()
         };
-        let prefix = if is_selected { "▸ " } else { "  " };
+        let prefix = if is_selected {
+            Icon::SelectionArrow.as_str()
+        } else {
+            Icon::SelectionPad.as_str()
+        };
         lines.push(Line::from(Span::styled(
             format!("{}{}", prefix, item),
             style,
@@ -1112,21 +1127,25 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "─── Recent Files ───",
-        Style::default().fg(Color::DarkGray),
+        texts::SEPARATOR_RECENT_FILES,
+        ElementStyle::SettingsSectionHeader.style(),
     )));
     lines.push(Line::from(""));
 
-    let menu_len = MENU_ITEMS.len();
+    let menu_len = texts::MENU_ITEMS.len();
     for (i, file) in state.settings.recent_files.iter().enumerate() {
         let idx = menu_len + i;
         let is_selected = state.selected == idx;
         let style = if is_selected {
-            Style::default().bg(Color::DarkGray).fg(Color::White)
+            ElementStyle::SettingsSelected.style()
         } else {
-            Style::default().fg(Color::White)
+            ElementStyle::SettingsNormal.style()
         };
-        let prefix = if is_selected { "▸ " } else { "  " };
+        let prefix = if is_selected {
+            Icon::SelectionArrow.as_str()
+        } else {
+            Icon::SelectionPad.as_str()
+        };
         let display = if state.settings.display_full_path {
             file.clone()
         } else {
@@ -1165,19 +1184,16 @@ fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsStat
 
     let overlay_area = make_overlay(area, 10);
     let block = Block::default()
-        .title(" Settings ")
+        .title(texts::SETTINGS_APP)
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black).fg(Color::Cyan));
+        .style(ElementStyle::SettingsOverlayBlock.style());
 
     let inner = block.inner(overlay_area);
 
     let rows = [
+        (texts::SETTING_FULL_PATH, state.settings.display_full_path),
         (
-            "Display full path in title bar",
-            state.settings.display_full_path,
-        ),
-        (
-            "Start with last file",
+            texts::SETTING_LAST_FILE,
             state.settings.open_last_opened_file_on_startup,
         ),
     ];
@@ -1188,12 +1204,20 @@ fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsStat
     for (i, (label, value)) in rows.iter().enumerate() {
         let is_selected = i == setting_idx;
         let style = if is_selected {
-            Style::default().bg(Color::DarkGray).fg(Color::White)
+            ElementStyle::SettingsSelected.style()
         } else {
-            Style::default().fg(Color::White)
+            ElementStyle::SettingsNormal.style()
         };
-        let prefix = if is_selected { "▸ " } else { "  " };
-        let checkbox = if *value { "[X]" } else { "[ ]" };
+        let prefix = if is_selected {
+            Icon::SelectionArrow.as_str()
+        } else {
+            Icon::SelectionPad.as_str()
+        };
+        let checkbox = if *value {
+            Icon::CheckboxOn.as_str()
+        } else {
+            Icon::CheckboxOff.as_str()
+        };
         lines.push(Line::from(vec![
             Span::styled(format!("{}{} ", prefix, checkbox), style),
             Span::styled(*label, style),
@@ -1202,8 +1226,8 @@ fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsStat
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Space:toggle  Enter:save  Esc:cancel",
-        Style::default().fg(Color::DarkGray),
+        texts::HINT_APP_SETTINGS,
+        ElementStyle::SettingsHelp.style(),
     )));
 
     frame.render_widget(Clear, overlay_area);
@@ -1214,22 +1238,27 @@ fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsStat
 fn render_delete_confirm_modal(frame: &mut Frame, area: Rect, path: &str) {
     let overlay_area = make_overlay(area, 7);
     let block = Block::default()
-        .title(" Confirm Delete ")
+        .title(texts::SETTINGS_DELETE_CONFIRM)
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black).fg(Color::Red));
+        .style(ElementStyle::SettingsDeleteBlock.style());
 
     let inner = block.inner(overlay_area);
 
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
-            format!("Remove '{}' from recent files?", path),
-            Style::default().fg(Color::White),
+            format!(
+                "{}{}{}",
+                texts::PROMPT_DELETE_RECENT_START,
+                path,
+                texts::PROMPT_DELETE_RECENT_END
+            ),
+            ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "y/Enter:confirm  any key:cancel",
-            Style::default().fg(Color::DarkGray),
+            texts::HINT_DELETE_CONFIRM,
+            ElementStyle::SettingsHelp.style(),
         )),
     ];
 
@@ -1241,22 +1270,22 @@ fn render_delete_confirm_modal(frame: &mut Frame, area: Rect, path: &str) {
 fn render_change_pw_confirm_modal(frame: &mut Frame, area: Rect) {
     let overlay_area = make_overlay(area, 7);
     let block = Block::default()
-        .title(" Change Password ")
+        .title(texts::SETTINGS_CHANGE_PASSWORD)
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black).fg(Color::Yellow));
+        .style(ElementStyle::SettingsChangePwBlock.style());
 
     let inner = block.inner(overlay_area);
 
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
-            "Are you sure you want to change the password?",
-            Style::default().fg(Color::White),
+            texts::PROMPT_CHANGE_PW,
+            ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "y/Enter:yes  any key:no",
-            Style::default().fg(Color::DarkGray),
+            texts::HINT_CHANGE_PW_CONFIRM,
+            ElementStyle::SettingsHelp.style(),
         )),
     ];
 
@@ -1268,22 +1297,22 @@ fn render_change_pw_confirm_modal(frame: &mut Frame, area: Rect) {
 fn render_confirm_no_passphrase_modal(frame: &mut Frame, area: Rect) {
     let overlay_area = make_overlay(area, 7);
     let block = Block::default()
-        .title(" No Passphrase ")
+        .title(texts::SETTINGS_NO_PASSPHRASE)
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black).fg(Color::Yellow));
+        .style(ElementStyle::SettingsNoPassBlock.style());
 
     let inner = block.inner(overlay_area);
 
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
-            "You are creating the secret file without password?",
-            Style::default().fg(Color::White),
+            texts::PROMPT_NO_PASSPHRASE,
+            ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "y/Enter:yes  any key:no",
-            Style::default().fg(Color::DarkGray),
+            texts::HINT_NO_PASSPHRASE,
+            ElementStyle::SettingsHelp.style(),
         )),
     ];
 
@@ -1319,16 +1348,16 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
 
     let overlay_area = make_overlay(area, if error.is_some() { 13 } else { 12 });
     let block = Block::default()
-        .title(" Change Password ")
+        .title(texts::SETTINGS_CHANGE_PASSWORD)
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black).fg(Color::Yellow));
+        .style(ElementStyle::SettingsChangePwBlock.style());
 
     let inner = block.inner(overlay_area);
 
     let fields = [
-        ("Current password", &current, current_cursor),
-        ("New password", &new_pass, new_cursor),
-        ("Confirm new password", &confirm, confirm_cursor),
+        (texts::LABEL_CURRENT_PW, &current, current_cursor),
+        (texts::LABEL_NEW_PW, &new_pass, new_cursor),
+        (texts::LABEL_CONFIRM_PW, &confirm, confirm_cursor),
     ];
 
     let mut lines: Vec<Line> = Vec::new();
@@ -1343,25 +1372,31 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
             let before = &masked[..pos.min(masked.len())];
             let at = masked
                 .get(pos..)
-                .and_then(|s| s.chars().next())
-                .map(|c| c.to_string())
+                .and_then(|s: &str| s.chars().next())
+                .map(|c: char| c.to_string())
                 .unwrap_or_default();
             let after = &masked[pos + at.len()..];
             let cursor_char = if at.is_empty() { " " } else { &at };
 
             lines.push(Line::from(vec![
-                Span::styled(format!("  {}: ", label), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("  {}: ", label),
+                    ElementStyle::SettingsFieldLabel.style(),
+                ),
                 Span::raw(before.to_string()),
                 Span::styled(
                     cursor_char.to_string(),
-                    Style::default().bg(Color::White).fg(Color::Black),
+                    ElementStyle::InvertedCursor.style(),
                 ),
                 Span::raw(after.to_string()),
             ]));
         } else {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {}: ", label), Style::default().fg(Color::White)),
-                Span::styled(masked, Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("  {}: ", label),
+                    ElementStyle::SettingsFieldLabel.style(),
+                ),
+                Span::styled(masked, ElementStyle::SettingsFieldLabel.style()),
             ]));
         }
     }
@@ -1369,14 +1404,14 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
     if let Some(ref err_msg) = error {
         lines.push(Line::from(Span::styled(
             format!(" {}", err_msg),
-            Style::default().bg(Color::Red).fg(Color::White),
+            ElementStyle::SettingsErrorBar.style(),
         )));
     }
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Tab/↑/↓:switch  Enter:apply  Esc:cancel",
-        Style::default().fg(Color::DarkGray),
+        texts::HINT_CHANGE_PW_INPUT,
+        ElementStyle::SettingsHelp.style(),
     )));
 
     frame.render_widget(Clear, overlay_area);
@@ -1392,38 +1427,33 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
             cursor,
             error,
             ..
-        }) => (
-            file_path.clone(),
-            passphrase.clone(),
-            *cursor,
-            error.clone(),
-        ),
+        }) => (file_path, passphrase, *cursor, error),
         _ => return,
     };
 
     let display_path = if state.settings.display_full_path {
-        file_path.clone()
+        file_path.to_string()
     } else {
-        std::path::Path::new(&file_path)
+        std::path::Path::new(file_path.as_str())
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| file_path.clone())
+            .unwrap_or_else(|| file_path.to_string())
     };
 
     let overlay_area = make_overlay(area, if error.is_some() { 9 } else { 8 });
 
     let block = Block::default()
-        .title(" Enter Passphrase ")
+        .title(texts::SETTINGS_ENTER_PASSPHRASE)
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black).fg(Color::Cyan));
+        .style(ElementStyle::SettingsPassBlock.style());
 
     let inner = block.inner(overlay_area);
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        format!("File: {}", display_path),
-        Style::default().fg(Color::DarkGray),
+        format!("{} {}", texts::LABEL_FILE, display_path),
+        ElementStyle::CursorLabel.style(),
     )));
     lines.push(Line::from(""));
 
@@ -1431,19 +1461,22 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
     let before = &display[..cursor.min(display.len())];
     let at = display
         .get(cursor..)
-        .and_then(|s| s.chars().next())
-        .map(|c| c.to_string())
+        .and_then(|s: &str| s.chars().next())
+        .map(|c: char| c.to_string())
         .unwrap_or_default();
     let after = &display[cursor + at.len()..];
 
     let cursor_char = if at.is_empty() { " " } else { &at };
 
     lines.push(Line::from(vec![
-        Span::styled("Passphrase: ", Style::default().fg(Color::Cyan)),
+        Span::styled(
+            texts::LABEL_PASSPHRASE,
+            ElementStyle::SettingsPassLabel.style(),
+        ),
         Span::raw(before.to_string()),
         Span::styled(
             cursor_char.to_string(),
-            Style::default().bg(Color::White).fg(Color::Black),
+            ElementStyle::InvertedCursor.style(),
         ),
         Span::raw(after.to_string()),
     ]));
@@ -1451,14 +1484,14 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
     if let Some(ref err_msg) = error {
         lines.push(Line::from(Span::styled(
             format!(" {}", err_msg),
-            Style::default().bg(Color::Red).fg(Color::White),
+            ElementStyle::SettingsErrorBar.style(),
         )));
     }
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Enter:confirm  Esc:cancel",
-        Style::default().fg(Color::DarkGray),
+        texts::HINT_PASSPHRASE,
+        ElementStyle::SettingsHelp.style(),
     )));
 
     frame.render_widget(Clear, overlay_area);
@@ -1469,19 +1502,19 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
 fn render_alert_modal(frame: &mut Frame, area: Rect, message: &str) {
     let overlay_area = make_overlay(area, 6);
     let block = Block::default()
-        .title(" Alert ")
+        .title(texts::SETTINGS_ALERT)
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black).fg(Color::Red));
+        .style(ElementStyle::SettingsAlertBlock.style());
 
     let inner = block.inner(overlay_area);
 
     let lines = vec![
         Line::from(""),
-        Line::from(Span::styled(message, Style::default().fg(Color::White))),
+        Line::from(Span::styled(message, ElementStyle::ConfirmMessage.style())),
         Line::from(""),
         Line::from(Span::styled(
-            "Press any key to dismiss",
-            Style::default().fg(Color::DarkGray),
+            texts::HINT_ALERT,
+            ElementStyle::SettingsHelp.style(),
         )),
     ];
 
@@ -1495,19 +1528,16 @@ fn render_alert_modal(frame: &mut Frame, area: Rect, message: &str) {
 
 fn render_settings_status_bar(frame: &mut Frame, area: Rect, _state: &SettingsState) {
     let text = Text::from(Line::from(vec![Span::styled(
-        " SETTINGS ",
-        Style::default()
-            .bg(Color::Cyan)
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD),
+        texts::STATUS_SETTINGS_LABEL,
+        ElementStyle::SettingsStatusBar.style(),
     )]));
     frame.render_widget(Paragraph::new(text), area);
 }
 
 fn render_settings_help_bar(frame: &mut Frame, area: Rect) {
     let text = Text::from(Line::from(vec![Span::styled(
-        "j/k:navigate  Enter:select  d:<delete path> q:quit",
-        Style::default().fg(Color::DarkGray),
+        texts::HINT_SETTINGS,
+        ElementStyle::SettingsHelp.style(),
     )]));
     frame.render_widget(Paragraph::new(text), area);
 }
