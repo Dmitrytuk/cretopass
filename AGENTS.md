@@ -50,7 +50,7 @@ Password field values display as `*****` in the detail overlay and when unfocuse
   - `src/settings/ui.rs`: settings GUI — `SettingsState`, `run()`, `render()`
   - `src/settings/widget.rs`: `handle_modal_key` dispatch, 5 per-modal handlers, uses `file_handling` for all I/O
   - `src/settings/active_file.rs`: opened-file state — path, passphrase, Node
-  - `src/settings/utils.rs`: `AppSettings`, `config_dir`, `open_file_dialog`, `push_recent_file`, `save_settings`/`load_settings` (rkyv format, raw I/O via `file_handling`)
+  - `src/settings/utils.rs`: `AppSettings`, `config_dir`, `push_recent_file`, `save_settings`/`load_settings` (rkyv format, raw I/O via `file_handling`)
   - `src/file_browser.rs`: module root, re-exports `FileEntry` from `file_handling`
   - `src/file_browser/state.rs`: `FileBrowserState`, `FileBrowserMode` — uses `file_handling::list_dir`
   - `src/file_browser/render.rs`: all file browser rendering
