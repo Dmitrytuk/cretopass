@@ -201,6 +201,10 @@ fn handle_settings_key<B: Backend>(
                         message: texts::MSG_NO_OPEN_FILE.to_string(),
                     });
                 }
+            } else if idx == 4 {
+                // TODO: export active file
+            } else if idx == 5 {
+                // TODO: import from file
             } else {
                 let file_idx = idx - texts::MENU_ITEMS.len();
                 if file_idx < state.settings.recent_files.len() {

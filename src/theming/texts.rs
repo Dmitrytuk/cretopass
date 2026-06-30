@@ -27,6 +27,8 @@ pub const MENU_ITEMS: &[&str] = &[
     "Create new secret file",
     "Settings",
     "Change file password",
+    "Export active file",
+    "Import from file",
 ];
 
 pub const SETTING_FULL_PATH: &str = "Display full path in title bar";
