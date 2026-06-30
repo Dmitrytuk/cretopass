@@ -1043,7 +1043,7 @@ fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
                 n
             };
 
-            let active_path = match &state.active_file_path {
+            let base_path = match &state.active_file_path {
                 Some(p) => p.clone(),
                 None => {
                     state.mode = InputMode::Alert {
@@ -1053,7 +1053,19 @@ fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
                 }
             };
 
-            match export_tree(&export_node, &active_path, format) {
+            let path = std::path::Path::new(&base_path);
+            let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("export");
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("age");
+            let node_name_clean: String = node
+                .name
+                .chars()
+                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                .collect();
+            let export_path = parent.join(format!("{}_{}.{}", stem, node_name_clean, ext));
+            let export_path_str = export_path.to_string_lossy().to_string();
+
+            match export_tree(&export_node, &export_path_str, format) {
                 Ok(out_path) => {
                     state.mode = InputMode::Alert {
                         message: format!("{}{}", texts::MSG_EXPORT_NODE_SUCCESS, out_path),
