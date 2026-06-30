@@ -36,6 +36,21 @@ pub const SETTING_LAST_FILE: &str = "Start with last file";
 
 pub const FIELD_TYPE_ITEMS: [&str; 3] = ["1. Login", "2. Password", "3. Custom Field"];
 
+pub const EXPORT_SELECT_TITLE: &str = " Select Export Format ";
+pub const EXPORT_CONFIRM_TITLE: &str = " Confirm Export ";
+pub const EXPORT_TYPE_ITEMS: [&str; 3] = ["1. JSON", "2. XML", "3. CSV"];
+pub const FORMAT_JSON: &str = "JSON";
+pub const FORMAT_XML: &str = "XML";
+pub const FORMAT_CSV: &str = "CSV";
+pub const PROMPT_EXPORT_CONFIRM_START: &str = "Are you sure you want to export as ";
+pub const PROMPT_EXPORT_CONFIRM_END: &str = "?";
+
+pub const IMPORT_SELECT_TITLE: &str = " Select Import Format ";
+pub const IMPORT_CONFIRM_TITLE: &str = " Confirm Import ";
+pub const IMPORT_TYPE_ITEMS: [&str; 3] = ["1. JSON", "2. XML", "3. CSV"];
+pub const PROMPT_IMPORT_CONFIRM_START: &str = "Are you sure you want to import from ";
+pub const PROMPT_IMPORT_CONFIRM_END: &str = "?";
+
 pub const LABEL_NAME: &str = "Name: ";
 pub const LABEL_DESC: &str = "Desc: ";
 pub const LABEL_PASSPHRASE: &str = "Passphrase: ";
@@ -91,6 +106,7 @@ pub const PROMPT_CHANGE_PW: &str = "Are you sure you want to change the password
 pub const PROMPT_NO_PASSPHRASE: &str = "You are creating the secret file without password?";
 pub const PROMPT_DISCARD: &str = "Discard changes?";
 
+pub const MSG_NOT_IMPLEMENTED: &str = "This feature is not yet implemented";
 pub const MSG_NO_OPEN_FILE: &str = "No file is currently open";
 pub const MSG_CANNOT_DELETE_OPEN: &str = "Cannot delete the currently open file from recent files";
 pub const MSG_CANNOT_WRITE: &str = "Cannot write to this path";
