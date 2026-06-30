@@ -293,7 +293,7 @@ fn handle_settings_key<B: Backend>(
 fn handle_file_browser_key<B: Backend>(
     key: event::KeyEvent,
     state: &mut SettingsState,
-    _terminal: &mut Terminal<B>,
+    terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     let mut modal = match state.modal.take() {
         Some(SettingsModal::FileBrowser(b)) => b,
@@ -330,12 +330,55 @@ fn handle_file_browser_key<B: Backend>(
 
             if modal.mode == FileBrowserMode::ImportFile {
                 match file_handling::import::import_tree(&path) {
-                    Ok(node) => {
+                    Ok(imported_node) => {
                         if let Some(ref mut af) = state.active_file {
-                            af.node = Some(node);
-                            state.modal = Some(SettingsModal::Alert {
-                                message: texts::MSG_IMPORT_SUCCESS.to_string(),
-                            });
+                            if let Some(ref mut root) = af.node {
+                                let filename = std::path::Path::new(&path)
+                                    .file_stem()
+                                    .map(|s| s.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| "unknown".to_string());
+                                let date_time = chrono::Local::now()
+                                    .format("%Y-%m-%d_%H%M%S").to_string();
+                                let mut wrapper = crate::tree::node::Node::new(
+                                    format!("imported_{}_{}", filename, date_time),
+                                    "",
+                                );
+                                wrapper.children = vec![imported_node];
+                                root.add_child(wrapper);
+
+                                let save_path = match af.path.clone() {
+                                    Some(p) => p,
+                                    None => {
+                                        state.modal = Some(SettingsModal::Alert {
+                                            message: "No file path set".to_string(),
+                                        });
+                                        return Ok(());
+                                    }
+                                };
+                                let save_pass = af.passphrase.clone();
+                                let save_node = root.clone();
+
+                                state.status = Some(texts::STATUS_SAVING);
+                                terminal.draw(|f| render(f, f.area(), state))?;
+                                match file_handling::save_tree(
+                                    &save_node, &save_path, &save_pass,
+                                ) {
+                                    Err(e) => {
+                                        state.status = None;
+                                        state.modal = Some(SettingsModal::Alert {
+                                            message: format!(
+                                                "{}{}", texts::MSG_SAVE_FAILED, e
+                                            ),
+                                        });
+                                    }
+                                    Ok(()) => {
+                                        state.status = None;
+                                        state.modal = Some(SettingsModal::Alert {
+                                            message: texts::MSG_IMPORT_SUCCESS.to_string(),
+                                        });
+                                    }
+                                }
+                            }
                         } else {
                             state.modal = Some(SettingsModal::Alert {
                                 message: texts::MSG_IMPORT_NO_OPEN_FILE.to_string(),
