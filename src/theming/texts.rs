@@ -46,8 +46,6 @@ pub const FORMAT_CSV: &str = "CSV";
 pub const PROMPT_EXPORT_CONFIRM_START: &str = "Are you sure you want to export as ";
 pub const PROMPT_EXPORT_CONFIRM_END: &str = "?";
 
-
-
 pub const LABEL_NAME: &str = "Name: ";
 pub const LABEL_DESC: &str = "Desc: ";
 pub const LABEL_PASSPHRASE: &str = "Passphrase: ";
@@ -114,7 +112,7 @@ pub const MSG_PW_MISMATCH: &str = "New passwords do not match";
 pub const MSG_SETTINGS_SAVED: &str = "Settings saved";
 pub const MSG_SAVE_FAILED: &str = "Failed to save: ";
 pub const MSG_EXPORT_SUCCESS: &str = "File exported at ";
-pub const MSG_IMPORT_SUCCESS: &str = "File imported successfully. Save to persist.";
+pub const MSG_IMPORT_SUCCESS: &str = "File imported successfully.";
 pub const MSG_IMPORT_NO_OPEN_FILE: &str = "Import requires an open file. Open one first.";
 
 pub const EMPTY_DIR: &str = "  (empty directory)";
