@@ -11,6 +11,7 @@ pub enum FileHandlingError {
     NotAnAgeFile,
     InvalidPassphraseEncoding,
     PathNotWritable(String),
+    ExportError(String),
 }
 
 impl fmt::Display for FileHandlingError {
@@ -29,6 +30,7 @@ impl fmt::Display for FileHandlingError {
             }
             Self::InvalidPassphraseEncoding => write!(f, "Invalid passphrase encoding"),
             Self::PathNotWritable(p) => write!(f, "Cannot write to path: {p}"),
+            Self::ExportError(msg) => write!(f, "Export error: {msg}"),
         }
     }
 }

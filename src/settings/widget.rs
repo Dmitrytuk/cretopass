@@ -844,9 +844,40 @@ fn handle_export_select_type_key(key: event::KeyEvent, state: &mut SettingsState
 fn handle_export_confirm_key(key: event::KeyEvent, state: &mut SettingsState) {
     match Action::from_confirm(&key) {
         Action::Yes => {
-            state.modal = Some(SettingsModal::Alert {
-                message: texts::MSG_NOT_IMPLEMENTED.to_string(),
-            });
+            let export_type = match state.modal.take() {
+                Some(SettingsModal::ExportConfirm { export_type }) => export_type,
+                _ => return,
+            };
+
+            let af = match state.active_file.clone() {
+                Some(af) => af,
+                None => return,
+            };
+
+            let path = match af.path {
+                Some(p) => p,
+                None => return,
+            };
+
+            let node = match af.node {
+                Some(n) => n,
+                None => return,
+            };
+
+            let format = match export_type.as_str() {
+                "JSON" => file_handling::export::ExportFormat::Json,
+                "XML" => file_handling::export::ExportFormat::Xml,
+                _ => file_handling::export::ExportFormat::Csv,
+            };
+
+            match file_handling::export::export_tree(&node, &path, format) {
+                Ok(out_path) => {
+                    state.modal = Some(SettingsModal::Alert {
+                        message: format!("{}{}", texts::MSG_EXPORT_SUCCESS, out_path),
+                    });
+                }
+                Err(_) => {}
+            }
         }
         _ => {
             state.modal = None;

@@ -113,6 +113,7 @@ pub const MSG_PW_EMPTY: &str = "New password fields cannot be empty";
 pub const MSG_PW_MISMATCH: &str = "New passwords do not match";
 pub const MSG_SETTINGS_SAVED: &str = "Settings saved";
 pub const MSG_SAVE_FAILED: &str = "Failed to save: ";
+pub const MSG_EXPORT_SUCCESS: &str = "File exported at ";
 
 pub const EMPTY_DIR: &str = "  (empty directory)";
 pub const NO_MATCHING_FILES: &str = "  No matching files";
