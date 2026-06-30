@@ -7,6 +7,7 @@ use crate::file_handling::FileEntry;
 pub enum FileBrowserMode {
     OpenFile,
     CreateFile,
+    ImportFile,
 }
 
 /// Filter controlling which entries are shown in the file list.

@@ -21,6 +21,7 @@ pub const SETTINGS_DELETE_CONFIRM: &str = " Confirm Delete ";
 
 pub const BROWSER_OPEN: &str = " Open File ";
 pub const BROWSER_CREATE: &str = " Create New Secret File ";
+pub const BROWSER_IMPORT: &str = " Import File ";
 
 pub const MENU_ITEMS: &[&str] = &[
     "Open secret file",
@@ -45,11 +46,7 @@ pub const FORMAT_CSV: &str = "CSV";
 pub const PROMPT_EXPORT_CONFIRM_START: &str = "Are you sure you want to export as ";
 pub const PROMPT_EXPORT_CONFIRM_END: &str = "?";
 
-pub const IMPORT_SELECT_TITLE: &str = " Select Import Format ";
-pub const IMPORT_CONFIRM_TITLE: &str = " Confirm Import ";
-pub const IMPORT_TYPE_ITEMS: [&str; 3] = ["1. JSON", "2. XML", "3. CSV"];
-pub const PROMPT_IMPORT_CONFIRM_START: &str = "Are you sure you want to import from ";
-pub const PROMPT_IMPORT_CONFIRM_END: &str = "?";
+
 
 pub const LABEL_NAME: &str = "Name: ";
 pub const LABEL_DESC: &str = "Desc: ";

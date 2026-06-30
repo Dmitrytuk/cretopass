@@ -53,12 +53,6 @@ enum SettingsModal {
     ExportConfirm {
         export_type: String,
     },
-    ImportSelectType {
-        selected_type: usize,
-    },
-    ImportConfirm {
-        import_type: String,
-    },
 }
 
 pub struct SettingsState {
@@ -222,13 +216,14 @@ fn handle_settings_key<B: Backend>(
                     });
                 }
             } else if idx == 5 {
-                if state.active_file.is_some() {
-                    state.modal = Some(SettingsModal::ImportSelectType { selected_type: 0 });
-                } else {
-                    state.modal = Some(SettingsModal::Alert {
-                        message: texts::MSG_NO_OPEN_FILE.to_string(),
-                    });
-                }
+                let mut fb = FileBrowserState::new(FileBrowserMode::ImportFile);
+                fb.set_active_file_path(
+                    state
+                        .active_file
+                        .as_ref()
+                        .and_then(|af| af.path.as_ref().map(PathBuf::from)),
+                );
+                state.modal = Some(SettingsModal::FileBrowser(fb));
             } else {
                 let file_idx = idx - texts::MENU_ITEMS.len();
                 if file_idx < state.settings.recent_files.len() {
@@ -333,7 +328,11 @@ fn handle_file_browser_key<B: Backend>(
         Some(FileBrowserAction::Selected(path)) => {
             let creating = modal.mode == FileBrowserMode::CreateFile;
 
-            if creating {
+            if modal.mode == FileBrowserMode::ImportFile {
+                state.modal = Some(SettingsModal::Alert {
+                    message: texts::MSG_NOT_IMPLEMENTED.to_string(),
+                });
+            } else if creating {
                 if file_handling::probe_path_writable(&path).is_ok() {
                     state.modal = Some(SettingsModal::PassphraseInput {
                         file_path: path,
@@ -855,65 +854,6 @@ fn handle_export_confirm_key(key: event::KeyEvent, state: &mut SettingsState) {
     }
 }
 
-fn handle_import_select_type_key(key: event::KeyEvent, state: &mut SettingsState) {
-    match Action::from_select_field_type(&key) {
-        Action::Cancel => {
-            state.modal = None;
-        }
-        Action::NavDown => {
-            if let Some(SettingsModal::ImportSelectType { ref mut selected_type }) = state.modal {
-                *selected_type = (*selected_type + 1) % 3;
-            }
-        }
-        Action::NavUp => {
-            if let Some(SettingsModal::ImportSelectType { ref mut selected_type }) = state.modal {
-                *selected_type = (*selected_type + 2) % 3;
-            }
-        }
-        Action::SelectType1 => {
-            if let Some(SettingsModal::ImportSelectType { ref mut selected_type }) = state.modal {
-                *selected_type = 0;
-            }
-        }
-        Action::SelectType2 => {
-            if let Some(SettingsModal::ImportSelectType { ref mut selected_type }) = state.modal {
-                *selected_type = 1;
-            }
-        }
-        Action::SelectType3 => {
-            if let Some(SettingsModal::ImportSelectType { ref mut selected_type }) = state.modal {
-                *selected_type = 2;
-            }
-        }
-        Action::Confirm => {
-            if let Some(SettingsModal::ImportSelectType { selected_type }) = state.modal.take() {
-                let format = match selected_type {
-                    0 => texts::FORMAT_JSON,
-                    1 => texts::FORMAT_XML,
-                    _ => texts::FORMAT_CSV,
-                };
-                state.modal = Some(SettingsModal::ImportConfirm {
-                    import_type: format.to_string(),
-                });
-            }
-        }
-        _ => {}
-    }
-}
-
-fn handle_import_confirm_key(key: event::KeyEvent, state: &mut SettingsState) {
-    match Action::from_confirm(&key) {
-        Action::Yes => {
-            state.modal = Some(SettingsModal::Alert {
-                message: texts::MSG_NOT_IMPLEMENTED.to_string(),
-            });
-        }
-        _ => {
-            state.modal = None;
-        }
-    }
-}
-
 // ── Modal key handling (Passphrase, Alert, FileBrowser) ──
 
 fn handle_modal_key<B: Backend>(
@@ -930,8 +870,6 @@ fn handle_modal_key<B: Backend>(
         Some(ConfirmNoPassphrase { .. }) => 4,
         Some(ExportSelectType { .. }) => 5,
         Some(ExportConfirm { .. }) => 6,
-        Some(ImportSelectType { .. }) => 7,
-        Some(ImportConfirm { .. }) => 8,
         _ => 255,
     };
     match kind {
@@ -955,14 +893,6 @@ fn handle_modal_key<B: Backend>(
         }
         6 => {
             handle_export_confirm_key(key, state);
-            return Ok(());
-        }
-        7 => {
-            handle_import_select_type_key(key, state);
-            return Ok(());
-        }
-        8 => {
-            handle_import_confirm_key(key, state);
             return Ok(());
         }
         _ => {}
@@ -997,9 +927,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. }
             | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. }
-            | SettingsModal::ImportSelectType { .. }
-            | SettingsModal::ImportConfirm { .. } => unreachable!(),
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::Backspace => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -1021,9 +949,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. }
             | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. }
-            | SettingsModal::ImportSelectType { .. }
-            | SettingsModal::ImportConfirm { .. } => unreachable!(),
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::DeleteChar => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -1044,9 +970,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. }
             | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. }
-            | SettingsModal::ImportSelectType { .. }
-            | SettingsModal::ImportConfirm { .. } => unreachable!(),
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::CursorLeft => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
@@ -1063,9 +987,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. }
             | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. }
-            | SettingsModal::ImportSelectType { .. }
-            | SettingsModal::ImportConfirm { .. } => unreachable!(),
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::CursorRight => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -1086,9 +1008,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. }
             | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. }
-            | SettingsModal::ImportSelectType { .. }
-            | SettingsModal::ImportConfirm { .. } => unreachable!(),
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::CursorHome => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
@@ -1105,9 +1025,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. }
             | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. }
-            | SettingsModal::ImportSelectType { .. }
-            | SettingsModal::ImportConfirm { .. } => unreachable!(),
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::CursorEnd => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -1126,9 +1044,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. }
             | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. }
-            | SettingsModal::ImportSelectType { .. }
-            | SettingsModal::ImportConfirm { .. } => unreachable!(),
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::Confirm => match modal {
             SettingsModal::PassphraseInput {
@@ -1222,9 +1138,7 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::ConfirmNoPassphrase { .. }
             | SettingsModal::ChangePwInput { .. }
             | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. }
-            | SettingsModal::ImportSelectType { .. }
-            | SettingsModal::ImportConfirm { .. } => unreachable!(),
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         _ => {
             state.modal = Some(modal);
@@ -1260,12 +1174,6 @@ fn render(frame: &mut Frame, area: Rect, state: &SettingsState) {
         }
         Some(SettingsModal::ExportConfirm { export_type }) => {
             render_export_confirm_modal(frame, area, export_type)
-        }
-        Some(SettingsModal::ImportSelectType { .. }) => {
-            render_import_select_type_modal(frame, area, state)
-        }
-        Some(SettingsModal::ImportConfirm { import_type }) => {
-            render_import_confirm_modal(frame, area, import_type)
         }
         None => {}
     }
@@ -1694,84 +1602,6 @@ fn render_export_confirm_modal(frame: &mut Frame, area: Rect, export_type: &str)
                 texts::PROMPT_EXPORT_CONFIRM_START,
                 export_type,
                 texts::PROMPT_EXPORT_CONFIRM_END
-            ),
-            ElementStyle::ConfirmMessage.style(),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            texts::HINT_CHANGE_PW_CONFIRM,
-            ElementStyle::SettingsHelp.style(),
-        )),
-    ];
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
-fn render_import_select_type_modal(frame: &mut Frame, area: Rect, state: &SettingsState) {
-    let selected_type = match &state.modal {
-        Some(SettingsModal::ImportSelectType { selected_type }) => *selected_type,
-        _ => 0,
-    };
-
-    let overlay_area = make_overlay(area, 10);
-    let block = Block::default()
-        .title(texts::IMPORT_SELECT_TITLE)
-        .borders(Borders::ALL)
-        .style(ElementStyle::SettingsOverlayBlock.style());
-
-    let inner = block.inner(overlay_area);
-
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(""));
-
-    for (i, item) in texts::IMPORT_TYPE_ITEMS.iter().enumerate() {
-        let is_selected = i == selected_type;
-        let style = if is_selected {
-            ElementStyle::SettingsSelected.style()
-        } else {
-            ElementStyle::SettingsNormal.style()
-        };
-        let prefix = if is_selected {
-            Icon::SelectionArrow.as_str()
-        } else {
-            Icon::SelectionPad.as_str()
-        };
-        lines.push(Line::from(Span::styled(
-            format!("{}{}", prefix, item),
-            style,
-        )));
-    }
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        texts::HINT_SELECT_FIELD_TYPE,
-        ElementStyle::SettingsHelp.style(),
-    )));
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
-fn render_import_confirm_modal(frame: &mut Frame, area: Rect, import_type: &str) {
-    let overlay_area = make_overlay(area, 7);
-    let block = Block::default()
-        .title(texts::IMPORT_CONFIRM_TITLE)
-        .borders(Borders::ALL)
-        .style(ElementStyle::SettingsChangePwBlock.style());
-
-    let inner = block.inner(overlay_area);
-
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            format!(
-                "{}{}{}",
-                texts::PROMPT_IMPORT_CONFIRM_START,
-                import_type,
-                texts::PROMPT_IMPORT_CONFIRM_END
             ),
             ElementStyle::ConfirmMessage.style(),
         )),
