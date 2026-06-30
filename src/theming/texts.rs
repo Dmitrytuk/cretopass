@@ -101,6 +101,18 @@ pub const PROMPT_CHANGE_PW: &str = "Are you sure you want to change the password
 pub const PROMPT_NO_PASSPHRASE: &str = "You are creating the secret file without password?";
 pub const PROMPT_DISCARD: &str = "Discard changes?";
 
+pub const OVERLAY_EXPORT_NODE: &str = " Export Node ";
+pub const OVERLAY_EXPORT_FORMAT: &str = " Select Export Format ";
+pub const EXPORT_NODE_OPTIONS: [&str; 2] = [
+    "1. Export this node",
+    "2. Export this node with children",
+];
+pub const HINT_EXPORT_NODE_SELECT: &str = "j/k:nav  Enter:choose  Esc:cancel";
+pub const HINT_EXPORT_NODE_FORMAT: &str = "j/k:nav  Enter:choose  Esc:cancel";
+pub const MSG_EXPORT_NODE_SUCCESS: &str = "Node exported at ";
+pub const MODE_EXPORT_SELECT: &str = "EXPORT";
+pub const MODE_EXPORT_FORMAT: &str = "EXPORT FMT";
+
 pub const MSG_NOT_IMPLEMENTED: &str = "This feature is not yet implemented";
 pub const MSG_NO_OPEN_FILE: &str = "No file is currently open";
 pub const MSG_CANNOT_DELETE_OPEN: &str = "Cannot delete the currently open file from recent files";
