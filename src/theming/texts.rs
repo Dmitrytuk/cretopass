@@ -114,6 +114,8 @@ pub const MSG_PW_MISMATCH: &str = "New passwords do not match";
 pub const MSG_SETTINGS_SAVED: &str = "Settings saved";
 pub const MSG_SAVE_FAILED: &str = "Failed to save: ";
 pub const MSG_EXPORT_SUCCESS: &str = "File exported at ";
+pub const MSG_IMPORT_SUCCESS: &str = "File imported successfully. Save to persist.";
+pub const MSG_IMPORT_NO_OPEN_FILE: &str = "Import requires an open file. Open one first.";
 
 pub const EMPTY_DIR: &str = "  (empty directory)";
 pub const NO_MATCHING_FILES: &str = "  No matching files";

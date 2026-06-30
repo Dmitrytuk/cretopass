@@ -329,9 +329,25 @@ fn handle_file_browser_key<B: Backend>(
             let creating = modal.mode == FileBrowserMode::CreateFile;
 
             if modal.mode == FileBrowserMode::ImportFile {
-                state.modal = Some(SettingsModal::Alert {
-                    message: texts::MSG_NOT_IMPLEMENTED.to_string(),
-                });
+                match file_handling::import::import_tree(&path) {
+                    Ok(node) => {
+                        if let Some(ref mut af) = state.active_file {
+                            af.node = Some(node);
+                            state.modal = Some(SettingsModal::Alert {
+                                message: texts::MSG_IMPORT_SUCCESS.to_string(),
+                            });
+                        } else {
+                            state.modal = Some(SettingsModal::Alert {
+                                message: texts::MSG_IMPORT_NO_OPEN_FILE.to_string(),
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        state.modal = Some(SettingsModal::Alert {
+                            message: format!("{e}"),
+                        });
+                    }
+                }
             } else if creating {
                 if file_handling::probe_path_writable(&path).is_ok() {
                     state.modal = Some(SettingsModal::PassphraseInput {
@@ -876,7 +892,11 @@ fn handle_export_confirm_key(key: event::KeyEvent, state: &mut SettingsState) {
                         message: format!("{}{}", texts::MSG_EXPORT_SUCCESS, out_path),
                     });
                 }
-                Err(_) => {}
+                Err(e) => {
+                    state.modal = Some(SettingsModal::Alert {
+                        message: format!("{e}"),
+                    });
+                }
             }
         }
         _ => {
