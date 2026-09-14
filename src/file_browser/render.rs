@@ -3,9 +3,9 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
-use crate::cursor::cursor_field_spans;
-use crate::theming::{ElementStyle, Icon, texts};
 use super::state::{FileBrowserMode, FileBrowserState, FileFilter, FocusTarget};
+use crate::cursor::cursor_field_spans;
+use crate::theming::{texts, ElementStyle, Icon};
 
 const DEFAULT_HEIGHT: u16 = 18;
 
@@ -159,7 +159,10 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
                 name_style
             };
 
-            let marker = if entry.is_age_file && !entry.is_dir && state.mode != FileBrowserMode::ImportFile {
+            let marker = if entry.is_age_file
+                && !entry.is_dir
+                && state.mode != FileBrowserMode::ImportFile
+            {
                 Icon::PwdMarker.as_str()
             } else {
                 ""
@@ -205,10 +208,7 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     let search_style = ElementStyle::FbActiveSearch.style();
 
     let mut spans = vec![
-        Span::styled(
-            format!(" Filter: {} ", filter_text),
-            hint_style,
-        ),
+        Span::styled(format!(" Filter: {} ", filter_text), hint_style),
         Span::styled(texts::FB_HINT_FILTER, hint_style),
     ];
 
@@ -218,51 +218,40 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
             search_style,
         ));
     } else {
-        spans.push(Span::styled(
-            texts::FB_HINT_SEARCH,
-            hint_style,
-        ));
+        spans.push(Span::styled(texts::FB_HINT_SEARCH, hint_style));
     }
 
     if state.mode == FileBrowserMode::CreateFile {
-        spans.push(Span::styled(
-            texts::FB_HINT_NEW_DIR,
-            hint_style,
-        ));
+        spans.push(Span::styled(texts::FB_HINT_NEW_DIR, hint_style));
     }
 
     // Show rename/delete hints when a PWD-marked file is selected
     if let Some(entry) = state.entries.get(state.selected) {
         if entry.is_age_file && !entry.is_dir && state.mode != FileBrowserMode::ImportFile {
-            spans.push(Span::styled(
-                texts::FB_HINT_RENAME,
-                hint_style,
-            ));
-            spans.push(Span::styled(
-                texts::FB_HINT_DELETE,
-                hint_style,
-            ));
+            spans.push(Span::styled(texts::FB_HINT_RENAME, hint_style));
+            spans.push(Span::styled(texts::FB_HINT_DELETE, hint_style));
         }
     }
 
     if state.mode == FileBrowserMode::CreateFile {
         if state.focus == FocusTarget::Input {
-            spans.push(Span::styled(
-                texts::FB_HINT_LIST,
-                hint_style,
-            ));
+            spans.push(Span::styled(texts::FB_HINT_LIST, hint_style));
         } else {
-            spans.push(Span::styled(
-                texts::FB_HINT_NAME,
-                hint_style,
-            ));
+            spans.push(Span::styled(texts::FB_HINT_NAME, hint_style));
         }
     }
 
     frame.render_widget(Paragraph::new(Text::from(Line::from(spans))), area);
 }
 
-fn render_file_input(frame: &mut Frame, area: Rect, label: &str, text: &str, cursor: usize, hints: &[&str]) {
+fn render_file_input(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    text: &str,
+    cursor: usize,
+    hints: &[&str],
+) {
     let mut spans = cursor_field_spans(label, text, cursor, true);
     for hint in hints {
         spans.push(Span::raw("  "));
@@ -470,8 +459,7 @@ mod tests {
         // Create a known empty directory
         let empty_dir = std::path::Path::new("/tmp/__test_empty_xyz__");
         let _ = std::fs::create_dir_all(empty_dir);
-        state.entries =
-            file_handling::list_dir(empty_dir).unwrap();
+        state.entries = file_handling::list_dir(empty_dir).unwrap();
         state.filter = FileFilter::PwdKeeperOnly;
         let text = render_to_text(&state);
         // Searching for something non-existent
@@ -544,8 +532,14 @@ mod tests {
             text.contains("[PWD]"),
             "should show [PWD] marker for age files:\n{text}"
         );
-        assert!(text.contains("myvault.age"), "should show age filename:\n{text}");
-        assert!(text.contains("notes.txt"), "should show regular filename:\n{text}");
+        assert!(
+            text.contains("myvault.age"),
+            "should show age filename:\n{text}"
+        );
+        assert!(
+            text.contains("notes.txt"),
+            "should show regular filename:\n{text}"
+        );
 
         let _ = std::fs::remove_dir_all(dir);
     }

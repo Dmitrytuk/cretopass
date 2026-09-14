@@ -1,3 +1,5 @@
+use zeroize::Zeroizing;
+
 use crate::tree::node::Node;
 
 /// Holds the state of the currently opened secret file.
@@ -8,8 +10,8 @@ use crate::tree::node::Node;
 pub struct ActiveFileState {
     /// Full filesystem path of the opened file.
     pub path: Option<String>,
-    /// Raw passphrase bytes provided by the user.
-    pub passphrase: Vec<u8>,
+    /// Passphrase bytes provided by the user, zeroized on drop.
+    pub passphrase: Zeroizing<Vec<u8>>,
     /// The deserialized root [`Node`] that will be loaded into the tree.
     pub node: Option<Node>,
 }
@@ -24,7 +26,7 @@ impl ActiveFileState {
     pub fn new() -> Self {
         Self {
             path: None,
-            passphrase: Vec::new(),
+            passphrase: Zeroizing::new(Vec::new()),
             node: None,
         }
     }

@@ -104,8 +104,7 @@ impl FileBrowserState {
                     FileFilter::All => true,
                     FileFilter::PwdKeeperOnly => e.is_age_file,
                 };
-                let passes_search = query.is_empty()
-                    || e.name.to_lowercase().contains(&query);
+                let passes_search = query.is_empty() || e.name.to_lowercase().contains(&query);
                 passes_filter && passes_search
             })
             .map(|(i, _)| i)
@@ -136,7 +135,10 @@ impl FileBrowserState {
         }
         // Find the position of our current raw selected in the filtered list
         // and clamp to min/max
-        let pos = indices.iter().position(|&i| i >= self.selected).unwrap_or(0);
+        let pos = indices
+            .iter()
+            .position(|&i| i >= self.selected)
+            .unwrap_or(0);
         let pos = pos.min(indices.len().saturating_sub(1));
         self.selected = indices[pos];
     }

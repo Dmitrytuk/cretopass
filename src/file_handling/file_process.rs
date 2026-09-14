@@ -39,20 +39,6 @@ pub fn write_file(path: &str, data: &[u8]) -> Result<(), FileHandlingError> {
     fs::write(path, data).map_err(FileHandlingError::Io)
 }
 
-/// Serialises a Node and writes it to a file (plain JSON, no encryption).
-pub fn write_node_to_file(node: &Node, path: &str) -> Result<(), FileHandlingError> {
-    let json = node_to_json(node)?;
-    fs::write(path, json)?;
-    Ok(())
-}
-
-/// Reads a file and deserialises its contents into a Node (plain JSON, no decryption).
-pub fn read_node_from_file(path: &str) -> Result<Node, FileHandlingError> {
-    let json = fs::read_to_string(path)?;
-    let node = json_to_node(&json)?;
-    Ok(node)
-}
-
 // ── Encrypted file operations ──
 
 /// Validates and reads an age-encrypted file.  Returns the full bytes.
@@ -88,30 +74,59 @@ pub fn validate_encrypted_file(path: &str) -> Result<Vec<u8>, FileHandlingError>
 /// Decrypts age-encrypted bytes with a passphrase and deserialises into a Node.
 pub fn decrypt_to_node(data: &[u8], passphrase: &str) -> Result<Node, FileHandlingError> {
     let json = crypt::decrypt(data, passphrase)
-        .map_err(|e| FileHandlingError::Crypt(format!("Decryption failed: {e}")))?;
+        .map_err(|e| FileHandlingError::Crypt(format!("decryption failed: {e}")))?;
     json_to_node(&json).map_err(FileHandlingError::Serde)
 }
 
-/// Saves a Node tree to an age-encrypted file with a `.bak` backup strategy.
-pub fn save_tree(
-    root: &Node,
-    path: &str,
-    passphrase: &[u8],
-) -> Result<(), FileHandlingError> {
-    let passphrase_str =
-        std::str::from_utf8(passphrase).map_err(|_| FileHandlingError::InvalidPassphraseEncoding)?;
+/// Saves a Node tree to an age-encrypted file with an atomic write and a
+/// `.bak` backup of the previous version.
+///
+/// The new ciphertext is written to a temporary file in the same directory,
+/// flushed and `sync`ed, then atomically renamed over the target path so a
+/// crash mid-write never leaves a truncated/corrupt vault. The previous file
+/// (if any) is preserved as `{path}.bak` for recovery.
+pub fn save_tree(root: &Node, path: &str, passphrase: &[u8]) -> Result<(), FileHandlingError> {
+    let passphrase_str = std::str::from_utf8(passphrase)
+        .map_err(|_| FileHandlingError::InvalidPassphraseEncoding)?;
 
     let json = node_to_json(root)?;
     let encrypted = crypt::encrypt(&json, passphrase_str)
-        .map_err(|e| FileHandlingError::Crypt(format!("Encryption failed: {e}")))?;
+        .map_err(|e| FileHandlingError::Crypt(format!("encryption failed: {e}")))?;
 
+    let target = Path::new(path);
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
     let backup_path = format!("{}.bak", path);
-    let _ = fs::copy(path, &backup_path);
 
-    fs::write(path, &encrypted)?;
+    // Write to a unique temp file in the same directory, then atomically
+    // rename over the target so a failed write never corrupts the vault.
+    let tmp_path = parent.join(format!(
+        ".{}.tmp",
+        target
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "vault".to_string())
+    ));
+    write_and_sync(&tmp_path, &encrypted)?;
 
-    let _ = fs::remove_file(&backup_path);
+    // Preserve the current file as a backup before replacing it.
+    if target.exists() {
+        fs::copy(target, &backup_path).map_err(FileHandlingError::Io)?;
+    }
 
+    fs::rename(&tmp_path, target).map_err(|e| {
+        let _ = fs::remove_file(&tmp_path);
+        FileHandlingError::Io(e)
+    })?;
+
+    Ok(())
+}
+
+/// Writes `data` to `path`, flushing and syncing to disk before returning.
+fn write_and_sync(path: &Path, data: &[u8]) -> Result<(), FileHandlingError> {
+    use std::io::Write;
+    let mut file = fs::File::create(path).map_err(FileHandlingError::Io)?;
+    file.write_all(data).map_err(FileHandlingError::Io)?;
+    file.sync_all().map_err(FileHandlingError::Io)?;
     Ok(())
 }
 
@@ -125,7 +140,7 @@ pub fn create_secret_file(path: &str, passphrase: &str) -> Result<Node, FileHand
     let node = Node::new(texts::DEFAULT_ROOT_NAME, "");
     let json = node_to_json(&node)?;
     let encrypted = crypt::encrypt(&json, passphrase)
-        .map_err(|e| FileHandlingError::Crypt(format!("Encryption failed: {e}")))?;
+        .map_err(|e| FileHandlingError::Crypt(format!("encryption failed: {e}")))?;
     fs::write(path, &encrypted)?;
     Ok(node)
 }
@@ -260,9 +275,18 @@ mod tests {
     fn test_json_roundtrip_with_extra() {
         let mut node = Node::new("Entry", "Login credentials");
         node.extra_fields = vec![
-            ExtraField { field_type: FieldType::Login, value: "admin".to_string() },
-            ExtraField { field_type: FieldType::Password, value: "secret123".to_string() },
-            ExtraField { field_type: FieldType::Custom("Note".to_string()), value: "important".to_string() },
+            ExtraField {
+                field_type: FieldType::Login,
+                value: "admin".to_string(),
+            },
+            ExtraField {
+                field_type: FieldType::Password,
+                value: "secret123".to_string(),
+            },
+            ExtraField {
+                field_type: FieldType::Custom("Note".to_string()),
+                value: "important".to_string(),
+            },
         ];
         let json = node_to_json(&node).unwrap();
         let decoded: Node = json_to_node(&json).unwrap();
@@ -287,10 +311,7 @@ mod tests {
                 Node::with_children(
                     "Category",
                     "",
-                    vec![
-                        Node::new("Item1", "leaf"),
-                        Node::new("Item2", "leaf"),
-                    ],
+                    vec![Node::new("Item1", "leaf"), Node::new("Item2", "leaf")],
                 ),
                 Node::new("Sibling", "leaf"),
             ],
@@ -301,21 +322,6 @@ mod tests {
         assert_eq!(node.children.len(), decoded.children.len());
         let cat = &decoded.children[0];
         assert_eq!(cat.children.len(), 2);
-    }
-
-    #[test]
-    fn test_write_read_file() {
-        let node = Node::new("TestNode", "file roundtrip");
-        let path = format!("/tmp/test_file_handling_{}.kdbx", uuid::Uuid::new_v4());
-        let _ = fs::remove_file(&path);
-
-        write_node_to_file(&node, &path).unwrap();
-        let decoded = read_node_from_file(&path).unwrap();
-
-        assert_eq!(node.id, decoded.id);
-        assert_eq!(node.name, decoded.name);
-
-        let _ = fs::remove_file(&path);
     }
 
     #[test]
@@ -344,7 +350,10 @@ mod tests {
 
         let result = validate_encrypted_file(&path);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), FileHandlingError::FileTooLarge { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            FileHandlingError::FileTooLarge { .. }
+        ));
 
         let _ = fs::remove_file(&path);
     }
@@ -356,7 +365,10 @@ mod tests {
 
         let result = validate_encrypted_file(&path);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), FileHandlingError::NotAnAgeFile));
+        assert!(matches!(
+            result.unwrap_err(),
+            FileHandlingError::NotAnAgeFile
+        ));
 
         let _ = fs::remove_file(&path);
     }
@@ -381,7 +393,10 @@ mod tests {
 
         let result = validate_encrypted_file(&path);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), FileHandlingError::FileTooSmall));
+        assert!(matches!(
+            result.unwrap_err(),
+            FileHandlingError::FileTooSmall
+        ));
 
         let _ = fs::remove_file(&path);
     }
@@ -389,11 +404,7 @@ mod tests {
     #[test]
     fn test_decrypt_to_node_roundtrip() {
         let path = format!("/tmp/test_decrypt_{}.age", uuid::Uuid::new_v4());
-        let original = Node::with_children(
-            "Root",
-            "root desc",
-            vec![Node::new("Child1", "leaf")],
-        );
+        let original = Node::with_children("Root", "root desc", vec![Node::new("Child1", "leaf")]);
         create_test_encrypted_file(&path, "my-pass", &original);
 
         let data = fs::read(&path).unwrap();
@@ -436,7 +447,7 @@ mod tests {
         );
         save_tree(&mutated, &path, passphrase).unwrap();
 
-        assert!(fs::metadata(&backup_path).is_err());
+        assert!(fs::metadata(&backup_path).is_ok());
 
         let data = fs::read(&path).unwrap();
         let decoded = decrypt_to_node(&data, passphrase_str).unwrap();
@@ -445,6 +456,7 @@ mod tests {
         assert_eq!(decoded.children[0].name, "New Child");
 
         let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(&backup_path);
     }
 
     #[test]

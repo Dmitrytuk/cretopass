@@ -4,6 +4,9 @@ use crate::file_handling::FileHandlingError;
 use crate::tree::node::{ExtraField, FieldType, Node};
 use uuid::Uuid;
 
+/// Maximum size (in bytes) of a file accepted for import.
+const MAX_IMPORT_SIZE: u64 = 50 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ImportFormat {
     Json,
@@ -24,11 +27,19 @@ impl ImportFormat {
 }
 
 pub fn import_tree(path: &str) -> Result<Node, FileHandlingError> {
-    let format = ImportFormat::from_path(path)
-        .ok_or_else(|| FileHandlingError::ImportError(format!("Unsupported file extension: {path}")))?;
+    let format = ImportFormat::from_path(path).ok_or_else(|| {
+        FileHandlingError::ImportError(format!("unsupported file extension: {path}"))
+    })?;
 
-    let data = std::fs::read_to_string(path)
-        .map_err(FileHandlingError::Io)?;
+    let meta = std::fs::metadata(path).map_err(FileHandlingError::Io)?;
+    if meta.len() > MAX_IMPORT_SIZE {
+        return Err(FileHandlingError::FileTooLarge {
+            size: meta.len(),
+            max: MAX_IMPORT_SIZE,
+        });
+    }
+
+    let data = std::fs::read_to_string(path).map_err(FileHandlingError::Io)?;
 
     match format {
         ImportFormat::Json => import_json(&data),
@@ -41,38 +52,52 @@ fn import_json(data: &str) -> Result<Node, FileHandlingError> {
     serde_json::from_str(data).map_err(FileHandlingError::Serde)
 }
 
+/// Maximum XML nesting depth accepted during import, guarding against
+/// stack overflow from maliciously deep files.
+const MAX_XML_DEPTH: usize = 256;
+
 fn import_xml(data: &str) -> Result<Node, FileHandlingError> {
     let trimmed = data.trim();
     // Skip XML declaration if present
     let body = if trimmed.starts_with("<?xml") {
-        let end = trimmed.find("?>").ok_or_else(|| {
-            FileHandlingError::ImportError("Unterminated XML declaration".into())
-        })?;
+        let end = trimmed
+            .find("?>")
+            .ok_or_else(|| FileHandlingError::ImportError("unterminated XML declaration".into()))?;
         trimmed[end + 2..].trim()
     } else {
         trimmed
     };
 
-    let (node, _rest) = parse_xml_node(body)?;
+    let (node, _rest) = parse_xml_node(body, 0)?;
     Ok(node)
 }
 
-fn parse_xml_node(input: &str) -> Result<(Node, &str), FileHandlingError> {
+fn parse_xml_node(input: &str, depth: usize) -> Result<(Node, &str), FileHandlingError> {
+    if depth > MAX_XML_DEPTH {
+        return Err(FileHandlingError::ImportError(
+            "XML nesting too deep".into(),
+        ));
+    }
     let input = input.trim_start();
 
     if !input.starts_with("<node") {
         return Err(FileHandlingError::ImportError("expected <node".into()));
     }
 
-    let tag_end = input.find('>')
+    let tag_end = input
+        .find('>')
         .ok_or_else(|| FileHandlingError::ImportError("expected > in <node".into()))?;
     let attrs_str = &input[5..tag_end];
 
     let attrs = extract_xml_attrs(attrs_str);
-    let name = attrs.iter().find(|(k, _)| k == "name")
+    let name = attrs
+        .iter()
+        .find(|(k, _)| k == "name")
         .map(|(_, v)| unescape_xml(v))
         .ok_or_else(|| FileHandlingError::ImportError("missing name attribute".into()))?;
-    let description = attrs.iter().find(|(k, _)| k == "description")
+    let description = attrs
+        .iter()
+        .find(|(k, _)| k == "description")
         .map(|(_, v)| unescape_xml(v))
         .ok_or_else(|| FileHandlingError::ImportError("missing description attribute".into()))?;
 
@@ -82,11 +107,14 @@ fn parse_xml_node(input: &str) -> Result<(Node, &str), FileHandlingError> {
     let ef_open = "<extra_fields>";
     let ef_close = "</extra_fields>";
     if !remaining.starts_with(ef_open) {
-        return Err(FileHandlingError::ImportError("expected <extra_fields>".into()));
+        return Err(FileHandlingError::ImportError(
+            "expected <extra_fields>".into(),
+        ));
     }
     remaining = &remaining[ef_open.len()..];
 
-    let ef_end = remaining.find(ef_close)
+    let ef_end = remaining
+        .find(ef_close)
         .ok_or_else(|| FileHandlingError::ImportError("expected </extra_fields>".into()))?;
     let ef_content = &remaining[..ef_end];
     remaining = &remaining[ef_end + ef_close.len()..];
@@ -105,7 +133,7 @@ fn parse_xml_node(input: &str) -> Result<(Node, &str), FileHandlingError> {
                 remaining = &remaining["</children>".len()..];
                 break;
             }
-            let (child, rest) = parse_xml_node(remaining)?;
+            let (child, rest) = parse_xml_node(remaining, depth + 1)?;
             children.push(child);
             remaining = rest;
         }
@@ -166,24 +194,25 @@ fn parse_xml_fields(input: &str) -> Result<Vec<ExtraField>, FileHandlingError> {
         }
         remaining = &remaining["<field".len()..];
 
-        let tag_end = remaining.find('>')
+        let tag_end = remaining
+            .find('>')
             .ok_or_else(|| FileHandlingError::ImportError("expected > in <field".into()))?;
         let attrs_str = &remaining[..tag_end];
         remaining = &remaining[tag_end + 1..];
 
         let attrs = extract_xml_attrs(attrs_str);
-        let ft_str = attrs.iter().find(|(k, _)| k == "type")
+        let ft_str = attrs
+            .iter()
+            .find(|(k, _)| k == "type")
             .map(|(_, v)| v.as_str())
             .ok_or_else(|| FileHandlingError::ImportError("missing type in <field>".into()))?;
-        let value = attrs.iter().find(|(k, _)| k == "value")
+        let value = attrs
+            .iter()
+            .find(|(k, _)| k == "value")
             .map(|(_, v)| unescape_xml(v))
             .ok_or_else(|| FileHandlingError::ImportError("missing value in <field>".into()))?;
 
-        let field_type = match ft_str {
-            "Login" => FieldType::Login,
-            "Password" => FieldType::Password,
-            other => FieldType::Custom(other.to_string()),
-        };
+        let field_type = FieldType::from_wire_label(ft_str);
 
         fields.push(ExtraField { field_type, value });
     }
@@ -208,16 +237,18 @@ struct PathData {
 fn import_csv(data: &str) -> Result<Node, FileHandlingError> {
     let mut lines: Vec<&str> = data.lines().collect();
     if lines.is_empty() {
-        return Err(FileHandlingError::ImportError("Empty CSV file".into()));
+        return Err(FileHandlingError::ImportError("empty CSV file".into()));
     }
 
-    // Skip header
-    if lines[0].trim().starts_with("path,") {
+    // Skip header (tolerate a trailing CR from CRLF line endings).
+    if lines[0].trim_end_matches('\r').trim().starts_with("path,") {
         lines.remove(0);
     }
 
     if lines.is_empty() {
-        return Err(FileHandlingError::ImportError("CSV file has no data rows".into()));
+        return Err(FileHandlingError::ImportError(
+            "CSV file has no data rows".into(),
+        ));
     }
 
     // Parse all rows
@@ -231,22 +262,27 @@ fn import_csv(data: &str) -> Result<Node, FileHandlingError> {
 
     let mut rows: Vec<Row> = Vec::new();
     for line in &lines {
-        let trimmed = line.trim();
+        // Strip a trailing CR left by CRLF line endings.
+        let trimmed = line.trim_end_matches('\r').trim();
         if trimmed.is_empty() {
             continue;
         }
         let fields = parse_csv_line(trimmed);
         if fields.len() < 4 {
-            return Err(FileHandlingError::ImportError(
-                format!("CSV row has too few fields: {trimmed}"),
-            ));
+            return Err(FileHandlingError::ImportError(format!(
+                "CSV row has too few fields: {trimmed}"
+            )));
         }
         let field_type = if fields.len() >= 5 && !fields[3].is_empty() {
             Some(fields[3].clone())
         } else {
             None
         };
-        let field_value = if fields.len() >= 5 { fields[4].clone() } else { String::new() };
+        let field_value = if fields.len() >= 5 {
+            fields[4].clone()
+        } else {
+            String::new()
+        };
 
         rows.push(Row {
             path: fields[0].clone(),
@@ -264,11 +300,7 @@ fn import_csv(data: &str) -> Result<Node, FileHandlingError> {
         let path = &row.path;
         if let Some((_, data)) = path_map.iter_mut().find(|(p, _)| p == path) {
             if let Some(ref ft) = row.field_type {
-                let field_type = match ft.as_str() {
-                    "Login" => FieldType::Login,
-                    "Password" => FieldType::Password,
-                    other => FieldType::Custom(other.to_string()),
-                };
+                let field_type = FieldType::from_wire_label(ft);
                 data.extra_fields.push(ExtraField {
                     field_type,
                     value: row.field_value.clone(),
@@ -277,21 +309,20 @@ fn import_csv(data: &str) -> Result<Node, FileHandlingError> {
         } else {
             let mut extra_fields = Vec::new();
             if let Some(ref ft) = row.field_type {
-                let field_type = match ft.as_str() {
-                    "Login" => FieldType::Login,
-                    "Password" => FieldType::Password,
-                    other => FieldType::Custom(other.to_string()),
-                };
+                let field_type = FieldType::from_wire_label(ft);
                 extra_fields.push(ExtraField {
                     field_type,
                     value: row.field_value.clone(),
                 });
             }
-            path_map.push((path.clone(), PathData {
-                name: row.name.clone(),
-                description: row.description.clone(),
-                extra_fields,
-            }));
+            path_map.push((
+                path.clone(),
+                PathData {
+                    name: row.name.clone(),
+                    description: row.description.clone(),
+                    extra_fields,
+                },
+            ));
         }
     }
 
@@ -319,8 +350,6 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
             children: tree.children.into_iter().map(into_node).collect(),
         }
     }
-
-
 
     let mut roots: Vec<TreeNode> = Vec::new();
 
@@ -354,9 +383,21 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
             } else {
                 container.push(TreeNode {
                     key: seg_str.clone(),
-                    name: if is_last { data.name.clone() } else { seg_str.clone() },
-                    description: if is_last { data.description.clone() } else { String::new() },
-                    extra_fields: if is_last { data.extra_fields.clone() } else { Vec::new() },
+                    name: if is_last {
+                        data.name.clone()
+                    } else {
+                        seg_str.clone()
+                    },
+                    description: if is_last {
+                        data.description.clone()
+                    } else {
+                        String::new()
+                    },
+                    extra_fields: if is_last {
+                        data.extra_fields.clone()
+                    } else {
+                        Vec::new()
+                    },
                     children: Vec::new(),
                 });
                 idx_path.push(container.len() - 1);
@@ -365,7 +406,7 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
     }
 
     if roots.is_empty() {
-        return Err(FileHandlingError::ImportError("No data to import".into()));
+        return Err(FileHandlingError::ImportError("no data to import".into()));
     }
 
     if roots.len() == 1 {
@@ -461,21 +502,30 @@ mod tests {
     fn sample_node() -> Node {
         let mut child = Node::new("Login", "My email login");
         child.extra_fields = vec![
-            ExtraField { field_type: FieldType::Login, value: "user@example.com".to_string() },
-            ExtraField { field_type: FieldType::Password, value: "s3cret".to_string() },
+            ExtraField {
+                field_type: FieldType::Login,
+                value: "user@example.com".to_string(),
+            },
+            ExtraField {
+                field_type: FieldType::Password,
+                value: "s3cret".to_string(),
+            },
         ];
         let mut key = Node::new("Key", "private key path");
-        key.extra_fields = vec![
-            ExtraField { field_type: FieldType::Password, value: "encrypted-key".to_string() },
-        ];
+        key.extra_fields = vec![ExtraField {
+            field_type: FieldType::Password,
+            value: "encrypted-key".to_string(),
+        }];
         let mut server = Node::with_children("Server", "SSH config", vec![key]);
-        server.extra_fields = vec![
-            ExtraField { field_type: FieldType::Custom("Custom:Host".to_string()), value: "example.com".to_string() },
-        ];
+        server.extra_fields = vec![ExtraField {
+            field_type: FieldType::Custom("Custom:Host".to_string()),
+            value: "example.com".to_string(),
+        }];
         let mut root = Node::with_children("Secrets", "My vault", vec![child, server]);
-        root.extra_fields = vec![
-            ExtraField { field_type: FieldType::Custom("Note".to_string()), value: "top level note".to_string() },
-        ];
+        root.extra_fields = vec![ExtraField {
+            field_type: FieldType::Custom("Note".to_string()),
+            value: "top level note".to_string(),
+        }];
         root
     }
 
@@ -508,7 +558,10 @@ mod tests {
         assert_eq!(login.extra_fields[0].value, "user@example.com");
         assert_eq!(login.extra_fields[1].value, "s3cret");
         assert!(matches!(login.extra_fields[0].field_type, FieldType::Login));
-        assert!(matches!(login.extra_fields[1].field_type, FieldType::Password));
+        assert!(matches!(
+            login.extra_fields[1].field_type,
+            FieldType::Password
+        ));
 
         let server = &imported.children[1];
         assert_eq!(server.name, "Server");
@@ -615,7 +668,10 @@ mod tests {
 
     #[test]
     fn test_import_format_from_path() {
-        assert_eq!(ImportFormat::from_path("file.json"), Some(ImportFormat::Json));
+        assert_eq!(
+            ImportFormat::from_path("file.json"),
+            Some(ImportFormat::Json)
+        );
         assert_eq!(ImportFormat::from_path("file.xml"), Some(ImportFormat::Xml));
         assert_eq!(ImportFormat::from_path("file.csv"), Some(ImportFormat::Csv));
         assert_eq!(ImportFormat::from_path("file.age"), None);
@@ -728,8 +784,14 @@ mod tests {
     fn test_xml_roundtrip_nested() {
         let mut child = Node::new("Login", "My login");
         child.extra_fields = vec![
-            ExtraField { field_type: FieldType::Login, value: "user".to_string() },
-            ExtraField { field_type: FieldType::Password, value: "pass".to_string() },
+            ExtraField {
+                field_type: FieldType::Login,
+                value: "user".to_string(),
+            },
+            ExtraField {
+                field_type: FieldType::Password,
+                value: "pass".to_string(),
+            },
         ];
         let original = Node::with_children("Root", "Vault", vec![child]);
         let imported = roundtrip_node(&original);
@@ -751,9 +813,10 @@ mod tests {
     #[test]
     fn test_xml_roundtrip_special_chars() {
         let mut original = Node::new("A & B <C>", r#"description "with" quotes'apos"#);
-        original.extra_fields = vec![
-            ExtraField { field_type: FieldType::Custom("<tag>".to_string()), value: "a&b".to_string() },
-        ];
+        original.extra_fields = vec![ExtraField {
+            field_type: FieldType::Custom("<tag>".to_string()),
+            value: "a&b".to_string(),
+        }];
         let imported = roundtrip_node(&original);
         assert_nodes_match(&original, &imported);
     }
@@ -762,8 +825,14 @@ mod tests {
     fn test_csv_roundtrip() {
         let mut child = Node::new("Login", "My login");
         child.extra_fields = vec![
-            ExtraField { field_type: FieldType::Login, value: "user".to_string() },
-            ExtraField { field_type: FieldType::Password, value: "pass".to_string() },
+            ExtraField {
+                field_type: FieldType::Login,
+                value: "user".to_string(),
+            },
+            ExtraField {
+                field_type: FieldType::Password,
+                value: "pass".to_string(),
+            },
         ];
         let original = Node::with_children("Root", "Vault", vec![child]);
 
@@ -779,9 +848,18 @@ mod tests {
     fn test_csv_roundtrip_multiple_extra_fields() {
         let mut child = Node::new("Entry", "Login creds");
         child.extra_fields = vec![
-            ExtraField { field_type: FieldType::Login, value: "admin".to_string() },
-            ExtraField { field_type: FieldType::Password, value: "secret123".to_string() },
-            ExtraField { field_type: FieldType::Custom("URL".to_string()), value: "https://example.com".to_string() },
+            ExtraField {
+                field_type: FieldType::Login,
+                value: "admin".to_string(),
+            },
+            ExtraField {
+                field_type: FieldType::Password,
+                value: "secret123".to_string(),
+            },
+            ExtraField {
+                field_type: FieldType::Custom("URL".to_string()),
+                value: "https://example.com".to_string(),
+            },
         ];
         let original = Node::with_children("Secrets", "", vec![child]);
 
@@ -797,10 +875,11 @@ mod tests {
 
     #[test]
     fn test_json_roundtrip_via_import_tree() {
-        let original = Node::with_children("Root", "desc", vec![
-            Node::new("Child1", "leaf1"),
-            Node::new("Child2", "leaf2"),
-        ]);
+        let original = Node::with_children(
+            "Root",
+            "desc",
+            vec![Node::new("Child1", "leaf1"), Node::new("Child2", "leaf2")],
+        );
         let json_path = format!("/tmp/roundtrip_json_{}.json", uuid::Uuid::new_v4());
         export_tree(&original, &json_path, ExportFormat::Json).unwrap();
         let imported = import_tree(&json_path).unwrap();
@@ -813,6 +892,9 @@ mod tests {
     fn test_import_tree_unsupported_extension() {
         let result = import_tree("/tmp/test.xyz");
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), FileHandlingError::ImportError(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            FileHandlingError::ImportError(_)
+        ));
     }
 }

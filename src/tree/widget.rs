@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use zeroize::Zeroizing;
+
 use ratatui::{
     layout::Rect,
     text::{Line, Span, Text},
@@ -8,8 +10,8 @@ use ratatui::{
 };
 use uuid::Uuid;
 
-use crate::theming::{ElementStyle, Icon, texts};
 use super::node::{ExtraField, Node};
+use crate::theming::{texts, ElementStyle, Icon};
 
 /// A single visible row in the flattened tree display.
 #[derive(Debug, Clone)]
@@ -110,9 +112,7 @@ pub enum InputMode {
         selected_format: usize,
     },
     /// Simple alert message popup (any key dismisses).
-    Alert {
-        message: String,
-    },
+    Alert { message: String },
 }
 
 /// Central application state.
@@ -131,8 +131,8 @@ pub struct TreeState {
     pub return_to_menu: bool,
     /// Path of the currently opened encrypted file, if any.
     pub active_file_path: Option<String>,
-    /// Passphrase for the open file (raw bytes, provided by user).
-    pub active_file_passphrase: Vec<u8>,
+    /// Passphrase for the open file (provided by user), zeroized on drop.
+    pub active_file_passphrase: Zeroizing<Vec<u8>>,
     /// Set to `true` whenever the tree is mutated; cleared after save.
     pub dirty: bool,
     /// If `true`, window title shows the full path; otherwise just the filename.
@@ -157,7 +157,7 @@ impl TreeState {
             quit: false,
             return_to_menu: false,
             active_file_path: None,
-            active_file_passphrase: Vec::new(),
+            active_file_passphrase: Zeroizing::new(Vec::new()),
             dirty: false,
             display_full_path: true,
             status: None,
@@ -516,10 +516,7 @@ impl TreeWidget {
                 texts::STATUS_SAVING => ElementStyle::StatusSaving,
                 _ => ElementStyle::StatusInfo,
             };
-            title_spans.push(Span::styled(
-                format!(" {}  ", s),
-                el.style(),
-            ));
+            title_spans.push(Span::styled(format!(" {}  ", s), el.style()));
         }
         title_spans.push(Span::raw(base_title));
 

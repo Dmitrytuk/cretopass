@@ -1,9 +1,13 @@
+use std::borrow::Cow;
 use std::io::{self, Write};
 
-use crate::cursor::{cursor_field_spans, selected_span};
+use crate::cursor::{
+    backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
+    selected_span,
+};
 use crate::file_handling::save_tree;
-use crate::theming::{ElementStyle, texts};
 use crate::theming::Action;
+use crate::theming::{texts, ElementStyle};
 use crate::tree::node::{ExtraField, FieldType};
 use crate::tree::widget::{InputMode, TreeState, TreeWidget};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -52,11 +56,7 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) ->
                 terminal.draw(|f| ui(f, state))?;
                 if let Some(ref p) = state.active_file_path {
                     state.dirty = false;
-                    if let Err(e) = save_tree(
-                        &state.root,
-                        p,
-                        &state.active_file_passphrase,
-                    ) {
+                    if let Err(e) = save_tree(&state.root, p, &state.active_file_passphrase) {
                         eprintln!("Save failed: {e}");
                     }
                 }
@@ -215,6 +215,21 @@ fn active_len_for_field(
     }
 }
 
+fn active_text_for_field<'a>(
+    name: &'a str,
+    desc: &'a str,
+    extra_fields: &'a [ExtraField],
+    field: usize,
+) -> Option<&'a str> {
+    match field {
+        0 => Some(name),
+        1 => Some(desc),
+        f => f
+            .checked_sub(2)
+            .and_then(|ef_idx| extra_fields.get(ef_idx).map(|ef| ef.value.as_str())),
+    }
+}
+
 fn cursor_on_new_field(field: usize, name: &str, desc: &str, extra_fields: &[ExtraField]) -> usize {
     match field {
         0 => name.len(),
@@ -271,22 +286,15 @@ fn build_editing_mode(
 }
 
 fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
-    let is_adding = matches!(state.mode, InputMode::Adding { .. });
-    let (node_id, name, desc, extra_fields, field, cursor) = match &state.mode {
+    let mode = std::mem::replace(&mut state.mode, InputMode::Normal);
+    let (is_adding, node_id, name, desc, extra_fields, field, cursor) = match mode {
         InputMode::Adding {
             name,
             desc,
             extra_fields,
             field,
             cursor,
-        } => (
-            None,
-            name.clone(),
-            desc.clone(),
-            extra_fields.clone(),
-            *field,
-            *cursor,
-        ),
+        } => (true, None, name, desc, extra_fields, field, cursor),
         InputMode::Editing {
             node_id,
             name,
@@ -295,14 +303,18 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
             field,
             cursor,
         } => (
-            Some(*node_id),
-            name.clone(),
-            desc.clone(),
-            extra_fields.clone(),
-            *field,
-            *cursor,
+            false,
+            Some(node_id),
+            name,
+            desc,
+            extra_fields,
+            field,
+            cursor,
         ),
-        _ => return,
+        other => {
+            state.mode = other;
+            return;
+        }
     };
 
     let build_mode = |n: String, d: String, ef: Vec<ExtraField>, f: usize, cur: usize| {
@@ -401,11 +413,13 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
             state.mode = build_mode(name, desc, extra_fields, new_field, new_cursor);
         }
         Action::CursorLeft if !is_on_add_button => {
-            let new_cursor = cursor.saturating_sub(1);
+            let new_cursor = active_text_for_field(&name, &desc, &extra_fields, field)
+                .map_or(cursor, |text| cursor_left(text, cursor));
             state.mode = build_mode(name, desc, extra_fields, field, new_cursor);
         }
         Action::CursorRight if !is_on_add_button => {
-            let new_cursor = (cursor + 1).min(active_len);
+            let new_cursor = active_text_for_field(&name, &desc, &extra_fields, field)
+                .map_or(cursor, |text| cursor_right(text, cursor));
             state.mode = build_mode(name, desc, extra_fields, field, new_cursor);
         }
         Action::CursorHome if !is_on_add_button => {
@@ -421,17 +435,17 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
             }
             let (new_name, new_desc, new_extra_fields, new_cursor) = if field == 0 {
                 let mut n = name;
-                n.remove(cursor - 1);
-                (n, desc, extra_fields, cursor - 1)
+                let nc = backspace_at(&mut n, cursor);
+                (n, desc, extra_fields, nc)
             } else if field == 1 {
                 let mut d = desc;
-                d.remove(cursor - 1);
-                (name, d, extra_fields, cursor - 1)
+                let nc = backspace_at(&mut d, cursor);
+                (name, d, extra_fields, nc)
             } else if is_on_extra {
                 let mut ef = extra_fields;
                 let idx = field - 2;
-                ef[idx].value.remove(cursor - 1);
-                (name, desc, ef, cursor - 1)
+                let nc = backspace_at(&mut ef[idx].value, cursor);
+                (name, desc, ef, nc)
             } else {
                 (name, desc, extra_fields, cursor)
             };
@@ -444,16 +458,16 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
             }
             let (new_name, new_desc, new_extra_fields, new_cursor) = if field == 0 {
                 let mut n = name;
-                n.remove(cursor);
+                delete_at(&mut n, cursor);
                 (n, desc, extra_fields, cursor)
             } else if field == 1 {
                 let mut d = desc;
-                d.remove(cursor);
+                delete_at(&mut d, cursor);
                 (name, d, extra_fields, cursor)
             } else if is_on_extra {
                 let mut ef = extra_fields;
                 let idx = field - 2;
-                ef[idx].value.remove(cursor);
+                delete_at(&mut ef[idx].value, cursor);
                 (name, desc, ef, cursor)
             } else {
                 (name, desc, extra_fields, cursor)
@@ -463,17 +477,20 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
         Action::InsertChar(c) if !is_on_add_button => {
             let (new_name, new_desc, new_extra_fields, new_cursor) = if field == 0 {
                 let mut n = name;
-                n.insert(cursor, c);
-                (n, desc, extra_fields, cursor + 1)
+                let mut nc = cursor;
+                insert_char_at(&mut n, &mut nc, c);
+                (n, desc, extra_fields, nc)
             } else if field == 1 {
                 let mut d = desc;
-                d.insert(cursor, c);
-                (name, d, extra_fields, cursor + 1)
+                let mut nc = cursor;
+                insert_char_at(&mut d, &mut nc, c);
+                (name, d, extra_fields, nc)
             } else if is_on_extra {
                 let mut ef = extra_fields;
                 let idx = field - 2;
-                ef[idx].value.insert(cursor, c);
-                (name, desc, ef, cursor + 1)
+                let mut nc = cursor;
+                insert_char_at(&mut ef[idx].value, &mut nc, c);
+                (name, desc, ef, nc)
             } else {
                 (name, desc, extra_fields, cursor)
             };
@@ -486,7 +503,8 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
 }
 
 fn handle_select_field_type(key: event::KeyEvent, state: &mut TreeState) {
-    let (node_id, name, desc, extra_fields, field, cursor, selected_type) = match &state.mode {
+    let mode = std::mem::replace(&mut state.mode, InputMode::Normal);
+    let (node_id, name, desc, extra_fields, field, cursor, selected_type) = match mode {
         InputMode::SelectFieldType {
             node_id,
             name,
@@ -496,15 +514,18 @@ fn handle_select_field_type(key: event::KeyEvent, state: &mut TreeState) {
             cursor,
             selected_type,
         } => (
-            *node_id,
-            name.clone(),
-            desc.clone(),
-            extra_fields.clone(),
-            *field,
-            *cursor,
-            *selected_type,
+            node_id,
+            name,
+            desc,
+            extra_fields,
+            field,
+            cursor,
+            selected_type,
         ),
-        _ => return,
+        other => {
+            state.mode = other;
+            return;
+        }
     };
 
     let is_adding = node_id.is_none();
@@ -617,7 +638,8 @@ fn handle_select_field_type(key: event::KeyEvent, state: &mut TreeState) {
 }
 
 fn handle_custom_field_name(key: event::KeyEvent, state: &mut TreeState) {
-    let (node_id, name, desc, extra_fields, field, cursor, input) = match &state.mode {
+    let mode = std::mem::replace(&mut state.mode, InputMode::Normal);
+    let (node_id, name, desc, extra_fields, field, cursor, input) = match mode {
         InputMode::CustomFieldName {
             node_id,
             name,
@@ -626,16 +648,11 @@ fn handle_custom_field_name(key: event::KeyEvent, state: &mut TreeState) {
             field,
             cursor,
             input,
-        } => (
-            *node_id,
-            name.clone(),
-            desc.clone(),
-            extra_fields.clone(),
-            *field,
-            *cursor,
-            input.clone(),
-        ),
-        _ => return,
+        } => (node_id, name, desc, extra_fields, field, cursor, input),
+        other => {
+            state.mode = other;
+            return;
+        }
     };
 
     let is_adding = node_id.is_none();
@@ -707,7 +724,8 @@ fn handle_custom_field_name(key: event::KeyEvent, state: &mut TreeState) {
 }
 
 fn handle_confirm_delete(key: event::KeyEvent, state: &mut TreeState) {
-    let (node_id, name, desc, extra_fields, field, cursor, target_index) = match &state.mode {
+    let mode = std::mem::replace(&mut state.mode, InputMode::Normal);
+    let (node_id, name, desc, extra_fields, field, cursor, target_index) = match mode {
         InputMode::ConfirmDeleteField {
             node_id,
             name,
@@ -717,15 +735,18 @@ fn handle_confirm_delete(key: event::KeyEvent, state: &mut TreeState) {
             cursor,
             target_index,
         } => (
-            *node_id,
-            name.clone(),
-            desc.clone(),
-            extra_fields.clone(),
-            *field,
-            *cursor,
-            *target_index,
+            node_id,
+            name,
+            desc,
+            extra_fields,
+            field,
+            cursor,
+            target_index,
         ),
-        _ => return,
+        other => {
+            state.mode = other;
+            return;
+        }
     };
 
     let is_adding = node_id.is_none();
@@ -787,7 +808,8 @@ fn adding_has_changes(name: &str, desc: &str, extra_fields: &[ExtraField]) -> bo
 }
 
 fn handle_confirm_discard(key: event::KeyEvent, state: &mut TreeState) {
-    let (node_id, name, desc, extra_fields, field, cursor) = match &state.mode {
+    let mode = std::mem::replace(&mut state.mode, InputMode::Normal);
+    let (node_id, name, desc, extra_fields, field, cursor) = match mode {
         InputMode::ConfirmDiscardChanges {
             node_id,
             name,
@@ -795,15 +817,11 @@ fn handle_confirm_discard(key: event::KeyEvent, state: &mut TreeState) {
             extra_fields,
             field,
             cursor,
-        } => (
-            *node_id,
-            name.clone(),
-            desc.clone(),
-            extra_fields.clone(),
-            *field,
-            *cursor,
-        ),
-        _ => return,
+        } => (node_id, name, desc, extra_fields, field, cursor),
+        other => {
+            state.mode = other;
+            return;
+        }
     };
 
     match Action::from_confirm(&key) {
@@ -837,7 +855,16 @@ fn handle_confirm_discard(key: event::KeyEvent, state: &mut TreeState) {
                 };
             }
         }
-        _ => {}
+        _ => {
+            state.mode = InputMode::ConfirmDiscardChanges {
+                node_id,
+                name,
+                desc,
+                extra_fields,
+                field,
+                cursor,
+            };
+        }
     }
 }
 
@@ -869,9 +896,13 @@ fn copy_to_clipboard(text: &str) {
 }
 
 fn handle_detail(key: event::KeyEvent, state: &mut TreeState) {
-    let (selected, alert) = match &state.mode {
-        InputMode::Detail { selected, alert } => (*selected, alert.clone()),
-        _ => return,
+    let mode = std::mem::replace(&mut state.mode, InputMode::Normal);
+    let (selected, alert) = match mode {
+        InputMode::Detail { selected, alert } => (selected, alert),
+        other => {
+            state.mode = other;
+            return;
+        }
     };
 
     if alert.is_some() {
@@ -931,16 +962,30 @@ fn handle_detail(key: event::KeyEvent, state: &mut TreeState) {
                     field: 0,
                     cursor,
                 };
+            } else {
+                state.mode = InputMode::Detail {
+                    selected,
+                    alert: None,
+                };
             }
         }
-        _ => {}
+        _ => {
+            state.mode = InputMode::Detail {
+                selected,
+                alert: None,
+            };
+        }
     }
 }
 
 fn handle_export_node_select(key: event::KeyEvent, state: &mut TreeState) {
-    let (node, selected) = match &state.mode {
-        InputMode::ExportNodeSelect { node, selected } => (node.clone(), *selected),
-        _ => return,
+    let mode = std::mem::replace(&mut state.mode, InputMode::Normal);
+    let (node, selected) = match mode {
+        InputMode::ExportNodeSelect { node, selected } => (node, selected),
+        other => {
+            state.mode = other;
+            return;
+        }
     };
 
     match Action::from_select_field_type(&key) {
@@ -973,18 +1018,24 @@ fn handle_export_node_select(key: event::KeyEvent, state: &mut TreeState) {
         Action::SelectType2 => {
             state.mode = InputMode::ExportNodeSelect { node, selected: 1 };
         }
-        _ => {}
+        _ => {
+            state.mode = InputMode::ExportNodeSelect { node, selected };
+        }
     }
 }
 
 fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
-    let (node, include_children, selected_format) = match &state.mode {
+    let mode = std::mem::replace(&mut state.mode, InputMode::Normal);
+    let (node, include_children, selected_format) = match mode {
         InputMode::ExportNodeFormat {
             node,
             include_children,
             selected_format,
-        } => (node.clone(), *include_children, *selected_format),
-        _ => return,
+        } => (node, include_children, selected_format),
+        other => {
+            state.mode = other;
+            return;
+        }
     };
 
     match Action::from_select_field_type(&key) {
@@ -1035,10 +1086,11 @@ fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
                 _ => ExportFormat::Csv,
             };
 
+            let node_name = node.name.clone();
             let export_node = if include_children {
-                node.clone()
+                node
             } else {
-                let mut n = node.clone();
+                let mut n = node;
                 n.children = Vec::new();
                 n
             };
@@ -1047,7 +1099,7 @@ fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
                 Some(p) => p.clone(),
                 None => {
                     state.mode = InputMode::Alert {
-                        message: "No active file to derive export path".to_string(),
+                        message: texts::MSG_NO_ACTIVE_FILE.to_string(),
                     };
                     return;
                 }
@@ -1055,12 +1107,20 @@ fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
 
             let path = std::path::Path::new(&base_path);
             let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("export");
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("export");
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("age");
-            let node_name_clean: String = node
-                .name
+            let node_name_clean: String = node_name
                 .chars()
-                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                .map(|c| {
+                    if c.is_alphanumeric() || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
                 .collect();
             let export_path = parent.join(format!("{}_{}.{}", stem, node_name_clean, ext));
             let export_path_str = export_path.to_string_lossy().to_string();
@@ -1078,7 +1138,13 @@ fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
                 }
             }
         }
-        _ => {}
+        _ => {
+            state.mode = InputMode::ExportNodeFormat {
+                node,
+                include_children,
+                selected_format,
+            };
+        }
     }
 }
 
@@ -1103,28 +1169,45 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
 
     match &state.mode {
         InputMode::Search => render_search_overlay(frame, area, state),
-        InputMode::Adding { name, desc, extra_fields, field, cursor } => {
-            render_edit_overlay_common(
+        InputMode::Adding {
+            name,
+            desc,
+            extra_fields,
+            field,
+            cursor,
+        } => {
+            render_edit_overlay(
                 frame,
                 area,
-                name,
-                desc,
-                extra_fields,
-                *field,
-                *cursor,
-                texts::OVERLAY_ADD_NODE,
+                EditOverlayArgs {
+                    name,
+                    desc,
+                    extra_fields,
+                    field: *field,
+                    cursor: *cursor,
+                    title: texts::OVERLAY_ADD_NODE,
+                },
             );
         }
-        InputMode::Editing { name, desc, extra_fields, field, cursor, .. } => {
-            render_edit_overlay_common(
+        InputMode::Editing {
+            name,
+            desc,
+            extra_fields,
+            field,
+            cursor,
+            ..
+        } => {
+            render_edit_overlay(
                 frame,
                 area,
-                name,
-                desc,
-                extra_fields,
-                *field,
-                *cursor,
-                texts::OVERLAY_EDIT_NODE,
+                EditOverlayArgs {
+                    name,
+                    desc,
+                    extra_fields,
+                    field: *field,
+                    cursor: *cursor,
+                    title: texts::OVERLAY_EDIT_NODE,
+                },
             );
         }
         InputMode::SelectFieldType { .. } => render_select_field_type_overlay(frame, area, state),
@@ -1163,24 +1246,25 @@ fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         InputMode::SelectFieldType { .. } => {
             (texts::MODE_FIELD_TYPE, ElementStyle::ModeFieldType.style())
         }
-        InputMode::CustomFieldName { .. } => {
-            (texts::MODE_CUSTOM_NAME, ElementStyle::ModeCustomName.style())
-        }
+        InputMode::CustomFieldName { .. } => (
+            texts::MODE_CUSTOM_NAME,
+            ElementStyle::ModeCustomName.style(),
+        ),
         InputMode::ConfirmDeleteField { .. } => {
             (texts::MODE_CONFIRM, ElementStyle::ModeConfirmDelete.style())
         }
         InputMode::ConfirmDiscardChanges { .. } => {
             (texts::MODE_DISCARD, ElementStyle::ModeDiscard.style())
         }
-        InputMode::ExportNodeSelect { .. } => {
-            (texts::MODE_EXPORT_SELECT, ElementStyle::ModeFieldType.style())
-        }
-        InputMode::ExportNodeFormat { .. } => {
-            (texts::MODE_EXPORT_FORMAT, ElementStyle::ModeFieldType.style())
-        }
-        InputMode::Alert { .. } => {
-            (texts::MODE_NORMAL, ElementStyle::ModeNormal.style())
-        }
+        InputMode::ExportNodeSelect { .. } => (
+            texts::MODE_EXPORT_SELECT,
+            ElementStyle::ModeFieldType.style(),
+        ),
+        InputMode::ExportNodeFormat { .. } => (
+            texts::MODE_EXPORT_FORMAT,
+            ElementStyle::ModeFieldType.style(),
+        ),
+        InputMode::Alert { .. } => (texts::MODE_NORMAL, ElementStyle::ModeNormal.style()),
     };
 
     let name = state.current_name().unwrap_or_default();
@@ -1220,7 +1304,11 @@ fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         InputMode::AwaitingDd => texts::HINT_AWAIT_DD,
         InputMode::Detail { ref alert, .. } if alert.is_some() => texts::HINT_DETAIL_ALERT,
         InputMode::Detail { .. } => texts::HINT_DETAIL,
-        InputMode::Editing { extra_fields, field, .. } => {
+        InputMode::Editing {
+            extra_fields,
+            field,
+            ..
+        } => {
             let is_on_extra = extra_field_index(*field).is_some_and(|i| i < extra_fields.len());
             if is_on_extra {
                 texts::HINT_FORM_EXTRA
@@ -1230,7 +1318,11 @@ fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
                 texts::HINT_FORM
             }
         }
-        InputMode::Adding { extra_fields, field, .. } => {
+        InputMode::Adding {
+            extra_fields,
+            field,
+            ..
+        } => {
             let is_on_extra = extra_field_index(*field).is_some_and(|i| i < extra_fields.len());
             if is_on_extra {
                 texts::HINT_FORM_EXTRA
@@ -1319,7 +1411,9 @@ fn render_export_node_select_overlay(frame: &mut Frame, area: Rect, state: &Tree
 
 fn render_export_node_format_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
     let selected_format = match &state.mode {
-        InputMode::ExportNodeFormat { selected_format, .. } => *selected_format,
+        InputMode::ExportNodeFormat {
+            selected_format, ..
+        } => *selected_format,
         _ => return,
     };
 
@@ -1362,7 +1456,7 @@ fn render_alert_overlay(frame: &mut Frame, area: Rect, message: &str) {
     };
 
     let block = Block::default()
-        .title(" Alert ")
+        .title(texts::ALERT_TITLE)
         .borders(Borders::ALL)
         .style(ElementStyle::CopiedBlock.style());
 
@@ -1405,7 +1499,7 @@ fn render_extra_field_line(
 ) -> Line<'static> {
     let is_active = field == ef_index + 2;
     let display_val = if is_active && !is_inactive_display {
-        ef.value.clone()
+        Cow::Borrowed(ef.value.as_str())
     } else {
         ef.field_type.display_value(&ef.value)
     };
@@ -1413,17 +1507,25 @@ fn render_extra_field_line(
     Line::from(cursor_field_spans(&prefix, &display_val, cursor, is_active))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_edit_overlay_common(
-    frame: &mut Frame,
-    area: Rect,
-    name: &str,
-    desc: &str,
-    extra_fields: &[ExtraField],
+/// Arguments for rendering the add/edit node overlay form.
+struct EditOverlayArgs<'a> {
+    name: &'a str,
+    desc: &'a str,
+    extra_fields: &'a [ExtraField],
     field: usize,
     cursor: usize,
-    title: &str,
-) {
+    title: &'a str,
+}
+
+fn render_edit_overlay(frame: &mut Frame, area: Rect, args: EditOverlayArgs<'_>) {
+    let EditOverlayArgs {
+        name,
+        desc,
+        extra_fields,
+        field,
+        cursor,
+        title,
+    } = args;
     let overlay_area = make_overlay_area(area, extra_fields.len(), 5);
 
     let block = Block::default()
@@ -1534,7 +1636,12 @@ fn render_custom_field_name_overlay(frame: &mut Frame, area: Rect, state: &TreeS
 
     let inner = block.inner(overlay_area);
     let lines = vec![
-        Line::from(cursor_field_spans(texts::LABEL_NAME, &input, input.len(), true)),
+        Line::from(cursor_field_spans(
+            texts::LABEL_NAME,
+            &input,
+            input.len(),
+            true,
+        )),
         Line::from(""),
         Line::from(Span::styled(
             texts::HINT_CUSTOM_FIELD_NAME,
@@ -1575,7 +1682,12 @@ fn render_confirm_delete_overlay(frame: &mut Frame, area: Rect, state: &TreeStat
     let inner = block.inner(overlay_area);
     let lines = vec![
         Line::from(Span::styled(
-            format!("{}{}{}", texts::PROMPT_DELETE_FIELD_START, label, texts::PROMPT_DELETE_FIELD_END),
+            format!(
+                "{}{}{}",
+                texts::PROMPT_DELETE_FIELD_START,
+                label,
+                texts::PROMPT_DELETE_FIELD_END
+            ),
             ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),

@@ -8,6 +8,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{backend::Backend, Frame, Terminal};
 
+use crate::cursor::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
 use crate::file_browser::{self, FileBrowserAction, FileBrowserMode, FileBrowserState};
 use crate::file_handling;
 use crate::settings::active_file::ActiveFileState;
@@ -336,9 +337,9 @@ fn handle_file_browser_key<B: Backend>(
                                 let filename = std::path::Path::new(&path)
                                     .file_stem()
                                     .map(|s| s.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| "unknown".to_string());
-                                let date_time = chrono::Local::now()
-                                    .format("%Y-%m-%d_%H%M%S").to_string();
+                                    .unwrap_or_else(|| texts::IMPORT_NAME_FALLBACK.to_string());
+                                let date_time =
+                                    chrono::Local::now().format("%Y-%m-%d_%H%M%S").to_string();
                                 let mut wrapper = crate::tree::node::Node::new(
                                     format!("imported_{}_{}", filename, date_time),
                                     "",
@@ -350,7 +351,7 @@ fn handle_file_browser_key<B: Backend>(
                                     Some(p) => p,
                                     None => {
                                         state.modal = Some(SettingsModal::Alert {
-                                            message: "No file path set".to_string(),
+                                            message: texts::MSG_NO_FILE_PATH.to_string(),
                                         });
                                         return Ok(());
                                     }
@@ -360,15 +361,11 @@ fn handle_file_browser_key<B: Backend>(
 
                                 state.status = Some(texts::STATUS_SAVING);
                                 terminal.draw(|f| render(f, f.area(), state))?;
-                                match file_handling::save_tree(
-                                    &save_node, &save_path, &save_pass,
-                                ) {
+                                match file_handling::save_tree(&save_node, &save_path, &save_pass) {
                                     Err(e) => {
                                         state.status = None;
                                         state.modal = Some(SettingsModal::Alert {
-                                            message: format!(
-                                                "{}{}", texts::MSG_SAVE_FAILED, e
-                                            ),
+                                            message: format!("{}{}", texts::MSG_SAVE_FAILED, e),
                                         });
                                     }
                                     Ok(()) => {
@@ -451,7 +448,7 @@ fn handle_app_settings_key(key: event::KeyEvent, state: &mut SettingsState) {
         Action::ToggleSetting => {
             let idx = match state.modal.as_ref() {
                 Some(SettingsModal::AppSettings { setting_idx }) => *setting_idx,
-                _ => unreachable!(),
+                _ => return,
             };
             if idx == 0 {
                 state.settings.display_full_path = !state.settings.display_full_path;
@@ -547,18 +544,9 @@ fn handle_change_pw_input_key<B: Backend>(
             {
                 *error = None;
                 match *focused {
-                    0 => {
-                        current.insert(*current_cursor, c);
-                        *current_cursor += 1;
-                    }
-                    1 => {
-                        new_pass.insert(*new_cursor, c);
-                        *new_cursor += 1;
-                    }
-                    _ => {
-                        confirm.insert(*confirm_cursor, c);
-                        *confirm_cursor += 1;
-                    }
+                    0 => insert_char_at(current, current_cursor, c),
+                    1 => insert_char_at(new_pass, new_cursor, c),
+                    _ => insert_char_at(confirm, confirm_cursor, c),
                 }
             }
         }
@@ -577,16 +565,13 @@ fn handle_change_pw_input_key<B: Backend>(
                 *error = None;
                 match *focused {
                     0 if *current_cursor > 0 => {
-                        *current_cursor -= 1;
-                        current.remove(*current_cursor);
+                        *current_cursor = backspace_at(current, *current_cursor);
                     }
                     1 if *new_cursor > 0 => {
-                        *new_cursor -= 1;
-                        new_pass.remove(*new_cursor);
+                        *new_cursor = backspace_at(new_pass, *new_cursor);
                     }
                     2 if *confirm_cursor > 0 => {
-                        *confirm_cursor -= 1;
-                        confirm.remove(*confirm_cursor);
+                        *confirm_cursor = backspace_at(confirm, *confirm_cursor);
                     }
                     _ => {}
                 }
@@ -606,32 +591,29 @@ fn handle_change_pw_input_key<B: Backend>(
             {
                 *error = None;
                 match *focused {
-                    0 if *current_cursor < current.len() => {
-                        current.remove(*current_cursor);
-                    }
-                    1 if *new_cursor < new_pass.len() => {
-                        new_pass.remove(*new_cursor);
-                    }
-                    2 if *confirm_cursor < confirm.len() => {
-                        confirm.remove(*confirm_cursor);
-                    }
+                    0 => delete_at(current, *current_cursor),
+                    1 => delete_at(new_pass, *new_cursor),
+                    2 => delete_at(confirm, *confirm_cursor),
                     _ => {}
                 }
             }
         }
         Action::CursorLeft => {
             if let Some(SettingsModal::ChangePwInput {
+                ref mut current,
                 ref mut current_cursor,
+                ref mut new_pass,
                 ref mut new_cursor,
+                ref mut confirm,
                 ref mut confirm_cursor,
                 ref mut focused,
                 ..
             }) = state.modal
             {
                 match *focused {
-                    0 if *current_cursor > 0 => *current_cursor -= 1,
-                    1 if *new_cursor > 0 => *new_cursor -= 1,
-                    2 if *confirm_cursor > 0 => *confirm_cursor -= 1,
+                    0 => *current_cursor = cursor_left(current, *current_cursor),
+                    1 => *new_cursor = cursor_left(new_pass, *new_cursor),
+                    2 => *confirm_cursor = cursor_left(confirm, *confirm_cursor),
                     _ => {}
                 }
             }
@@ -649,9 +631,9 @@ fn handle_change_pw_input_key<B: Backend>(
             }) = state.modal
             {
                 match *focused {
-                    0 if *current_cursor < current.len() => *current_cursor += 1,
-                    1 if *new_cursor < new_pass.len() => *new_cursor += 1,
-                    2 if *confirm_cursor < confirm.len() => *confirm_cursor += 1,
+                    0 => *current_cursor = cursor_right(current, *current_cursor),
+                    1 => *new_cursor = cursor_right(new_pass, *new_cursor),
+                    2 => *confirm_cursor = cursor_right(confirm, *confirm_cursor),
                     _ => {}
                 }
             }
@@ -745,7 +727,7 @@ fn handle_change_pw_input_key<B: Backend>(
                     };
                     (current.clone(), new_pass.clone(), confirm.clone(), !is_ok)
                 }
-                _ => unreachable!(),
+                _ => return Ok(()),
             };
             if has_error {
                 state.modal = Some(modal);
@@ -754,7 +736,7 @@ fn handle_change_pw_input_key<B: Backend>(
                 if let Some(ref active_file) = state.active_file.clone() {
                     if let (Some(ref path), Some(ref node)) = (&active_file.path, &active_file.node)
                     {
-                        let new_pass_bytes = new_pass.into_bytes();
+                        let new_pass_bytes = zeroize::Zeroizing::new(new_pass.into_bytes());
                         state.status = Some(texts::STATUS_SAVING);
                         terminal.draw(|f| render(f, f.area(), state))?;
                         match file_handling::save_tree(node, path, &new_pass_bytes) {
@@ -802,7 +784,7 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
 ) -> io::Result<()> {
     let file_path = match state.modal.take() {
         Some(SettingsModal::ConfirmNoPassphrase { file_path }) => file_path,
-        _ => unreachable!(),
+        _ => return Ok(()),
     };
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
@@ -817,7 +799,7 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
                 }
                 Ok(node) => {
                     state.status = None;
-                    let pp_bytes = Vec::new();
+                    let pp_bytes = zeroize::Zeroizing::new(Vec::new());
                     let active_file = ActiveFileState {
                         path: Some(file_path.clone()),
                         passphrase: pp_bytes.clone(),
@@ -860,27 +842,42 @@ fn handle_export_select_type_key(key: event::KeyEvent, state: &mut SettingsState
             state.modal = None;
         }
         Action::NavDown => {
-            if let Some(SettingsModal::ExportSelectType { ref mut selected_type }) = state.modal {
+            if let Some(SettingsModal::ExportSelectType {
+                ref mut selected_type,
+            }) = state.modal
+            {
                 *selected_type = (*selected_type + 1) % 3;
             }
         }
         Action::NavUp => {
-            if let Some(SettingsModal::ExportSelectType { ref mut selected_type }) = state.modal {
+            if let Some(SettingsModal::ExportSelectType {
+                ref mut selected_type,
+            }) = state.modal
+            {
                 *selected_type = (*selected_type + 2) % 3;
             }
         }
         Action::SelectType1 => {
-            if let Some(SettingsModal::ExportSelectType { ref mut selected_type }) = state.modal {
+            if let Some(SettingsModal::ExportSelectType {
+                ref mut selected_type,
+            }) = state.modal
+            {
                 *selected_type = 0;
             }
         }
         Action::SelectType2 => {
-            if let Some(SettingsModal::ExportSelectType { ref mut selected_type }) = state.modal {
+            if let Some(SettingsModal::ExportSelectType {
+                ref mut selected_type,
+            }) = state.modal
+            {
                 *selected_type = 1;
             }
         }
         Action::SelectType3 => {
-            if let Some(SettingsModal::ExportSelectType { ref mut selected_type }) = state.modal {
+            if let Some(SettingsModal::ExportSelectType {
+                ref mut selected_type,
+            }) = state.modal
+            {
                 *selected_type = 2;
             }
         }
@@ -955,43 +952,64 @@ fn handle_modal_key<B: Backend>(
     state: &mut SettingsState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
-    use SettingsModal::*;
-    let kind: u8 = match state.modal.as_ref() {
-        Some(AppSettings { .. }) => 0,
-        Some(DeleteConfirm { .. }) => 1,
-        Some(ChangePwConfirm) => 2,
-        Some(ChangePwInput { .. }) => 3,
-        Some(ConfirmNoPassphrase { .. }) => 4,
-        Some(ExportSelectType { .. }) => 5,
-        Some(ExportConfirm { .. }) => 6,
-        _ => 255,
-    };
-    match kind {
-        0 => {
-            handle_app_settings_key(key, state);
-            return Ok(());
-        }
-        1 => {
-            handle_delete_confirm_key(key, state);
-            return Ok(());
-        }
-        2 => {
-            handle_change_pw_confirm_key(key, state);
-            return Ok(());
-        }
-        3 => return handle_change_pw_input_key(key, state, terminal),
-        4 => return handle_confirm_no_passphrase_key(key, state, terminal),
-        5 => {
-            handle_export_select_type_key(key, state);
-            return Ok(());
-        }
-        6 => {
-            handle_export_confirm_key(key, state);
-            return Ok(());
-        }
-        _ => {}
+    let is_passphrase = matches!(
+        state.modal,
+        Some(SettingsModal::PassphraseInput { .. }) | Some(SettingsModal::Alert { .. })
+    );
+    if is_passphrase {
+        return handle_passphrase_key(key, state, terminal);
     }
 
+    let is_app_settings = matches!(state.modal, Some(SettingsModal::AppSettings { .. }));
+    if is_app_settings {
+        handle_app_settings_key(key, state);
+        return Ok(());
+    }
+
+    let is_delete_confirm = matches!(state.modal, Some(SettingsModal::DeleteConfirm { .. }));
+    if is_delete_confirm {
+        handle_delete_confirm_key(key, state);
+        return Ok(());
+    }
+
+    let is_change_pw_confirm = matches!(state.modal, Some(SettingsModal::ChangePwConfirm));
+    if is_change_pw_confirm {
+        handle_change_pw_confirm_key(key, state);
+        return Ok(());
+    }
+
+    let is_change_pw_input = matches!(state.modal, Some(SettingsModal::ChangePwInput { .. }));
+    if is_change_pw_input {
+        return handle_change_pw_input_key(key, state, terminal);
+    }
+
+    let is_confirm_no_passphrase =
+        matches!(state.modal, Some(SettingsModal::ConfirmNoPassphrase { .. }));
+    if is_confirm_no_passphrase {
+        return handle_confirm_no_passphrase_key(key, state, terminal);
+    }
+
+    let is_export_select = matches!(state.modal, Some(SettingsModal::ExportSelectType { .. }));
+    if is_export_select {
+        handle_export_select_type_key(key, state);
+        return Ok(());
+    }
+
+    let is_export_confirm = matches!(state.modal, Some(SettingsModal::ExportConfirm { .. }));
+    if is_export_confirm {
+        handle_export_confirm_key(key, state);
+        return Ok(());
+    }
+
+    // No modal or unknown modal: nothing to do.
+    Ok(())
+}
+
+fn handle_passphrase_key<B: Backend>(
+    key: event::KeyEvent,
+    state: &mut SettingsState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
     let mut modal = match state.modal.take() {
         Some(m) => m,
         None => return Ok(()),
@@ -999,147 +1017,72 @@ fn handle_modal_key<B: Backend>(
 
     match Action::from_passphrase_input(&key) {
         Action::Cancel => {}
-        Action::InsertChar(c) => match &mut modal {
-            SettingsModal::PassphraseInput {
+        Action::InsertChar(c) => {
+            if let SettingsModal::PassphraseInput {
                 passphrase,
                 cursor,
                 error,
                 ..
-            } => {
-                passphrase.insert(*cursor, c);
-                *cursor += 1;
+            } = &mut modal
+            {
+                insert_char_at(passphrase, cursor, c);
                 *error = None;
-                state.modal = Some(modal);
             }
-            SettingsModal::Alert { .. } => {
-                state.modal = Some(modal);
-            }
-            SettingsModal::FileBrowser(_)
-            | SettingsModal::AppSettings { .. }
-            | SettingsModal::DeleteConfirm { .. }
-            | SettingsModal::ChangePwConfirm
-            | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. }
-            | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. } => unreachable!(),
-        },
-        Action::Backspace => match &mut modal {
-            SettingsModal::PassphraseInput {
+            state.modal = Some(modal);
+        }
+        Action::Backspace => {
+            if let SettingsModal::PassphraseInput {
                 passphrase, cursor, ..
-            } => {
+            } = &mut modal
+            {
                 if *cursor > 0 {
-                    *cursor -= 1;
-                    passphrase.remove(*cursor);
+                    *cursor = backspace_at(passphrase, *cursor);
                 }
-                state.modal = Some(modal);
             }
-            SettingsModal::Alert { .. } => {
-                state.modal = Some(modal);
-            }
-            SettingsModal::FileBrowser(_)
-            | SettingsModal::AppSettings { .. }
-            | SettingsModal::DeleteConfirm { .. }
-            | SettingsModal::ChangePwConfirm
-            | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. }
-            | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. } => unreachable!(),
-        },
-        Action::DeleteChar => match &mut modal {
-            SettingsModal::PassphraseInput {
+            state.modal = Some(modal);
+        }
+        Action::DeleteChar => {
+            if let SettingsModal::PassphraseInput {
                 passphrase, cursor, ..
-            } => {
-                if *cursor < passphrase.len() {
-                    passphrase.remove(*cursor);
-                }
-                state.modal = Some(modal);
+            } = &mut modal
+            {
+                delete_at(passphrase, *cursor);
             }
-            SettingsModal::Alert { .. } => {
-                state.modal = Some(modal);
-            }
-            SettingsModal::FileBrowser(_)
-            | SettingsModal::AppSettings { .. }
-            | SettingsModal::DeleteConfirm { .. }
-            | SettingsModal::ChangePwConfirm
-            | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. }
-            | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. } => unreachable!(),
-        },
-        Action::CursorLeft => match &mut modal {
-            SettingsModal::PassphraseInput { cursor, .. } => {
-                *cursor = cursor.saturating_sub(1);
-                state.modal = Some(modal);
-            }
-            SettingsModal::Alert { .. } => {
-                state.modal = Some(modal);
-            }
-            SettingsModal::FileBrowser(_)
-            | SettingsModal::AppSettings { .. }
-            | SettingsModal::DeleteConfirm { .. }
-            | SettingsModal::ChangePwConfirm
-            | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. }
-            | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. } => unreachable!(),
-        },
-        Action::CursorRight => match &mut modal {
-            SettingsModal::PassphraseInput {
+            state.modal = Some(modal);
+        }
+        Action::CursorLeft => {
+            if let SettingsModal::PassphraseInput {
                 cursor, passphrase, ..
-            } => {
-                if *cursor < passphrase.len() {
-                    *cursor += 1;
-                }
-                state.modal = Some(modal);
+            } = &mut modal
+            {
+                *cursor = cursor_left(passphrase, *cursor);
             }
-            SettingsModal::Alert { .. } => {
-                state.modal = Some(modal);
+            state.modal = Some(modal);
+        }
+        Action::CursorRight => {
+            if let SettingsModal::PassphraseInput {
+                cursor, passphrase, ..
+            } = &mut modal
+            {
+                *cursor = cursor_right(passphrase, *cursor);
             }
-            SettingsModal::FileBrowser(_)
-            | SettingsModal::AppSettings { .. }
-            | SettingsModal::DeleteConfirm { .. }
-            | SettingsModal::ChangePwConfirm
-            | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. }
-            | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. } => unreachable!(),
-        },
-        Action::CursorHome => match &mut modal {
-            SettingsModal::PassphraseInput { cursor, .. } => {
+            state.modal = Some(modal);
+        }
+        Action::CursorHome => {
+            if let SettingsModal::PassphraseInput { cursor, .. } = &mut modal {
                 *cursor = 0;
-                state.modal = Some(modal);
             }
-            SettingsModal::Alert { .. } => {
-                state.modal = Some(modal);
-            }
-            SettingsModal::FileBrowser(_)
-            | SettingsModal::AppSettings { .. }
-            | SettingsModal::DeleteConfirm { .. }
-            | SettingsModal::ChangePwConfirm
-            | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. }
-            | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. } => unreachable!(),
-        },
-        Action::CursorEnd => match &mut modal {
-            SettingsModal::PassphraseInput {
+            state.modal = Some(modal);
+        }
+        Action::CursorEnd => {
+            if let SettingsModal::PassphraseInput {
                 cursor, passphrase, ..
-            } => {
+            } = &mut modal
+            {
                 *cursor = passphrase.len();
-                state.modal = Some(modal);
             }
-            SettingsModal::Alert { .. } => {
-                state.modal = Some(modal);
-            }
-            SettingsModal::FileBrowser(_)
-            | SettingsModal::AppSettings { .. }
-            | SettingsModal::DeleteConfirm { .. }
-            | SettingsModal::ChangePwConfirm
-            | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. }
-            | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. } => unreachable!(),
-        },
+            state.modal = Some(modal);
+        }
         Action::Confirm => match modal {
             SettingsModal::PassphraseInput {
                 file_path,
@@ -1163,7 +1106,7 @@ fn handle_modal_key<B: Backend>(
                         }
                         Ok(node) => {
                             state.status = None;
-                            let pp_bytes = passphrase.into_bytes();
+                            let pp_bytes = zeroize::Zeroizing::new(passphrase.into_bytes());
                             let active_file = ActiveFileState {
                                 path: Some(file_path.clone()),
                                 passphrase: pp_bytes.clone(),
@@ -1201,7 +1144,7 @@ fn handle_modal_key<B: Backend>(
                         }
                         Ok(node) => {
                             state.status = None;
-                            let pp_bytes = passphrase.into_bytes();
+                            let pp_bytes = zeroize::Zeroizing::new(passphrase.into_bytes());
                             let active_file = ActiveFileState {
                                 path: Some(file_path.clone()),
                                 passphrase: pp_bytes.clone(),
@@ -1225,14 +1168,7 @@ fn handle_modal_key<B: Backend>(
                 }
             },
             SettingsModal::Alert { .. } => {}
-            SettingsModal::FileBrowser(_)
-            | SettingsModal::AppSettings { .. }
-            | SettingsModal::DeleteConfirm { .. }
-            | SettingsModal::ChangePwConfirm
-            | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. }
-            | SettingsModal::ExportSelectType { .. }
-            | SettingsModal::ExportConfirm { .. } => unreachable!(),
+            _ => {}
         },
         _ => {
             state.modal = Some(modal);

@@ -5,7 +5,6 @@ pub enum FileHandlingError {
     Io(std::io::Error),
     Serde(serde_json::Error),
     Crypt(String),
-    NotFound(String),
     FileTooLarge { size: u64, max: u64 },
     FileTooSmall,
     NotAnAgeFile,
@@ -18,21 +17,23 @@ pub enum FileHandlingError {
 impl fmt::Display for FileHandlingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io(e) => write!(f, "I/O error: {e}"),
-            Self::Serde(e) => write!(f, "JSON error: {e}"),
-            Self::Crypt(e) => write!(f, "Crypt error: {e}"),
-            Self::NotFound(p) => write!(f, "File not found: {p}"),
+            Self::Io(e) => write!(f, "io: {e}"),
+            Self::Serde(e) => write!(f, "json: {e}"),
+            Self::Crypt(e) => write!(f, "crypt: {e}"),
             Self::FileTooLarge { size, max } => {
-                write!(f, "File too large: {size} bytes (max {max} bytes)")
+                write!(f, "file too large: {size} bytes (max {max} bytes)")
             }
-            Self::FileTooSmall => write!(f, "File is too small to be an age-encrypted file"),
+            Self::FileTooSmall => write!(f, "file too small to be an age-encrypted file"),
             Self::NotAnAgeFile => {
-                write!(f, "File is not an age-encrypted file (missing age-encrypt magic header)")
+                write!(
+                    f,
+                    "not an age-encrypted file (missing age-encrypt magic header)"
+                )
             }
-            Self::InvalidPassphraseEncoding => write!(f, "Invalid passphrase encoding"),
-            Self::PathNotWritable(p) => write!(f, "Cannot write to path: {p}"),
-            Self::ExportError(msg) => write!(f, "Export error: {msg}"),
-            Self::ImportError(msg) => write!(f, "Import error: {msg}"),
+            Self::InvalidPassphraseEncoding => write!(f, "invalid passphrase encoding"),
+            Self::PathNotWritable(p) => write!(f, "cannot write to path: {p}"),
+            Self::ExportError(msg) => write!(f, "export: {msg}"),
+            Self::ImportError(msg) => write!(f, "import: {msg}"),
         }
     }
 }
