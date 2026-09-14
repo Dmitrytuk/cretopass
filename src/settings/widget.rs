@@ -47,6 +47,12 @@ enum SettingsModal {
         focused: usize,
         error: Option<String>,
     },
+    ExportSelectType {
+        selected_type: usize,
+    },
+    ExportConfirm {
+        export_type: String,
+    },
 }
 
 pub struct SettingsState {
@@ -201,6 +207,23 @@ fn handle_settings_key<B: Backend>(
                         message: texts::MSG_NO_OPEN_FILE.to_string(),
                     });
                 }
+            } else if idx == 4 {
+                if state.active_file.is_some() {
+                    state.modal = Some(SettingsModal::ExportSelectType { selected_type: 0 });
+                } else {
+                    state.modal = Some(SettingsModal::Alert {
+                        message: texts::MSG_NO_OPEN_FILE.to_string(),
+                    });
+                }
+            } else if idx == 5 {
+                let mut fb = FileBrowserState::new(FileBrowserMode::ImportFile);
+                fb.set_active_file_path(
+                    state
+                        .active_file
+                        .as_ref()
+                        .and_then(|af| af.path.as_ref().map(PathBuf::from)),
+                );
+                state.modal = Some(SettingsModal::FileBrowser(fb));
             } else {
                 let file_idx = idx - texts::MENU_ITEMS.len();
                 if file_idx < state.settings.recent_files.len() {
@@ -270,7 +293,7 @@ fn handle_settings_key<B: Backend>(
 fn handle_file_browser_key<B: Backend>(
     key: event::KeyEvent,
     state: &mut SettingsState,
-    _terminal: &mut Terminal<B>,
+    terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     let mut modal = match state.modal.take() {
         Some(SettingsModal::FileBrowser(b)) => b,
@@ -305,7 +328,70 @@ fn handle_file_browser_key<B: Backend>(
         Some(FileBrowserAction::Selected(path)) => {
             let creating = modal.mode == FileBrowserMode::CreateFile;
 
-            if creating {
+            if modal.mode == FileBrowserMode::ImportFile {
+                match file_handling::import::import_tree(&path) {
+                    Ok(imported_node) => {
+                        if let Some(ref mut af) = state.active_file {
+                            if let Some(ref mut root) = af.node {
+                                let filename = std::path::Path::new(&path)
+                                    .file_stem()
+                                    .map(|s| s.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| "unknown".to_string());
+                                let date_time = chrono::Local::now()
+                                    .format("%Y-%m-%d_%H%M%S").to_string();
+                                let mut wrapper = crate::tree::node::Node::new(
+                                    format!("imported_{}_{}", filename, date_time),
+                                    "",
+                                );
+                                wrapper.children = vec![imported_node];
+                                root.add_child(wrapper);
+
+                                let save_path = match af.path.clone() {
+                                    Some(p) => p,
+                                    None => {
+                                        state.modal = Some(SettingsModal::Alert {
+                                            message: "No file path set".to_string(),
+                                        });
+                                        return Ok(());
+                                    }
+                                };
+                                let save_pass = af.passphrase.clone();
+                                let save_node = root.clone();
+
+                                state.status = Some(texts::STATUS_SAVING);
+                                terminal.draw(|f| render(f, f.area(), state))?;
+                                match file_handling::save_tree(
+                                    &save_node, &save_path, &save_pass,
+                                ) {
+                                    Err(e) => {
+                                        state.status = None;
+                                        state.modal = Some(SettingsModal::Alert {
+                                            message: format!(
+                                                "{}{}", texts::MSG_SAVE_FAILED, e
+                                            ),
+                                        });
+                                    }
+                                    Ok(()) => {
+                                        state.status = None;
+                                        state.modal = Some(SettingsModal::Alert {
+                                            message: texts::MSG_IMPORT_SUCCESS.to_string(),
+                                        });
+                                    }
+                                }
+                            }
+                        } else {
+                            state.modal = Some(SettingsModal::Alert {
+                                message: texts::MSG_IMPORT_NO_OPEN_FILE.to_string(),
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        state.modal = Some(SettingsModal::Alert {
+                            message: format!("{e}"),
+                        });
+                    }
+                }
+            } else if creating {
                 if file_handling::probe_path_writable(&path).is_ok() {
                     state.modal = Some(SettingsModal::PassphraseInput {
                         file_path: path,
@@ -766,6 +852,102 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
     Ok(())
 }
 
+// ── Export/Import modal key handlers ──
+
+fn handle_export_select_type_key(key: event::KeyEvent, state: &mut SettingsState) {
+    match Action::from_select_field_type(&key) {
+        Action::Cancel => {
+            state.modal = None;
+        }
+        Action::NavDown => {
+            if let Some(SettingsModal::ExportSelectType { ref mut selected_type }) = state.modal {
+                *selected_type = (*selected_type + 1) % 3;
+            }
+        }
+        Action::NavUp => {
+            if let Some(SettingsModal::ExportSelectType { ref mut selected_type }) = state.modal {
+                *selected_type = (*selected_type + 2) % 3;
+            }
+        }
+        Action::SelectType1 => {
+            if let Some(SettingsModal::ExportSelectType { ref mut selected_type }) = state.modal {
+                *selected_type = 0;
+            }
+        }
+        Action::SelectType2 => {
+            if let Some(SettingsModal::ExportSelectType { ref mut selected_type }) = state.modal {
+                *selected_type = 1;
+            }
+        }
+        Action::SelectType3 => {
+            if let Some(SettingsModal::ExportSelectType { ref mut selected_type }) = state.modal {
+                *selected_type = 2;
+            }
+        }
+        Action::Confirm => {
+            if let Some(SettingsModal::ExportSelectType { selected_type }) = state.modal.take() {
+                let format = match selected_type {
+                    0 => texts::FORMAT_JSON,
+                    1 => texts::FORMAT_XML,
+                    _ => texts::FORMAT_CSV,
+                };
+                state.modal = Some(SettingsModal::ExportConfirm {
+                    export_type: format.to_string(),
+                });
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_export_confirm_key(key: event::KeyEvent, state: &mut SettingsState) {
+    match Action::from_confirm(&key) {
+        Action::Yes => {
+            let export_type = match state.modal.take() {
+                Some(SettingsModal::ExportConfirm { export_type }) => export_type,
+                _ => return,
+            };
+
+            let af = match state.active_file.clone() {
+                Some(af) => af,
+                None => return,
+            };
+
+            let path = match af.path {
+                Some(p) => p,
+                None => return,
+            };
+
+            let node = match af.node {
+                Some(n) => n,
+                None => return,
+            };
+
+            let format = match export_type.as_str() {
+                "JSON" => file_handling::export::ExportFormat::Json,
+                "XML" => file_handling::export::ExportFormat::Xml,
+                _ => file_handling::export::ExportFormat::Csv,
+            };
+
+            match file_handling::export::export_tree(&node, &path, format) {
+                Ok(out_path) => {
+                    state.modal = Some(SettingsModal::Alert {
+                        message: format!("{}{}", texts::MSG_EXPORT_SUCCESS, out_path),
+                    });
+                }
+                Err(e) => {
+                    state.modal = Some(SettingsModal::Alert {
+                        message: format!("{e}"),
+                    });
+                }
+            }
+        }
+        _ => {
+            state.modal = None;
+        }
+    }
+}
+
 // ── Modal key handling (Passphrase, Alert, FileBrowser) ──
 
 fn handle_modal_key<B: Backend>(
@@ -780,6 +962,8 @@ fn handle_modal_key<B: Backend>(
         Some(ChangePwConfirm) => 2,
         Some(ChangePwInput { .. }) => 3,
         Some(ConfirmNoPassphrase { .. }) => 4,
+        Some(ExportSelectType { .. }) => 5,
+        Some(ExportConfirm { .. }) => 6,
         _ => 255,
     };
     match kind {
@@ -797,6 +981,14 @@ fn handle_modal_key<B: Backend>(
         }
         3 => return handle_change_pw_input_key(key, state, terminal),
         4 => return handle_confirm_no_passphrase_key(key, state, terminal),
+        5 => {
+            handle_export_select_type_key(key, state);
+            return Ok(());
+        }
+        6 => {
+            handle_export_confirm_key(key, state);
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -827,7 +1019,9 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::DeleteConfirm { .. }
             | SettingsModal::ChangePwConfirm
             | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwInput { .. }
+            | SettingsModal::ExportSelectType { .. }
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::Backspace => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -847,7 +1041,9 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::DeleteConfirm { .. }
             | SettingsModal::ChangePwConfirm
             | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwInput { .. }
+            | SettingsModal::ExportSelectType { .. }
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::DeleteChar => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -866,7 +1062,9 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::DeleteConfirm { .. }
             | SettingsModal::ChangePwConfirm
             | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwInput { .. }
+            | SettingsModal::ExportSelectType { .. }
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::CursorLeft => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
@@ -881,7 +1079,9 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::DeleteConfirm { .. }
             | SettingsModal::ChangePwConfirm
             | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwInput { .. }
+            | SettingsModal::ExportSelectType { .. }
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::CursorRight => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -900,7 +1100,9 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::DeleteConfirm { .. }
             | SettingsModal::ChangePwConfirm
             | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwInput { .. }
+            | SettingsModal::ExportSelectType { .. }
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::CursorHome => match &mut modal {
             SettingsModal::PassphraseInput { cursor, .. } => {
@@ -915,7 +1117,9 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::DeleteConfirm { .. }
             | SettingsModal::ChangePwConfirm
             | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwInput { .. }
+            | SettingsModal::ExportSelectType { .. }
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::CursorEnd => match &mut modal {
             SettingsModal::PassphraseInput {
@@ -932,7 +1136,9 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::DeleteConfirm { .. }
             | SettingsModal::ChangePwConfirm
             | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwInput { .. }
+            | SettingsModal::ExportSelectType { .. }
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         Action::Confirm => match modal {
             SettingsModal::PassphraseInput {
@@ -1024,7 +1230,9 @@ fn handle_modal_key<B: Backend>(
             | SettingsModal::DeleteConfirm { .. }
             | SettingsModal::ChangePwConfirm
             | SettingsModal::ConfirmNoPassphrase { .. }
-            | SettingsModal::ChangePwInput { .. } => unreachable!(),
+            | SettingsModal::ChangePwInput { .. }
+            | SettingsModal::ExportSelectType { .. }
+            | SettingsModal::ExportConfirm { .. } => unreachable!(),
         },
         _ => {
             state.modal = Some(modal);
@@ -1054,6 +1262,12 @@ fn render(frame: &mut Frame, area: Rect, state: &SettingsState) {
         }
         Some(SettingsModal::ChangePwInput { .. }) => {
             render_change_pw_input_modal(frame, area, state)
+        }
+        Some(SettingsModal::ExportSelectType { .. }) => {
+            render_export_select_type_modal(frame, area, state)
+        }
+        Some(SettingsModal::ExportConfirm { export_type }) => {
+            render_export_confirm_modal(frame, area, export_type)
         }
         None => {}
     }
@@ -1413,6 +1627,84 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
         texts::HINT_CHANGE_PW_INPUT,
         ElementStyle::SettingsHelp.style(),
     )));
+
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(block, overlay_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+fn render_export_select_type_modal(frame: &mut Frame, area: Rect, state: &SettingsState) {
+    let selected_type = match &state.modal {
+        Some(SettingsModal::ExportSelectType { selected_type }) => *selected_type,
+        _ => 0,
+    };
+
+    let overlay_area = make_overlay(area, 10);
+    let block = Block::default()
+        .title(texts::EXPORT_SELECT_TITLE)
+        .borders(Borders::ALL)
+        .style(ElementStyle::SettingsOverlayBlock.style());
+
+    let inner = block.inner(overlay_area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(""));
+
+    for (i, item) in texts::EXPORT_TYPE_ITEMS.iter().enumerate() {
+        let is_selected = i == selected_type;
+        let style = if is_selected {
+            ElementStyle::SettingsSelected.style()
+        } else {
+            ElementStyle::SettingsNormal.style()
+        };
+        let prefix = if is_selected {
+            Icon::SelectionArrow.as_str()
+        } else {
+            Icon::SelectionPad.as_str()
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", prefix, item),
+            style,
+        )));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        texts::HINT_SELECT_FIELD_TYPE,
+        ElementStyle::SettingsHelp.style(),
+    )));
+
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(block, overlay_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+fn render_export_confirm_modal(frame: &mut Frame, area: Rect, export_type: &str) {
+    let overlay_area = make_overlay(area, 7);
+    let block = Block::default()
+        .title(texts::EXPORT_CONFIRM_TITLE)
+        .borders(Borders::ALL)
+        .style(ElementStyle::SettingsChangePwBlock.style());
+
+    let inner = block.inner(overlay_area);
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!(
+                "{}{}{}",
+                texts::PROMPT_EXPORT_CONFIRM_START,
+                export_type,
+                texts::PROMPT_EXPORT_CONFIRM_END
+            ),
+            ElementStyle::ConfirmMessage.style(),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            texts::HINT_CHANGE_PW_CONFIRM,
+            ElementStyle::SettingsHelp.style(),
+        )),
+    ];
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);

@@ -39,6 +39,7 @@ pub enum Action {
     SaveSettings,
     Yes,
     No,
+    ExportNode,
     None,
 }
 
@@ -48,6 +49,7 @@ impl Action {
             return match key.code {
                 KeyCode::Enter => Self::OpenDetail,
                 KeyCode::Char('c') => Self::Quit,
+                KeyCode::Char('e') => Self::ExportNode,
                 _ => Self::None,
             };
         }

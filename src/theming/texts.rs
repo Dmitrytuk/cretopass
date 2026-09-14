@@ -21,18 +21,30 @@ pub const SETTINGS_DELETE_CONFIRM: &str = " Confirm Delete ";
 
 pub const BROWSER_OPEN: &str = " Open File ";
 pub const BROWSER_CREATE: &str = " Create New Secret File ";
+pub const BROWSER_IMPORT: &str = " Import File ";
 
 pub const MENU_ITEMS: &[&str] = &[
     "Open secret file",
     "Create new secret file",
     "Settings",
     "Change file password",
+    "Export active file",
+    "Import from file",
 ];
 
 pub const SETTING_FULL_PATH: &str = "Display full path in title bar";
 pub const SETTING_LAST_FILE: &str = "Start with last file";
 
 pub const FIELD_TYPE_ITEMS: [&str; 3] = ["1. Login", "2. Password", "3. Custom Field"];
+
+pub const EXPORT_SELECT_TITLE: &str = " Select Export Format ";
+pub const EXPORT_CONFIRM_TITLE: &str = " Confirm Export ";
+pub const EXPORT_TYPE_ITEMS: [&str; 3] = ["1. JSON", "2. XML", "3. CSV"];
+pub const FORMAT_JSON: &str = "JSON";
+pub const FORMAT_XML: &str = "XML";
+pub const FORMAT_CSV: &str = "CSV";
+pub const PROMPT_EXPORT_CONFIRM_START: &str = "Are you sure you want to export as ";
+pub const PROMPT_EXPORT_CONFIRM_END: &str = "?";
 
 pub const LABEL_NAME: &str = "Name: ";
 pub const LABEL_DESC: &str = "Desc: ";
@@ -89,6 +101,19 @@ pub const PROMPT_CHANGE_PW: &str = "Are you sure you want to change the password
 pub const PROMPT_NO_PASSPHRASE: &str = "You are creating the secret file without password?";
 pub const PROMPT_DISCARD: &str = "Discard changes?";
 
+pub const OVERLAY_EXPORT_NODE: &str = " Export Node ";
+pub const OVERLAY_EXPORT_FORMAT: &str = " Select Export Format ";
+pub const EXPORT_NODE_OPTIONS: [&str; 2] = [
+    "1. Export this node",
+    "2. Export this node with children",
+];
+pub const HINT_EXPORT_NODE_SELECT: &str = "j/k:nav  Enter:choose  Esc:cancel";
+pub const HINT_EXPORT_NODE_FORMAT: &str = "j/k:nav  Enter:choose  Esc:cancel";
+pub const MSG_EXPORT_NODE_SUCCESS: &str = "Node exported at ";
+pub const MODE_EXPORT_SELECT: &str = "EXPORT";
+pub const MODE_EXPORT_FORMAT: &str = "EXPORT FMT";
+
+pub const MSG_NOT_IMPLEMENTED: &str = "This feature is not yet implemented";
 pub const MSG_NO_OPEN_FILE: &str = "No file is currently open";
 pub const MSG_CANNOT_DELETE_OPEN: &str = "Cannot delete the currently open file from recent files";
 pub const MSG_CANNOT_WRITE: &str = "Cannot write to this path";
@@ -98,6 +123,9 @@ pub const MSG_PW_EMPTY: &str = "New password fields cannot be empty";
 pub const MSG_PW_MISMATCH: &str = "New passwords do not match";
 pub const MSG_SETTINGS_SAVED: &str = "Settings saved";
 pub const MSG_SAVE_FAILED: &str = "Failed to save: ";
+pub const MSG_EXPORT_SUCCESS: &str = "File exported at ";
+pub const MSG_IMPORT_SUCCESS: &str = "File imported successfully.";
+pub const MSG_IMPORT_NO_OPEN_FILE: &str = "Import requires an open file. Open one first.";
 
 pub const EMPTY_DIR: &str = "  (empty directory)";
 pub const NO_MATCHING_FILES: &str = "  No matching files";

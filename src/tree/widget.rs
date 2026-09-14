@@ -93,6 +93,26 @@ pub enum InputMode {
         field: usize,
         cursor: usize,
     },
+    /// Popup for selecting export scope (node only or with children).
+    ExportNodeSelect {
+        /// The node being exported.
+        node: Node,
+        /// 0 = this node only, 1 = with children.
+        selected: usize,
+    },
+    /// Popup for selecting export format (JSON/XML/CSV).
+    ExportNodeFormat {
+        /// The node being exported.
+        node: Node,
+        /// Whether children should be included.
+        include_children: bool,
+        /// 0 = JSON, 1 = XML, 2 = CSV.
+        selected_format: usize,
+    },
+    /// Simple alert message popup (any key dismisses).
+    Alert {
+        message: String,
+    },
 }
 
 /// Central application state.

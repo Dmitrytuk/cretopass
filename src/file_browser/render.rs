@@ -19,6 +19,7 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
     let title = match state.mode {
         FileBrowserMode::OpenFile => texts::BROWSER_OPEN,
         FileBrowserMode::CreateFile => texts::BROWSER_CREATE,
+        FileBrowserMode::ImportFile => texts::BROWSER_IMPORT,
     };
 
     let block = Block::default()
@@ -158,7 +159,7 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
                 name_style
             };
 
-            let marker = if entry.is_age_file && !entry.is_dir {
+            let marker = if entry.is_age_file && !entry.is_dir && state.mode != FileBrowserMode::ImportFile {
                 Icon::PwdMarker.as_str()
             } else {
                 ""
@@ -232,7 +233,7 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
 
     // Show rename/delete hints when a PWD-marked file is selected
     if let Some(entry) = state.entries.get(state.selected) {
-        if entry.is_age_file && !entry.is_dir {
+        if entry.is_age_file && !entry.is_dir && state.mode != FileBrowserMode::ImportFile {
             spans.push(Span::styled(
                 texts::FB_HINT_RENAME,
                 hint_style,

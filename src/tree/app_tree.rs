@@ -42,6 +42,9 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) ->
                 InputMode::ConfirmDeleteField { .. } => handle_confirm_delete(key, state),
                 InputMode::ConfirmDiscardChanges { .. } => handle_confirm_discard(key, state),
                 InputMode::Detail { .. } => handle_detail(key, state),
+                InputMode::ExportNodeSelect { .. } => handle_export_node_select(key, state),
+                InputMode::ExportNodeFormat { .. } => handle_export_node_format(key, state),
+                InputMode::Alert { .. } => handle_alert(key, state),
             }
 
             if state.dirty {
@@ -138,6 +141,14 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
         }
         Action::ToggleSearch => {
             state.mode = InputMode::Search;
+        }
+        Action::ExportNode => {
+            if let Some(node) = state.current_node_ref() {
+                state.mode = InputMode::ExportNodeSelect {
+                    node: node.clone(),
+                    selected: 0,
+                };
+            }
         }
         Action::Cancel => {
             state.clear_search();
@@ -926,6 +937,156 @@ fn handle_detail(key: event::KeyEvent, state: &mut TreeState) {
     }
 }
 
+fn handle_export_node_select(key: event::KeyEvent, state: &mut TreeState) {
+    let (node, selected) = match &state.mode {
+        InputMode::ExportNodeSelect { node, selected } => (node.clone(), *selected),
+        _ => return,
+    };
+
+    match Action::from_select_field_type(&key) {
+        Action::Cancel => {
+            state.mode = InputMode::Normal;
+        }
+        Action::NavDown => {
+            state.mode = InputMode::ExportNodeSelect {
+                node,
+                selected: (selected + 1) % 2,
+            };
+        }
+        Action::NavUp => {
+            state.mode = InputMode::ExportNodeSelect {
+                node,
+                selected: (selected + 1) % 2,
+            };
+        }
+        Action::Confirm => {
+            let include_children = selected == 1;
+            state.mode = InputMode::ExportNodeFormat {
+                node,
+                include_children,
+                selected_format: 0,
+            };
+        }
+        Action::SelectType1 => {
+            state.mode = InputMode::ExportNodeSelect { node, selected: 0 };
+        }
+        Action::SelectType2 => {
+            state.mode = InputMode::ExportNodeSelect { node, selected: 1 };
+        }
+        _ => {}
+    }
+}
+
+fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
+    let (node, include_children, selected_format) = match &state.mode {
+        InputMode::ExportNodeFormat {
+            node,
+            include_children,
+            selected_format,
+        } => (node.clone(), *include_children, *selected_format),
+        _ => return,
+    };
+
+    match Action::from_select_field_type(&key) {
+        Action::Cancel => {
+            state.mode = InputMode::Normal;
+        }
+        Action::NavDown => {
+            state.mode = InputMode::ExportNodeFormat {
+                node,
+                include_children,
+                selected_format: (selected_format + 1) % 3,
+            };
+        }
+        Action::NavUp => {
+            state.mode = InputMode::ExportNodeFormat {
+                node,
+                include_children,
+                selected_format: (selected_format + 2) % 3,
+            };
+        }
+        Action::SelectType1 => {
+            state.mode = InputMode::ExportNodeFormat {
+                node,
+                include_children,
+                selected_format: 0,
+            };
+        }
+        Action::SelectType2 => {
+            state.mode = InputMode::ExportNodeFormat {
+                node,
+                include_children,
+                selected_format: 1,
+            };
+        }
+        Action::SelectType3 => {
+            state.mode = InputMode::ExportNodeFormat {
+                node,
+                include_children,
+                selected_format: 2,
+            };
+        }
+        Action::Confirm => {
+            use crate::file_handling::export::{export_tree, ExportFormat};
+
+            let format = match selected_format {
+                0 => ExportFormat::Json,
+                1 => ExportFormat::Xml,
+                _ => ExportFormat::Csv,
+            };
+
+            let export_node = if include_children {
+                node.clone()
+            } else {
+                let mut n = node.clone();
+                n.children = Vec::new();
+                n
+            };
+
+            let base_path = match &state.active_file_path {
+                Some(p) => p.clone(),
+                None => {
+                    state.mode = InputMode::Alert {
+                        message: "No active file to derive export path".to_string(),
+                    };
+                    return;
+                }
+            };
+
+            let path = std::path::Path::new(&base_path);
+            let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("export");
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("age");
+            let node_name_clean: String = node
+                .name
+                .chars()
+                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                .collect();
+            let export_path = parent.join(format!("{}_{}.{}", stem, node_name_clean, ext));
+            let export_path_str = export_path.to_string_lossy().to_string();
+
+            match export_tree(&export_node, &export_path_str, format) {
+                Ok(out_path) => {
+                    state.mode = InputMode::Alert {
+                        message: format!("{}{}", texts::MSG_EXPORT_NODE_SUCCESS, out_path),
+                    };
+                }
+                Err(e) => {
+                    state.mode = InputMode::Alert {
+                        message: format!("{e}"),
+                    };
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_alert(key: event::KeyEvent, state: &mut TreeState) {
+    let _ = key;
+    state.mode = InputMode::Normal;
+}
+
 fn ui(frame: &mut Frame, state: &mut TreeState) {
     let area = frame.area();
 
@@ -978,6 +1139,15 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
                 render_copy_alert_overlay(frame, area);
             }
         }
+        InputMode::ExportNodeSelect { .. } => {
+            render_export_node_select_overlay(frame, area, state);
+        }
+        InputMode::ExportNodeFormat { .. } => {
+            render_export_node_format_overlay(frame, area, state);
+        }
+        InputMode::Alert { message } => {
+            render_alert_overlay(frame, area, message);
+        }
         _ => {}
     }
 }
@@ -1001,6 +1171,15 @@ fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         }
         InputMode::ConfirmDiscardChanges { .. } => {
             (texts::MODE_DISCARD, ElementStyle::ModeDiscard.style())
+        }
+        InputMode::ExportNodeSelect { .. } => {
+            (texts::MODE_EXPORT_SELECT, ElementStyle::ModeFieldType.style())
+        }
+        InputMode::ExportNodeFormat { .. } => {
+            (texts::MODE_EXPORT_FORMAT, ElementStyle::ModeFieldType.style())
+        }
+        InputMode::Alert { .. } => {
+            (texts::MODE_NORMAL, ElementStyle::ModeNormal.style())
         }
     };
 
@@ -1065,6 +1244,9 @@ fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         InputMode::CustomFieldName { .. } => texts::HINT_CUSTOM_FIELD_NAME,
         InputMode::ConfirmDeleteField { .. } => texts::HINT_CONFIRM_DELETE,
         InputMode::ConfirmDiscardChanges { .. } => texts::HINT_DISCARD,
+        InputMode::ExportNodeSelect { .. } => texts::HINT_EXPORT_NODE_SELECT,
+        InputMode::ExportNodeFormat { .. } => texts::HINT_EXPORT_NODE_FORMAT,
+        InputMode::Alert { .. } => texts::HINT_DETAIL_ALERT,
     };
 
     let text = Text::from(Line::from(vec![Span::styled(
@@ -1097,6 +1279,109 @@ fn render_search_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
     frame.render_widget(Paragraph::new(text), inner);
+}
+
+fn render_export_node_select_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
+    let selected = match &state.mode {
+        InputMode::ExportNodeSelect { selected, .. } => *selected,
+        _ => return,
+    };
+
+    let overlay_area = Rect {
+        x: area.width / 4,
+        y: area.height / 2 - 3,
+        width: area.width / 2,
+        height: 7,
+    };
+
+    let block = Block::default()
+        .title(texts::OVERLAY_EXPORT_NODE)
+        .borders(Borders::ALL)
+        .style(ElementStyle::FieldTypeBlock.style());
+
+    let inner = block.inner(overlay_area);
+    let mut lines: Vec<Line> = Vec::new();
+
+    for (i, item) in texts::EXPORT_NODE_OPTIONS.iter().enumerate() {
+        lines.push(Line::from(selected_span(item, i == selected)));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        texts::HINT_EXPORT_NODE_SELECT,
+        ElementStyle::GrayHint.style(),
+    )));
+
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(block, overlay_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+fn render_export_node_format_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
+    let selected_format = match &state.mode {
+        InputMode::ExportNodeFormat { selected_format, .. } => *selected_format,
+        _ => return,
+    };
+
+    let overlay_area = Rect {
+        x: area.width / 4,
+        y: area.height / 2 - 3,
+        width: area.width / 2,
+        height: 8,
+    };
+
+    let block = Block::default()
+        .title(texts::OVERLAY_EXPORT_FORMAT)
+        .borders(Borders::ALL)
+        .style(ElementStyle::FieldTypeBlock.style());
+
+    let inner = block.inner(overlay_area);
+    let mut lines: Vec<Line> = Vec::new();
+
+    for (i, item) in texts::EXPORT_TYPE_ITEMS.iter().enumerate() {
+        lines.push(Line::from(selected_span(item, i == selected_format)));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        texts::HINT_EXPORT_NODE_FORMAT,
+        ElementStyle::GrayHint.style(),
+    )));
+
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(block, overlay_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+fn render_alert_overlay(frame: &mut Frame, area: Rect, message: &str) {
+    let overlay_area = Rect {
+        x: area.width / 6,
+        y: area.height / 2 - 2,
+        width: area.width * 2 / 3,
+        height: 5,
+    };
+
+    let block = Block::default()
+        .title(" Alert ")
+        .borders(Borders::ALL)
+        .style(ElementStyle::CopiedBlock.style());
+
+    let lines = vec![
+        Line::from(Span::styled(
+            format!(" {}", message),
+            ElementStyle::CopiedText.style(),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            texts::HINT_DETAIL_ALERT,
+            ElementStyle::DismissHint.style(),
+        )),
+    ];
+
+    let inner = block.inner(overlay_area);
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(&block, overlay_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
 fn make_overlay_area(area: Rect, extra_fields_len: usize, base_content: u16) -> Rect {

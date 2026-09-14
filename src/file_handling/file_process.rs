@@ -1,12 +1,9 @@
-pub mod error;
-
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-pub use error::FileHandlingError;
-
 use crate::crypt;
+use crate::file_handling::FileHandlingError;
 use crate::theming::texts;
 use crate::tree::node::Node;
 
@@ -224,6 +221,7 @@ pub fn probe_path_writable(path: &str) -> Result<(), FileHandlingError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::file_handling::FileHandlingError;
     use crate::tree::node::{ExtraField, FieldType};
 
     // ── JSON roundtrip tests (original) ──
