@@ -2,6 +2,24 @@
 
 Rust ratatui-based TUI app with a custom tree data structure (not file-system), vim-style navigation, search/filter, and edit/add forms. In-memory only, no persistence.
 
+
+## Coding Conventions
+
+Read the applicable doc before writing or modifying code in its area:
+
+- Main coding rules at: `@docs/conventions/rust_coding_rules.md`
+- Detailed rules how to use borrowing: `@docs/conventions/rust_ownership_rules.md`
+
+## Workflow Rules
+
+### Workflow
+1. Do one logical task. Folow the `Coding conventions`.
+2. If one logical task is completed, than Run subagent "git-committer".
+3. Print subagent output.
+
+### Commit Workflow
+- If subagent "git-committer" fails do not perform commits.
+
 ## Build & Run
 
 ```sh
