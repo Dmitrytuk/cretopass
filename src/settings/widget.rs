@@ -165,17 +165,18 @@ fn handle_settings_key<B: Backend>(
         Action::NavDown => state.select_next(),
         Action::NavUp => state.select_prev(),
         Action::ReturnToMenu => {
-            if let Some(ref active_file) = state.active_file {
-                if let Some(ref node) = active_file.node {
-                    let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
-                    tree_state.active_file_path = active_file.path.clone();
-                    tree_state.active_file_passphrase = active_file.passphrase.clone();
-                    tree_state.display_full_path = state.settings.display_full_path;
-                    crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
-                    if !tree_state.return_to_menu {
-                        state.quit = true;
-                    }
-                }
+            reopen_tree(state, terminal)?;
+        }
+        Action::Back => {
+            if state
+                .active_file
+                .as_ref()
+                .and_then(|af| af.node.as_ref())
+                .is_some()
+            {
+                reopen_tree(state, terminal)?;
+            } else {
+                state.quit = true;
             }
         }
         Action::Confirm => {
@@ -285,6 +286,22 @@ fn handle_settings_key<B: Backend>(
             }
         }
         _ => {}
+    }
+    Ok(())
+}
+
+fn reopen_tree<B: Backend>(state: &mut SettingsState, terminal: &mut Terminal<B>) -> io::Result<()> {
+    if let Some(ref active_file) = state.active_file {
+        if let Some(ref node) = active_file.node {
+            let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
+            tree_state.active_file_path = active_file.path.clone();
+            tree_state.active_file_passphrase = active_file.passphrase.clone();
+            tree_state.display_full_path = state.settings.display_full_path;
+            crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
+            if !tree_state.return_to_menu {
+                state.quit = true;
+            }
+        }
     }
     Ok(())
 }
