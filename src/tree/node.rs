@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -13,21 +15,48 @@ pub enum FieldType {
 
 impl FieldType {
     /// The display label for this field type.
-    pub fn label(&self) -> String {
+    ///
+    /// Only the `Custom` variant allocates; the others return a `'static` str.
+    pub fn label(&self) -> Cow<'_, str> {
         match self {
-            FieldType::Login => texts::FIELD_LOGIN.to_string(),
-            FieldType::Password => texts::FIELD_PASSWORD.to_string(),
-            FieldType::Custom(name) => name.clone(),
+            FieldType::Login => Cow::Borrowed(texts::FIELD_LOGIN),
+            FieldType::Password => Cow::Borrowed(texts::FIELD_PASSWORD),
+            FieldType::Custom(name) => Cow::Borrowed(name),
+        }
+    }
+
+    /// The wire label used by import/export formats.
+    ///
+    /// Custom fields are prefixed with `custom:` so they round-trip
+    /// unambiguously and cannot be confused with the built-in `Login` and
+    /// `Password` types (e.g. a custom field literally named `Login`).
+    pub fn wire_label(&self) -> Cow<'_, str> {
+        match self {
+            FieldType::Login => Cow::Borrowed(texts::FIELD_LOGIN),
+            FieldType::Password => Cow::Borrowed(texts::FIELD_PASSWORD),
+            FieldType::Custom(name) => Cow::Owned(format!("custom:{name}")),
+        }
+    }
+
+    /// Parses a wire label back into a [`FieldType`].
+    pub fn from_wire_label(s: &str) -> Self {
+        match s {
+            texts::FIELD_LOGIN => FieldType::Login,
+            texts::FIELD_PASSWORD => FieldType::Password,
+            other => match other.strip_prefix("custom:") {
+                Some(name) => FieldType::Custom(name.to_string()),
+                None => FieldType::Custom(other.to_string()),
+            },
         }
     }
 
     /// Returns the value string to display.
     ///
     /// Password fields are masked as `*****`; all other types show the raw value.
-    pub fn display_value(&self, value: &str) -> String {
+    pub fn display_value<'a>(&self, value: &'a str) -> Cow<'a, str> {
         match self {
-            FieldType::Password => texts::PASSWORD_MASK.to_string(),
-            _ => value.to_string(),
+            FieldType::Password => Cow::Borrowed(texts::PASSWORD_MASK),
+            _ => Cow::Borrowed(value),
         }
     }
 }

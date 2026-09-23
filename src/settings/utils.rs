@@ -1,10 +1,36 @@
-use std::path::PathBuf;
+use std::fmt;
+use std::path::{Path, PathBuf};
 
 use rkyv::{rancor, Archive, Deserialize, Serialize};
 
 use crate::file_handling;
 
 const SETTINGS_FILE_NAME: &str = "settings.pwd";
+
+/// Error produced by settings persistence operations.
+#[derive(Debug)]
+pub enum SettingsError {
+    Io(crate::file_handling::FileHandlingError),
+    Serialize(String),
+}
+
+impl fmt::Display for SettingsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "{e}"),
+            Self::Serialize(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl std::error::Error for SettingsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::Serialize(_) => None,
+        }
+    }
+}
 
 /// Persistent app settings stored in `~/.config/pwd-keeper/settings.pwd`.
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
@@ -36,7 +62,15 @@ impl Default for AppSettings {
 /// - macOS: `~/Library/Application Support/pwd-keeper/`
 /// - Windows: `%APPDATA%/pwd-keeper/`
 /// - Fallback: `./.pwd-keeper/`
-fn config_dir() -> PathBuf {
+///
+/// When the `PWD_KEEPER_CONFIG_DIR` environment variable is set, its value is
+/// used instead (primarily for tests).
+pub fn config_dir() -> PathBuf {
+    if let Ok(val) = std::env::var("PWD_KEEPER_CONFIG_DIR") {
+        if !val.is_empty() {
+            return PathBuf::from(val);
+        }
+    }
     if cfg!(target_os = "linux") {
         if let Ok(val) = std::env::var("XDG_CONFIG_HOME") {
             let mut p = PathBuf::from(val);
@@ -66,26 +100,56 @@ fn config_dir() -> PathBuf {
     p
 }
 
-/// Saves app settings to `~/.config/pwd-keeper/settings.pwd` as binary.
-pub fn save_settings(settings: &AppSettings) -> Result<(), String> {
-    let dir = config_dir();
-    let path = dir.join(SETTINGS_FILE_NAME);
-    file_handling::create_dir(&dir).map_err(|e| format!("Cannot create config directory: {e}"))?;
+/// Returns the settings file path for a given config directory.
+fn settings_file_path(dir: &Path) -> PathBuf {
+    dir.join(SETTINGS_FILE_NAME)
+}
+
+/// Saves app settings to the given config directory as binary.
+fn save_settings_to(dir: &Path, settings: &AppSettings) -> Result<(), SettingsError> {
+    let path = settings_file_path(dir);
+    file_handling::create_dir(dir).map_err(SettingsError::Io)?;
     let bytes = rkyv::to_bytes::<rancor::Error>(settings)
-        .map_err(|e| format!("Failed to serialise settings: {e}"))?;
-    file_handling::write_file(
-        &path.to_string_lossy(),
-        &bytes,
-    )
-    .map_err(|e| format!("Failed to write settings: {e}"))?;
+        .map_err(|e| SettingsError::Serialize(e.to_string()))?;
+    file_handling::write_file(&path.to_string_lossy(), &bytes).map_err(SettingsError::Io)?;
     Ok(())
 }
 
-/// Returns default settings and persists them to disk.
-fn create_default_settings() -> AppSettings {
-    let defaults = AppSettings::default();
-    let _ = save_settings(&defaults);
-    defaults
+/// Loads app settings from the given config directory, falling back to defaults.
+fn load_settings_from(dir: &Path) -> AppSettings {
+    let path = settings_file_path(dir);
+
+    let bytes = match file_handling::read_file(&path.to_string_lossy()) {
+        Ok(b) => b,
+        Err(_) => {
+            let defaults = AppSettings::default();
+            let _ = save_settings_to(dir, &defaults);
+            return defaults;
+        }
+    };
+
+    let archived = match rkyv::access::<ArchivedAppSettings, rancor::Error>(&bytes) {
+        Ok(a) => a,
+        Err(_) => {
+            let defaults = AppSettings::default();
+            let _ = save_settings_to(dir, &defaults);
+            return defaults;
+        }
+    };
+
+    match rkyv::deserialize::<AppSettings, rancor::Error>(archived) {
+        Ok(s) => s,
+        Err(_) => {
+            let defaults = AppSettings::default();
+            let _ = save_settings_to(dir, &defaults);
+            defaults
+        }
+    }
+}
+
+/// Saves app settings to `~/.config/pwd-keeper/settings.pwd` as binary.
+pub fn save_settings(settings: &AppSettings) -> Result<(), SettingsError> {
+    save_settings_to(&config_dir(), settings)
 }
 
 /// Loads app settings from the config directory.
@@ -93,28 +157,13 @@ fn create_default_settings() -> AppSettings {
 /// If the file does not exist, is corrupt, or has an incompatible format
 /// (e.g. from an older version), it is recreated with default values.
 pub fn load_settings() -> AppSettings {
-    let path = config_dir().join(SETTINGS_FILE_NAME);
-
-    let bytes = match file_handling::read_file(&path.to_string_lossy()) {
-        Ok(b) => b,
-        Err(_) => return create_default_settings(),
-    };
-
-    let archived = match rkyv::access::<ArchivedAppSettings, rancor::Error>(&bytes) {
-        Ok(a) => a,
-        Err(_) => return create_default_settings(),
-    };
-
-    match rkyv::deserialize::<AppSettings, rancor::Error>(archived) {
-        Ok(s) => s,
-        Err(_) => create_default_settings(),
-    }
+    load_settings_from(&config_dir())
 }
 
 /// Attempts to open an OS-native file-selection dialog.
 /// Inserts or moves `path` to the front of the recent-files list and saves.
 /// Duplicates are removed first.
-pub fn push_recent_file(settings: &mut AppSettings, path: &str) -> Result<(), String> {
+pub fn push_recent_file(settings: &mut AppSettings, path: &str) -> Result<(), SettingsError> {
     settings.recent_files.retain(|f| f != path);
     settings.recent_files.insert(0, path.to_string());
     settings.last_opened_file = Some(path.to_string());
@@ -125,16 +174,30 @@ pub fn push_recent_file(settings: &mut AppSettings, path: &str) -> Result<(), St
 mod tests {
     use super::*;
 
-    fn clean_settings_file() {
-        let path = config_dir().join(SETTINGS_FILE_NAME);
-        if path.exists() {
-            let _ = std::fs::remove_file(&path);
+    /// Points settings I/O at an isolated temp directory so tests never touch
+    /// the developer's real `~/.config/pwd-keeper`.
+    struct TestConfigDir(PathBuf);
+
+    impl TestConfigDir {
+        fn new() -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("pwd-keeper-test-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::env::set_var("PWD_KEEPER_CONFIG_DIR", &dir);
+            Self(dir)
+        }
+    }
+
+    impl Drop for TestConfigDir {
+        fn drop(&mut self) {
+            std::env::remove_var("PWD_KEEPER_CONFIG_DIR");
+            let _ = std::fs::remove_dir_all(&self.0);
         }
     }
 
     #[test]
     fn test_settings_save_load() {
-        clean_settings_file();
+        let _tmp = TestConfigDir::new();
 
         let settings = AppSettings {
             recent_files: vec![
@@ -151,10 +214,11 @@ mod tests {
         assert_eq!(loaded.recent_files.len(), 2);
         assert_eq!(loaded.recent_files[0], "/home/user/vault.age");
         assert_eq!(loaded.recent_files[1], "/home/user/backup.age");
-        assert_eq!(loaded.last_opened_file, Some("/home/user/vault.age".to_string()));
+        assert_eq!(
+            loaded.last_opened_file,
+            Some("/home/user/vault.age".to_string())
+        );
         assert!(!loaded.display_full_path);
-
-        clean_settings_file();
     }
 
     #[test]
@@ -168,7 +232,7 @@ mod tests {
 
     #[test]
     fn test_settings_save_empty() {
-        clean_settings_file();
+        let _tmp = TestConfigDir::new();
 
         let settings = AppSettings::default();
         save_settings(&settings).unwrap();
@@ -177,13 +241,11 @@ mod tests {
         assert!(loaded.last_opened_file.is_none());
         assert!(loaded.display_full_path);
         assert!(loaded.open_last_opened_file_on_startup);
-
-        clean_settings_file();
     }
 
     #[test]
     fn test_settings_no_file_creates_defaults() {
-        clean_settings_file();
+        let _tmp = TestConfigDir::new();
 
         let loaded = load_settings();
 
@@ -193,13 +255,11 @@ mod tests {
 
         let path = config_dir().join(SETTINGS_FILE_NAME);
         assert!(path.exists());
-
-        clean_settings_file();
     }
 
     #[test]
     fn test_push_recent_file_dedup() {
-        clean_settings_file();
+        let _tmp = TestConfigDir::new();
 
         let mut settings = AppSettings {
             recent_files: vec![
@@ -217,17 +277,12 @@ mod tests {
         assert_eq!(settings.recent_files[0], "/beta.age");
         assert_eq!(settings.recent_files[1], "/alpha.age");
         assert_eq!(settings.recent_files[2], "/gamma.age");
-        assert_eq!(
-            settings.last_opened_file,
-            Some("/beta.age".to_string())
-        );
-
-        clean_settings_file();
+        assert_eq!(settings.last_opened_file, Some("/beta.age".to_string()));
     }
 
     #[test]
     fn test_push_recent_file_sets_last_opened() {
-        clean_settings_file();
+        let _tmp = TestConfigDir::new();
 
         let mut settings = AppSettings::default();
         push_recent_file(&mut settings, "/new.age").unwrap();
@@ -235,13 +290,11 @@ mod tests {
         assert_eq!(settings.recent_files.len(), 1);
         assert_eq!(settings.recent_files[0], "/new.age");
         assert_eq!(settings.last_opened_file, Some("/new.age".to_string()));
-
-        clean_settings_file();
     }
 
     #[test]
     fn test_settings_roundtrip_display_full_path_false() {
-        clean_settings_file();
+        let _tmp = TestConfigDir::new();
 
         let settings = AppSettings {
             recent_files: vec!["/a.age".to_string()],
@@ -254,7 +307,5 @@ mod tests {
         let loaded = load_settings();
         assert!(!loaded.display_full_path);
         assert!(!loaded.open_last_opened_file_on_startup);
-
-        clean_settings_file();
     }
 }

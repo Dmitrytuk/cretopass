@@ -1,8 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
+use super::state::{FileBrowserAction, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget};
 use crate::file_handling;
 use crate::theming::texts;
-use super::state::{FileBrowserAction, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget};
 
 /// Processes a key event and returns an action if the user completed
 /// or cancelled the file browser.  Returns `None` when the browser
@@ -15,8 +15,7 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
                 if let Some(ref path_str) = state.confirm_delete.clone() {
                     let path = std::path::Path::new(path_str);
                     if Some(path) == state.active_file_path.as_deref() {
-                        state.error =
-                            Some(texts::MSG_CANNOT_DELETE_FILE.to_string());
+                        state.error = Some(texts::MSG_CANNOT_DELETE_FILE.to_string());
                     } else if file_handling::delete_file(path).is_ok() {
                         state.refresh_entries();
                     }
@@ -108,13 +107,19 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
 
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => {
-            let pos = indices.iter().position(|&i| i == state.selected).unwrap_or(0);
+            let pos = indices
+                .iter()
+                .position(|&i| i == state.selected)
+                .unwrap_or(0);
             let next_pos = (pos + 1) % indices.len();
             state.selected = indices[next_pos];
             None
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            let pos = indices.iter().position(|&i| i == state.selected).unwrap_or(0);
+            let pos = indices
+                .iter()
+                .position(|&i| i == state.selected)
+                .unwrap_or(0);
             let prev_pos = if pos == 0 { indices.len() - 1 } else { pos - 1 };
             state.selected = indices[prev_pos];
             None
@@ -191,33 +196,25 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
 fn handle_text_edit(cursor: &mut usize, text: &mut String, key: KeyCode) -> bool {
     match key {
         KeyCode::Char(c) => {
-            text.insert(*cursor, c);
-            *cursor += 1;
+            crate::cursor::insert_char_at(text, cursor, c);
             true
         }
         KeyCode::Backspace => {
             if *cursor > 0 {
-                *cursor -= 1;
-                text.remove(*cursor);
+                *cursor = crate::cursor::backspace_at(text, *cursor);
             }
             true
         }
         KeyCode::Delete => {
-            if *cursor < text.len() {
-                text.remove(*cursor);
-            }
+            crate::cursor::delete_at(text, *cursor);
             true
         }
         KeyCode::Left => {
-            if *cursor > 0 {
-                *cursor -= 1;
-            }
+            *cursor = crate::cursor::cursor_left(text, *cursor);
             true
         }
         KeyCode::Right => {
-            if *cursor < text.len() {
-                *cursor += 1;
-            }
+            *cursor = crate::cursor::cursor_right(text, *cursor);
             true
         }
         KeyCode::Home => {
@@ -239,7 +236,11 @@ fn handle_input_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileB
         return None;
     }
 
-    if handle_text_edit(&mut state.creating_cursor, &mut state.creating_name, key.code) {
+    if handle_text_edit(
+        &mut state.creating_cursor,
+        &mut state.creating_name,
+        key.code,
+    ) {
         return None;
     }
 
@@ -322,7 +323,9 @@ fn go_to_parent(state: &mut FileBrowserState) {
     let prev_dir = state.current_dir.clone();
     match file_handling::list_dir(&parent) {
         Ok(new_entries) => {
-            let prev_name = prev_dir.file_name().map(|n| n.to_string_lossy().to_string());
+            let prev_name = prev_dir
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string());
 
             state.current_dir = parent;
             state.entries = new_entries;
@@ -488,10 +491,7 @@ mod tests {
                     path.contains("myvault.age"),
                     "path should contain filename: {path}"
                 );
-                assert!(
-                    path.contains("/tmp"),
-                    "path should contain /tmp: {path}"
-                );
+                assert!(path.contains("/tmp"), "path should contain /tmp: {path}");
             }
             FileBrowserAction::Cancelled => panic!("expected Selected, got Cancelled"),
             FileBrowserAction::Renamed { .. } => panic!("expected Selected, got Renamed"),

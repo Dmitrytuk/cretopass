@@ -33,7 +33,6 @@ pub enum Action {
     SelectType1,
     SelectType2,
     SelectType3,
-    SettingsSelect,
     SettingsDelete,
     ToggleSetting,
     SaveSettings,
@@ -193,20 +192,6 @@ impl Action {
             KeyCode::Home => Self::CursorHome,
             KeyCode::End => Self::CursorEnd,
             KeyCode::Char(c) => Self::InsertChar(c),
-            _ => Self::None,
-        }
-    }
-
-    pub fn from_file_browser(key: &KeyEvent) -> Self {
-        match key.code {
-            KeyCode::Esc => Self::Cancel,
-            KeyCode::Char('j') | KeyCode::Down => Self::NavDown,
-            KeyCode::Char('k') | KeyCode::Up => Self::NavUp,
-            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Self::Confirm,
-            KeyCode::Char('h') | KeyCode::Left => Self::NavLeft,
-            KeyCode::Char('f') => Self::ToggleSearch,
-            KeyCode::Char('/') => Self::ToggleSearch,
-            KeyCode::Backspace => Self::Backspace,
             _ => Self::None,
         }
     }

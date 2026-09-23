@@ -17,6 +17,7 @@ pub const SETTINGS_CHANGE_PASSWORD: &str = " Change Password ";
 pub const SETTINGS_NO_PASSPHRASE: &str = " No Passphrase ";
 pub const SETTINGS_ENTER_PASSPHRASE: &str = " Enter Passphrase ";
 pub const SETTINGS_ALERT: &str = " Alert ";
+pub const ALERT_TITLE: &str = " Alert ";
 pub const SETTINGS_DELETE_CONFIRM: &str = " Confirm Delete ";
 
 pub const BROWSER_OPEN: &str = " Open File ";
@@ -103,10 +104,8 @@ pub const PROMPT_DISCARD: &str = "Discard changes?";
 
 pub const OVERLAY_EXPORT_NODE: &str = " Export Node ";
 pub const OVERLAY_EXPORT_FORMAT: &str = " Select Export Format ";
-pub const EXPORT_NODE_OPTIONS: [&str; 2] = [
-    "1. Export this node",
-    "2. Export this node with children",
-];
+pub const EXPORT_NODE_OPTIONS: [&str; 2] =
+    ["1. Export this node", "2. Export this node with children"];
 pub const HINT_EXPORT_NODE_SELECT: &str = "j/k:nav  Enter:choose  Esc:cancel";
 pub const HINT_EXPORT_NODE_FORMAT: &str = "j/k:nav  Enter:choose  Esc:cancel";
 pub const MSG_EXPORT_NODE_SUCCESS: &str = "Node exported at ";
@@ -126,12 +125,15 @@ pub const MSG_SAVE_FAILED: &str = "Failed to save: ";
 pub const MSG_EXPORT_SUCCESS: &str = "File exported at ";
 pub const MSG_IMPORT_SUCCESS: &str = "File imported successfully.";
 pub const MSG_IMPORT_NO_OPEN_FILE: &str = "Import requires an open file. Open one first.";
+pub const MSG_NO_ACTIVE_FILE: &str = "No active file to derive export path";
+pub const IMPORT_NAME_FALLBACK: &str = "unknown";
+pub const MSG_NO_FILE_PATH: &str = "No file path set";
 
 pub const EMPTY_DIR: &str = "  (empty directory)";
 pub const NO_MATCHING_FILES: &str = "  No matching files";
 pub const NO_DESCRIPTION: &str = "No description.";
 pub const ADD_FIELD_BUTTON: &str = "+ Add Field";
-pub const PASSWORD_MASK: &str = "****";
+pub const PASSWORD_MASK: &str = "*****";
 pub const COPY_CHECK: &str = "✓ Copied!";
 pub const SEPARATOR_RECENT_FILES: &str = "─── Recent Files ───";
 pub const NEW_FOLDER_DEFAULT: &str = "New Folder";

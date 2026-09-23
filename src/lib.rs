@@ -1,22 +1,24 @@
 use std::io;
 
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use crossterm::ExecutableCommand;
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-pub mod theming;
-pub mod tree;
-pub mod settings;
-pub mod file_handling;
 pub mod crypt;
 pub mod cursor;
 pub mod file_browser;
+pub mod file_handling;
+pub mod settings;
+pub mod theming;
+pub mod tree;
 
 pub use tree::node::{ExtraField, FieldType, Node};
 pub use tree::widget::{InputMode, TreeState, TreeWidget};
 
 /// Runs the settings menu. Selecting "Open secret file" opens the tree
-/// app with the built-in demo tree.
+/// app with the decrypted contents of the selected encrypted file.
 pub fn run() -> io::Result<()> {
     let mut terminal = setup_terminal()?;
     let res = settings::run(&mut terminal);
@@ -64,8 +66,14 @@ pub fn build_demo_tree() -> Node {
                 "Rust",
                 "Systems language focused on safety and performance",
                 vec![
-                    Node::new("Ownership", "Borrow checker, lifetimes, and memory management"),
-                    Node::new("Traits", "Shared behavior via trait definitions and implementations"),
+                    Node::new(
+                        "Ownership",
+                        "Borrow checker, lifetimes, and memory management",
+                    ),
+                    Node::new(
+                        "Traits",
+                        "Shared behavior via trait definitions and implementations",
+                    ),
                     Node::new("Async", "Async/await, futures, and tokio runtime"),
                 ],
             ),
@@ -83,7 +91,10 @@ pub fn build_demo_tree() -> Node {
                 "Container platform for developing and running applications",
                 vec![
                     Node::new("Images", "Building custom images with Dockerfiles"),
-                    Node::new("Compose", "Multi-container applications with docker-compose.yml"),
+                    Node::new(
+                        "Compose",
+                        "Multi-container applications with docker-compose.yml",
+                    ),
                     Node::new("Volumes", "Persistent data storage and sharing"),
                 ],
             ),

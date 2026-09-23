@@ -20,7 +20,9 @@ pub fn export_tree(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("export");
-    let parent = path.parent().map_or_else(|| ".", |p| p.to_str().unwrap_or("."));
+    let parent = path
+        .parent()
+        .map_or_else(|| ".", |p| p.to_str().unwrap_or("."));
     let out_name = match format {
         ExportFormat::Json => format!("{stem}.json"),
         ExportFormat::Xml => format!("{stem}.xml"),
@@ -30,8 +32,9 @@ pub fn export_tree(
     let out_str = out_path.to_string_lossy().to_string();
 
     let data = match format {
-        ExportFormat::Json => node_to_json(node)
-            .map_err(|e| FileHandlingError::ExportError(format!("JSON serialisation failed: {e}")))?,
+        ExportFormat::Json => node_to_json(node).map_err(|e| {
+            FileHandlingError::ExportError(format!("json serialisation failed: {e}"))
+        })?,
         ExportFormat::Xml => node_to_xml(node),
         ExportFormat::Csv => node_to_csv(node),
     };
@@ -52,13 +55,18 @@ fn write_xml_node(buf: &mut String, node: &Node, depth: usize) {
     let name_esc = escape_xml(&node.name);
     let desc_esc = escape_xml(&node.description);
 
-    buf.push_str(&format!("{indent}<node name=\"{name_esc}\" description=\"{desc_esc}\">\n"));
+    buf.push_str(&format!(
+        "{indent}<node name=\"{name_esc}\" description=\"{desc_esc}\">\n"
+    ));
 
     buf.push_str(&format!("{}  <extra_fields>\n", indent));
     for ef in &node.extra_fields {
-        let ft = escape_xml(&ef.field_type.label());
+        let ft = escape_xml(&ef.field_type.wire_label());
         let val = escape_xml(&ef.value);
-        buf.push_str(&format!("{}    <field type=\"{ft}\" value=\"{val}\"/>\n", indent));
+        buf.push_str(&format!(
+            "{}    <field type=\"{ft}\" value=\"{val}\"/>\n",
+            indent
+        ));
     }
     buf.push_str(&format!("{}  </extra_fields>\n", indent));
 
@@ -106,7 +114,7 @@ fn write_csv_rows(buf: &mut String, node: &Node, parent_path: String) {
     } else {
         for ef in &node.extra_fields {
             let desc = csv_escape(&node.description);
-            let ft = csv_escape(&ef.field_type.label());
+            let ft = csv_escape(&ef.field_type.wire_label());
             let val = csv_escape(&ef.value);
             buf.push_str(&format!(
                 "{},{},{},{},{}\n",
@@ -254,7 +262,11 @@ mod tests {
     #[test]
     fn test_export_error_on_bad_path() {
         let node = Node::new("X", "");
-        let result = export_tree(&node, "/nonexistent_dir_xyz123/test.age", ExportFormat::Json);
+        let result = export_tree(
+            &node,
+            "/nonexistent_dir_xyz123/test.age",
+            ExportFormat::Json,
+        );
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), FileHandlingError::Io(_)));
     }
@@ -269,7 +281,10 @@ mod tests {
 
     #[test]
     fn test_xml_escape() {
-        assert_eq!(escape_xml("a&b<c>d\"e'f"), "a&amp;b&lt;c&gt;d&quot;e&apos;f");
+        assert_eq!(
+            escape_xml("a&b<c>d\"e'f"),
+            "a&amp;b&lt;c&gt;d&quot;e&apos;f"
+        );
         assert_eq!(escape_xml("plain"), "plain");
     }
 }
