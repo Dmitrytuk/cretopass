@@ -74,8 +74,7 @@ pub const STATUS_LOADING: &str = "Loading...";
 pub const STATUS_SAVING: &str = "Saving...";
 pub const STATUS_SETTINGS_LABEL: &str = " SETTINGS ";
 
-pub const HINT_TREE: &str =
-    "j/k/h/l:nav  Enter:open  a/A:add  H:settings  /:search  dd:cut  p/P:paste  q:quit";
+pub const HINT_TREE: &str = "H:settings  /:search  ?:help  q:quit";
 pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
 pub const HINT_AWAIT_DD: &str = "Press d again to cut";
 pub const HINT_DETAIL: &str = "j/k:navigate  Enter:copy  i:edit  Esc:close";
@@ -99,13 +98,15 @@ pub const HINT_HELP: &str = "Press any key to close";
 
 pub const TREE_HELP_KEY_BINDINGS: &[&str] = &[
     " j/k      Navigate up/down",
-    " h/l      Collapse/expand (leaf: l opens detail)",
-    " Enter    Toggle expand (parent) or detail (leaf)",
+    " ↓/↑      Navigate up/down",
+    " h/l      Collapse/expand",
+    " ←/→      Collapse/expand",
+    " Enter    Toggle expand (parent) or detail",
     " i        Detail overlay for any node",
-    " l        Open detail (leaf)",
+    " l/→      Open detail for record",
     " d d      Cut selected node",
     " p / P    Paste as sibling / as child",
-    " a        Add sibling (after selected)",
+    " a        Add record",
     " A        Add child",
     " /        Search",
     " ?        Show this help",
