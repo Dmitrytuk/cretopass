@@ -97,7 +97,7 @@ pub const HINT_PASSPHRASE: &str = "Enter:confirm  Esc:cancel";
 pub const HINT_ALERT: &str = "Press any key to dismiss";
 pub const HINT_HELP: &str = "Press any key to close";
 
-pub const HELP_KEY_BINDINGS: &[&str] = &[
+pub const TREE_HELP_KEY_BINDINGS: &[&str] = &[
     " j/k      Navigate up/down",
     " h/l      Collapse/expand (leaf: l opens detail)",
     " Enter    Toggle expand (parent) or detail (leaf)",

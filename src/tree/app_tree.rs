@@ -1404,7 +1404,7 @@ fn render_search_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
 }
 
 fn render_help_overlay(frame: &mut Frame, area: Rect) {
-    let n_bindings = texts::HELP_KEY_BINDINGS.len() as u16;
+    let n_bindings = texts::TREE_HELP_KEY_BINDINGS.len() as u16;
     let overlay_height = (n_bindings + 4).min(area.height.saturating_sub(2));
     let overlay_area = Rect {
         x: area.width / 6,
@@ -1420,7 +1420,7 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
 
     let inner = block.inner(overlay_area);
     let mut lines: Vec<Line> = Vec::new();
-    for binding in texts::HELP_KEY_BINDINGS {
+    for binding in texts::TREE_HELP_KEY_BINDINGS {
         lines.push(Line::from(Span::styled(
             *binding,
             ElementStyle::HelpText.style(),

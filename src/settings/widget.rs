@@ -290,7 +290,10 @@ fn handle_settings_key<B: Backend>(
     Ok(())
 }
 
-fn reopen_tree<B: Backend>(state: &mut SettingsState, terminal: &mut Terminal<B>) -> io::Result<()> {
+fn reopen_tree<B: Backend>(
+    state: &mut SettingsState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
     if let Some(ref active_file) = state.active_file {
         if let Some(ref node) = active_file.node {
             let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
