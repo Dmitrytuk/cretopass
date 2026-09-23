@@ -41,6 +41,7 @@ pub enum Action {
     Yes,
     No,
     ExportNode,
+    OpenHelp,
     None,
 }
 
@@ -71,6 +72,7 @@ impl Action {
             KeyCode::Char('/') => Self::ToggleSearch,
             KeyCode::Char('q') | KeyCode::Char('Q') => Self::Quit,
             KeyCode::Char('H') => Self::ReturnToMenu,
+            KeyCode::Char('?') => Self::OpenHelp,
             _ => Self::None,
         }
     }

@@ -16,6 +16,7 @@ pub enum ElementStyle {
     ModeCustomName,
     ModeConfirmDelete,
     ModeDiscard,
+    ModeHelp,
     StatusBarText,
     HelpBar,
     SearchBlock,
@@ -26,6 +27,8 @@ pub enum ElementStyle {
     CopiedBlock,
     DiscardBlock,
     DetailBlock,
+    HelpBlock,
+    HelpText,
     CopiedText,
     ConfirmMessage,
     DismissHint,
@@ -118,6 +121,10 @@ impl ElementStyle {
                 .bg(Color::Yellow)
                 .fg(Color::Red)
                 .add_modifier(Modifier::BOLD),
+            Self::ModeHelp => Style::default()
+                .bg(Color::Magenta)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
             Self::StatusBarText => Style::default().fg(Color::Gray),
             Self::HelpBar => Style::default().fg(Color::DarkGray),
             Self::SearchBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
@@ -128,6 +135,8 @@ impl ElementStyle {
             Self::CopiedBlock => Style::default().bg(Color::Black).fg(Color::Green),
             Self::DiscardBlock => Style::default().bg(Color::Black).fg(Color::Yellow),
             Self::DetailBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
+            Self::HelpBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
+            Self::HelpText => Style::default().fg(Color::White),
             Self::CopiedText => Style::default()
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),

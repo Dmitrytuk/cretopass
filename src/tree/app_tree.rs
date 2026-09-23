@@ -49,6 +49,7 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) ->
                 InputMode::ExportNodeSelect { .. } => handle_export_node_select(key, state),
                 InputMode::ExportNodeFormat { .. } => handle_export_node_format(key, state),
                 InputMode::Alert { .. } => handle_alert(key, state),
+                InputMode::Help => handle_help(key, state),
             }
 
             if state.dirty {
@@ -164,6 +165,9 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
         }
         Action::Cancel => {
             state.clear_search();
+        }
+        Action::OpenHelp => {
+            state.mode = InputMode::Help;
         }
         _ => {}
     }
@@ -1169,6 +1173,11 @@ fn handle_alert(key: event::KeyEvent, state: &mut TreeState) {
     state.mode = InputMode::Normal;
 }
 
+fn handle_help(key: event::KeyEvent, state: &mut TreeState) {
+    let _ = key;
+    state.mode = InputMode::Normal;
+}
+
 fn ui(frame: &mut Frame, state: &mut TreeState) {
     let area = frame.area();
 
@@ -1247,6 +1256,9 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
         InputMode::Alert { message } => {
             render_alert_overlay(frame, area, message);
         }
+        InputMode::Help => {
+            render_help_overlay(frame, area);
+        }
         _ => {}
     }
 }
@@ -1281,6 +1293,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
             ElementStyle::ModeFieldType.style(),
         ),
         InputMode::Alert { .. } => (texts::MODE_NORMAL, ElementStyle::ModeNormal.style()),
+        InputMode::Help => (texts::MODE_HELP, ElementStyle::ModeHelp.style()),
     };
 
     let name = state.current_name().unwrap_or_default();
@@ -1355,6 +1368,7 @@ fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         InputMode::ExportNodeSelect { .. } => texts::HINT_EXPORT_NODE_SELECT,
         InputMode::ExportNodeFormat { .. } => texts::HINT_EXPORT_NODE_FORMAT,
         InputMode::Alert { .. } => texts::HINT_DETAIL_ALERT,
+        InputMode::Help => texts::HINT_HELP,
     };
 
     let text = Text::from(Line::from(vec![Span::styled(
@@ -1387,6 +1401,40 @@ fn render_search_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
     frame.render_widget(Paragraph::new(text), inner);
+}
+
+fn render_help_overlay(frame: &mut Frame, area: Rect) {
+    let n_bindings = texts::HELP_KEY_BINDINGS.len() as u16;
+    let overlay_height = (n_bindings + 4).min(area.height.saturating_sub(2));
+    let overlay_area = Rect {
+        x: area.width / 6,
+        y: area.height.saturating_sub(overlay_height) / 2,
+        width: area.width * 2 / 3,
+        height: overlay_height,
+    };
+
+    let block = Block::default()
+        .title(texts::OVERLAY_HELP)
+        .borders(Borders::ALL)
+        .style(ElementStyle::HelpBlock.style());
+
+    let inner = block.inner(overlay_area);
+    let mut lines: Vec<Line> = Vec::new();
+    for binding in texts::HELP_KEY_BINDINGS {
+        lines.push(Line::from(Span::styled(
+            *binding,
+            ElementStyle::HelpText.style(),
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        texts::HINT_HELP,
+        ElementStyle::DismissHint.style(),
+    )));
+
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(block, overlay_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
 fn render_export_node_select_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {

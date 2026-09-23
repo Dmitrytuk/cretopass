@@ -11,6 +11,7 @@ pub const OVERLAY_CUSTOM_FIELD_NAME: &str = " Custom Field Name ";
 pub const OVERLAY_CONFIRM_DELETE: &str = " Confirm Delete ";
 pub const OVERLAY_UNSAVED_CHANGES: &str = " Unsaved Changes ";
 pub const OVERLAY_COPIED: &str = " Copied ";
+pub const OVERLAY_HELP: &str = " Help ";
 
 pub const SETTINGS_APP: &str = " Settings ";
 pub const SETTINGS_CHANGE_PASSWORD: &str = " Change Password ";
@@ -67,6 +68,7 @@ pub const MODE_FIELD_TYPE: &str = "FIELD TYPE";
 pub const MODE_CUSTOM_NAME: &str = "CUSTOM NAME";
 pub const MODE_CONFIRM: &str = "CONFIRM";
 pub const MODE_DISCARD: &str = "DISCARD?";
+pub const MODE_HELP: &str = "HELP";
 
 pub const STATUS_LOADING: &str = "Loading...";
 pub const STATUS_SAVING: &str = "Saving...";
@@ -93,6 +95,24 @@ pub const HINT_CHANGE_PW_INPUT: &str = "Tab/↑/↓:switch  Enter:apply  Esc:can
 pub const HINT_NO_PASSPHRASE: &str = "y/Enter:yes  any key:no";
 pub const HINT_PASSPHRASE: &str = "Enter:confirm  Esc:cancel";
 pub const HINT_ALERT: &str = "Press any key to dismiss";
+pub const HINT_HELP: &str = "Press any key to close";
+
+pub const HELP_KEY_BINDINGS: &[&str] = &[
+    " j/k      Navigate up/down",
+    " h/l      Collapse/expand (leaf: l opens detail)",
+    " Enter    Toggle expand (parent) or detail (leaf)",
+    " i        Detail overlay for any node",
+    " l        Open detail (leaf)",
+    " d d      Cut selected node",
+    " p / P    Paste as sibling / as child",
+    " a        Add sibling (after selected)",
+    " A        Add child",
+    " /        Search",
+    " ?        Show this help",
+    " Esc      Clear search highlights",
+    " q        Quit the app",
+    " H        Return to settings menu",
+];
 
 pub const PROMPT_DELETE_FIELD_START: &str = "Delete \"";
 pub const PROMPT_DELETE_FIELD_END: &str = "\" field? (y/N)";

@@ -113,6 +113,8 @@ pub enum InputMode {
     },
     /// Simple alert message popup (any key dismisses).
     Alert { message: String },
+    /// Overlay showing the list of key bindings (any key dismisses).
+    Help,
 }
 
 /// Central application state.
