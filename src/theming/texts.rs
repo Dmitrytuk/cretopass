@@ -74,7 +74,7 @@ pub const STATUS_LOADING: &str = "Loading...";
 pub const STATUS_SAVING: &str = "Saving...";
 pub const STATUS_SETTINGS_LABEL: &str = " SETTINGS ";
 
-pub const HINT_NORMAL: &str =
+pub const HINT_TREE: &str =
     "j/k/h/l:nav  Enter:open  a/A:add  H:settings  /:search  dd:cut  p/P:paste  q:quit";
 pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
 pub const HINT_AWAIT_DD: &str = "Press d again to cut";

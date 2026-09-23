@@ -1328,7 +1328,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
 
 fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
     let help = match &state.mode {
-        InputMode::Normal => texts::HINT_NORMAL,
+        InputMode::Normal => texts::HINT_TREE,
         InputMode::Search => texts::HINT_SEARCH,
         InputMode::AwaitingDd => texts::HINT_AWAIT_DD,
         InputMode::Detail { ref alert, .. } if alert.is_some() => texts::HINT_DETAIL_ALERT,
