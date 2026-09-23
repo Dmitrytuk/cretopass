@@ -131,6 +131,18 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
             };
         }
         Action::AddNode => {
+            state.adding_as_sibling = false;
+            state.mode = InputMode::Adding {
+                name: String::new(),
+                desc: String::new(),
+                extra_fields: Vec::new(),
+                field: 0,
+                cursor: 0,
+            };
+        }
+        Action::AddSiblingNode => {
+            let is_root = state.selected_node_id() == Some(state.root.id);
+            state.adding_as_sibling = !is_root;
             state.mode = InputMode::Adding {
                 name: String::new(),
                 desc: String::new(),
@@ -368,7 +380,11 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
         }
         Action::Confirm => {
             if is_adding {
-                state.add_child_to_selected(name, desc, extra_fields);
+                if state.adding_as_sibling {
+                    state.add_sibling_to_selected(name, desc, extra_fields);
+                } else {
+                    state.add_child_to_selected(name, desc, extra_fields);
+                }
                 state.mode = InputMode::Normal;
             } else {
                 state.update_node(node_id.unwrap(), name, desc, extra_fields);

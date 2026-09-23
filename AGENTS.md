@@ -39,7 +39,8 @@ cargo doc --open                     # generate and open API docs from doc comme
 | `Enter` (detail) | Copy selected row to clipboard |
 | `d d` | Cut selected node |
 | `p` / `P` | Paste as sibling / as child |
-| `o` | Add child |
+| `a` | Add sibling (after selected; falls back to child when root selected) |
+| `A` (shift+a) | Add child |
 | `/` | Search (type, `Enter` confirm, `Esc` cancel) |
 | `Esc` (normal) | Clear search highlights |
 | `q` / `Ctrl+C` | Quit entire app |

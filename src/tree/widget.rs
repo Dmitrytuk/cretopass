@@ -127,6 +127,9 @@ pub struct TreeState {
     pub visible: Vec<VisibleNode>,
     pub matched: HashSet<usize>,
     pub mode: InputMode,
+    /// Whether the pending "Add" form should create a sibling (true) rather
+    /// than a child (false) of the selected node.
+    pub adding_as_sibling: bool,
     pub quit: bool,
     pub return_to_menu: bool,
     /// Path of the currently opened encrypted file, if any.
@@ -154,6 +157,7 @@ impl TreeState {
             visible: Vec::new(),
             matched: HashSet::new(),
             mode: InputMode::Normal,
+            adding_as_sibling: false,
             quit: false,
             return_to_menu: false,
             active_file_path: None,
@@ -345,6 +349,33 @@ impl TreeState {
         if let Some(target) = self.root.find_mut(id) {
             target.add_child(node);
             self.expanded.insert(id);
+            self.update_visible();
+            self.dirty = true;
+        }
+    }
+
+    /// Creates a new sibling node immediately after the currently selected node.
+    ///
+    /// No-op when the selected node is the root (it has no parent to provide
+    /// a sibling slot).
+    pub fn add_sibling_to_selected(
+        &mut self,
+        name: String,
+        desc: String,
+        extra_fields: Vec<ExtraField>,
+    ) {
+        let id = match self.selected_node_id() {
+            Some(id) => id,
+            None => return,
+        };
+        let final_name = if name.is_empty() {
+            texts::DEFAULT_NAME.to_string()
+        } else {
+            name
+        };
+        let mut node = Node::new(&final_name, &desc);
+        node.extra_fields = extra_fields;
+        if insert_after(&mut self.root, id, node) {
             self.update_visible();
             self.dirty = true;
         }
