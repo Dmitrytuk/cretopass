@@ -73,7 +73,7 @@ pub const STATUS_SAVING: &str = "Saving...";
 pub const STATUS_SETTINGS_LABEL: &str = " SETTINGS ";
 
 pub const HINT_NORMAL: &str =
-    "j/k/h/l:nav  Enter/l:open  i:detail  dd:cut  p:paste  P:paste_child  a:sibling  A:child  /:search  shift+h:settings q:quit";
+    "j/k/h/l:nav  Enter:open  a/A:add  H:settings  /:search  dd:cut  p/P:paste  q:quit";
 pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
 pub const HINT_AWAIT_DD: &str = "Press d again to cut";
 pub const HINT_DETAIL: &str = "j/k:navigate  Enter:copy  i:edit  Esc:close";
