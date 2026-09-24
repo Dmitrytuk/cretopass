@@ -1331,7 +1331,7 @@ fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         InputMode::Normal => texts::HINT_TREE,
         InputMode::Search => texts::HINT_SEARCH,
         InputMode::AwaitingDd => texts::HINT_AWAIT_DD,
-        InputMode::Detail { ref alert, .. } if alert.is_some() => texts::HINT_DETAIL_ALERT,
+        InputMode::Detail { alert, .. } if alert.is_some() => texts::HINT_DETAIL_ALERT,
         InputMode::Detail { .. } => texts::HINT_DETAIL,
         InputMode::Editing {
             extra_fields,
@@ -1721,7 +1721,7 @@ fn render_custom_field_name_overlay(frame: &mut Frame, area: Rect, state: &TreeS
 fn render_confirm_delete_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
     let label = match &state.mode {
         InputMode::ConfirmDeleteField {
-            ref extra_fields,
+            extra_fields,
             target_index,
             ..
         } => extra_fields

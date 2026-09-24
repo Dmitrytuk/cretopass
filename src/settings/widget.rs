@@ -754,7 +754,7 @@ fn handle_change_pw_input_key<B: Backend>(
             } else {
                 // Save with new passphrase and reopen
                 if let Some(ref active_file) = state.active_file.clone() {
-                    if let (Some(ref path), Some(ref node)) = (&active_file.path, &active_file.node)
+                    if let (Some(path), Some(node)) = (&active_file.path, &active_file.node)
                     {
                         let new_pass_bytes = zeroize::Zeroizing::new(new_pass.into_bytes());
                         state.status = Some(texts::STATUS_SAVING);
@@ -1203,7 +1203,7 @@ fn render(frame: &mut Frame, area: Rect, state: &SettingsState) {
     render_settings_window(frame, area, state);
 
     match &state.modal {
-        Some(SettingsModal::FileBrowser(ref browser)) => {
+        Some(SettingsModal::FileBrowser(browser)) => {
             file_browser::render_file_browser(frame, area, browser);
         }
         Some(SettingsModal::PassphraseInput { .. }) => render_passphrase_modal(frame, area, state),
@@ -1729,7 +1729,7 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
         Span::raw(after.to_string()),
     ]));
 
-    if let Some(ref err_msg) = error {
+    if let Some(err_msg) = error {
         lines.push(Line::from(Span::styled(
             format!(" {}", err_msg),
             ElementStyle::SettingsErrorBar.style(),
