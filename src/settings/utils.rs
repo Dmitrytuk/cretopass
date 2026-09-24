@@ -182,14 +182,17 @@ mod tests {
         fn new() -> Self {
             let dir = std::env::temp_dir().join(format!("cretopass-test-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&dir).unwrap();
-            std::env::set_var("CRETOPASS_CONFIG_DIR", &dir);
+            // SAFETY: tests in this module run single-threaded via
+            // `cargo test -- --test-threads=1`; no other thread mutates env.
+            unsafe { std::env::set_var("CRETOPASS_CONFIG_DIR", &dir) };
             Self(dir)
         }
     }
 
     impl Drop for TestConfigDir {
         fn drop(&mut self) {
-            std::env::remove_var("CRETOPASS_CONFIG_DIR");
+            // SAFETY: see TestConfigDir::new.
+            unsafe { std::env::remove_var("CRETOPASS_CONFIG_DIR") };
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }

@@ -2,6 +2,14 @@
 name = "cretopass"
 version = "1.0.0"
 edition = "2024"
+description = "Terminal-based secret keeper with vim-style navigation, age-encrypted file storage, and in-memory editing"
+license = "MIT"
+homepage = "https://github.com/cretopass/cretopass"
+repository = "https://github.com/cretopass/cretopass"
+authors = ["Your Name <email@example.com>"]
+readme = "README.md"
+keywords = ["password-manager", "tui", "terminal", "encryption", "age"]
+categories = ["command-line-utilities", "cryptography"]
 
 [dependencies]
 ratatui = "0.28"
