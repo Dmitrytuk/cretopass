@@ -118,6 +118,8 @@ pub fn save_tree(root: &Node, path: &str, passphrase: &[u8]) -> Result<(), FileH
         FileHandlingError::Io(e)
     })?;
 
+    let _ = fs::remove_file(&backup_path);
+
     Ok(())
 }
 
