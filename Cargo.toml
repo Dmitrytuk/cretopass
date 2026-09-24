@@ -1,5 +1,5 @@
 [package]
-name = "simple-password-keeper"
+name = "cretopass"
 version = "0.1.0"
 edition = "2021"
 

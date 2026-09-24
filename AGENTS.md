@@ -1,4 +1,4 @@
-# simple-password-keeper
+# cretopass
 
 Rust ratatui-based TUI app with a custom tree data structure (not file-system), vim-style navigation, search/filter, and edit/add forms. In-memory only, no persistence.
 
@@ -59,7 +59,7 @@ Password field values display as `*****` in the detail overlay and when unfocuse
 - **Crate**: library + binary. `src/lib.rs` is the crate root, re-exporting public API. `src/main.rs` is a thin binary that launches the TUI and can be consumed as a dependency by other crates.
 - **16 source files**:
   - `src/lib.rs`: crate root, re-exports, `build_demo_tree()`, terminal helpers, `run()`/`run_with_root()`
-  - `src/main.rs`: calls `tree_tui::run()`
+  - `src/main.rs`: calls `cretopass::run()`
   - `src/cursor.rs`: shared UI helpers — `cursor_field_spans()`, `selected_span()`, `selected_style()`
   - `src/tree/mod.rs`: module decl
   - `src/tree/node.rs`: Node struct
@@ -112,7 +112,7 @@ ratatui 0.28, crossterm 0.28, uuid 1.0 (features: v4, serde), serde 1 (feature: 
 - `cargo run` opens the settings menu first. Navigate with `j`/`k`, select with `Enter`, quit with `q`/`Esc`.
 - "Open secret file" opens a **FileInput modal** to enter a path (or press Enter on empty field for OS file browser). Validates file (≤50MB, age-encrypted header), then opens a **PassphraseInput modal**. On success, launches the tree app with the decrypted data. Wrong passphrase shows a red error bar; modal stays open. `Esc` cancels.
 - "Create new secret file" opens a **FileInput modal** to enter a path/filename. Validates writability via a temp-file probe, then opens the PassphraseInput modal. On success creates an encrypted file with a root node named `"Secrets"` and opens the tree app.
-- **Recent files** loaded from `~/.config/pwd-keeper/recent_files.json`. Each row is selectable — Enter validates the file then opens the PassphraseInput modal.
+- **Recent files** loaded from `~/.config/cretopass/recent_files.json`. Each row is selectable — Enter validates the file then opens the PassphraseInput modal.
 - Active file path shown in the window title bar of both Settings and Tree (`" Settings — /path/to/file "` / `" Tree — /path/to/file "`).
 - After successful open+decrypt, the file path is saved to recent files (deduplicated, most recent first).
 

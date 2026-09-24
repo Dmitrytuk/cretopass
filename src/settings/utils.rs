@@ -32,7 +32,7 @@ impl std::error::Error for SettingsError {
     }
 }
 
-/// Persistent app settings stored in `~/.config/pwd-keeper/settings.pwd`.
+/// Persistent app settings stored in `~/.config/cretopass/settings.pwd`.
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
 pub struct AppSettings {
     /// Recently opened secret files (most recent first).
@@ -56,17 +56,17 @@ impl Default for AppSettings {
     }
 }
 
-/// Returns the platform-specific config directory for pwd-keeper.
+/// Returns the platform-specific config directory for cretopass.
 ///
-/// - Linux: `$XDG_CONFIG_HOME/pwd-keeper/` or `~/.config/pwd-keeper/`
-/// - macOS: `~/Library/Application Support/pwd-keeper/`
-/// - Windows: `%APPDATA%/pwd-keeper/`
-/// - Fallback: `./.pwd-keeper/`
+/// - Linux: `$XDG_CONFIG_HOME/cretopass/` or `~/.config/cretopass/`
+/// - macOS: `~/Library/Application Support/cretopass/`
+/// - Windows: `%APPDATA%/cretopass/`
+/// - Fallback: `./.cretopass/`
 ///
-/// When the `PWD_KEEPER_CONFIG_DIR` environment variable is set, its value is
+/// When the `CRETOPASS_CONFIG_DIR` environment variable is set, its value is
 /// used instead (primarily for tests).
 pub fn config_dir() -> PathBuf {
-    if let Ok(val) = std::env::var("PWD_KEEPER_CONFIG_DIR") {
+    if let Ok(val) = std::env::var("CRETOPASS_CONFIG_DIR") {
         if !val.is_empty() {
             return PathBuf::from(val);
         }
@@ -74,29 +74,29 @@ pub fn config_dir() -> PathBuf {
     if cfg!(target_os = "linux") {
         if let Ok(val) = std::env::var("XDG_CONFIG_HOME") {
             let mut p = PathBuf::from(val);
-            p.push("pwd-keeper");
+            p.push("cretopass");
             return p;
         }
         if let Ok(val) = std::env::var("HOME") {
             let mut p = PathBuf::from(val);
-            p.push(".config/pwd-keeper");
+            p.push(".config/cretopass");
             return p;
         }
     } else if cfg!(target_os = "macos") {
         if let Ok(val) = std::env::var("HOME") {
             let mut p = PathBuf::from(val);
-            p.push("Library/Application Support/pwd-keeper");
+            p.push("Library/Application Support/cretopass");
             return p;
         }
     } else if cfg!(target_os = "windows") {
         if let Ok(val) = std::env::var("APPDATA") {
             let mut p = PathBuf::from(val);
-            p.push("pwd-keeper");
+            p.push("cretopass");
             return p;
         }
     }
     let mut p = PathBuf::from(".");
-    p.push(".pwd-keeper");
+    p.push(".cretopass");
     p
 }
 
@@ -147,7 +147,7 @@ fn load_settings_from(dir: &Path) -> AppSettings {
     }
 }
 
-/// Saves app settings to `~/.config/pwd-keeper/settings.pwd` as binary.
+/// Saves app settings to `~/.config/cretopass/settings.pwd` as binary.
 pub fn save_settings(settings: &AppSettings) -> Result<(), SettingsError> {
     save_settings_to(&config_dir(), settings)
 }
@@ -175,22 +175,21 @@ mod tests {
     use super::*;
 
     /// Points settings I/O at an isolated temp directory so tests never touch
-    /// the developer's real `~/.config/pwd-keeper`.
+    /// the developer's real `~/.config/cretopass`.
     struct TestConfigDir(PathBuf);
 
     impl TestConfigDir {
         fn new() -> Self {
-            let dir =
-                std::env::temp_dir().join(format!("pwd-keeper-test-{}", uuid::Uuid::new_v4()));
+            let dir = std::env::temp_dir().join(format!("cretopass-test-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&dir).unwrap();
-            std::env::set_var("PWD_KEEPER_CONFIG_DIR", &dir);
+            std::env::set_var("CRETOPASS_CONFIG_DIR", &dir);
             Self(dir)
         }
     }
 
     impl Drop for TestConfigDir {
         fn drop(&mut self) {
-            std::env::remove_var("PWD_KEEPER_CONFIG_DIR");
+            std::env::remove_var("CRETOPASS_CONFIG_DIR");
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
