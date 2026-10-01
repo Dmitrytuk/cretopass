@@ -56,7 +56,7 @@ fi
 
 if [[ "$FAILED" != true && -n "$VERSION" ]]; then
     echo "==> Building Docker image: $IMAGE_TAG"
-    if ! docker build -t "$IMAGE_TAG" -f "$DOCKERFILE" "$SCRIPT_DIR" >"$AGENT_OUT"; then
+    if ! docker build -t "$IMAGE_TAG" -f "$DOCKERFILE" "$SCRIPT_DIR" &>"$AGENT_OUT"; then
         fail "Docker image build failed"
     fi
 fi
@@ -91,13 +91,13 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         # ---------------------------------------------------------------
         echo "==> Building package: cretopass"
         cd /home/builder/repo/packaging/arch/cretopass
-        makepkg --syncdeps --cleanbuild --force --noconfirm >"$AGENT_OUT"
+        makepkg --syncdeps --cleanbuild --force --noconfirm &>"$AGENT_OUT"
 
         echo "==> namcap: cretopass"
-        namcap ./cretopass-*.pkg.tar.zst >"$AGENT_OUT"
+        namcap ./cretopass-*.pkg.tar.zst &>"$AGENT_OUT"
 
         echo "==> Installing cretopass"
-        sudo pacman -U --noconfirm ./cretopass-*.pkg.tar.zst >"$AGENT_OUT"
+        sudo pacman -U --noconfirm ./cretopass-*.pkg.tar.zst &>"$AGENT_OUT"
 
         echo "==> Smoke testing cretopass"
         cretopass --help >/dev/null
@@ -114,13 +114,13 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         # ---------------------------------------------------------------
         echo "==> Building package: cretopass-gui"
         cd /home/builder/repo/packaging/arch/cretopass-gui
-        makepkg --syncdeps --cleanbuild --force --noconfirm >"$AGENT_OUT"
+        makepkg --syncdeps --cleanbuild --force --noconfirm &>"$AGENT_OUT"
 
         echo "==> namcap: cretopass-gui"
-        namcap ./cretopass-gui-*.pkg.tar.zst >"$AGENT_OUT"
+        namcap ./cretopass-gui-*.pkg.tar.zst &>"$AGENT_OUT"
 
         echo "==> Installing cretopass-gui"
-        sudo pacman -U --noconfirm ./cretopass-gui-*.pkg.tar.zst >"$AGENT_OUT"
+        sudo pacman -U --noconfirm ./cretopass-gui-*.pkg.tar.zst &>"$AGENT_OUT"
 
         echo "==> Smoke testing cretopass-gui"
         desktop-file-validate /usr/share/applications/cretopass-gui.desktop
