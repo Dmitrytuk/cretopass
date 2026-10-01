@@ -84,7 +84,7 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         CRETOPASS_PKG=$(ls "$PKGDEST"/cretopass-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
 
         echo "<INFO>namcap: cretopass</INFO>"
-        namcap "$CRETOPASS_PKG"
+        echo "<NAMCAP>$(namcap "$CRETOPASS_PKG")</NAMCAP>"
 
         echo "<INFO>Installing cretopass</INFO>"
         sudo pacman -U --noconfirm "$CRETOPASS_PKG"
@@ -109,7 +109,7 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         CRETOPASS_GUI_PKG=$(ls "$PKGDEST"/cretopass-gui-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
 
         echo "<INFO>namcap: cretopass-gui</INFO>"
-        namcap "$CRETOPASS_GUI_PKG"
+        echo "<NAMCAP>$(namcap "$CRETOPASS_GUI_PKG")</NAMCAP>"
 
         echo "<INFO>Installing cretopass-gui</INFO>"
         sudo pacman -U --noconfirm "$CRETOPASS_GUI_PKG"
