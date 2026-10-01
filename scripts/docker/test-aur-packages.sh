@@ -3,17 +3,10 @@
 
 FAILED=false
 
-AGENT=${AGENT:-1}
-if [[ "$AGENT" == "1" ]]; then
-    AGENT_OUT=/dev/null
-else
-    AGENT_OUT=/dev/stdout
-fi
-
 fail() {
     local msg="$1"
     echo "" >&2
-    echo "==> ERROR: ${msg}" >&2
+    echo "<ERROR>${msg}</ERROR>" >&2
     if [[ -t 0 ]]; then
         echo -n "Press Enter to continue..."; read -r
     fi
@@ -35,14 +28,14 @@ GUI_TARBALL="/tmp/cretopass-gui-${VERSION}.tar.gz"
 
 TMP_PKGBUILD_DIR="$(mktemp -d /tmp/cretopass-pkgbuilds.XXXXXX)"
 
-echo "==> Patching pkgver=${VERSION} in PKGBUILD files"
+echo "<INFO>Patching pkgver=${VERSION} in PKGBUILD files</INFO>"
 mkdir -p "$TMP_PKGBUILD_DIR/cretopass" "$TMP_PKGBUILD_DIR/cretopass-gui"
 sed "s/^pkgver=.*/pkgver=${VERSION}/" "$REPO_ROOT/packaging/arch/cretopass/PKGBUILD" \
     > "$TMP_PKGBUILD_DIR/cretopass/PKGBUILD"
 sed "s/^pkgver=.*/pkgver=${VERSION}/" "$REPO_ROOT/packaging/arch/cretopass-gui/PKGBUILD" \
     > "$TMP_PKGBUILD_DIR/cretopass-gui/PKGBUILD"
 
-echo "==> Preparing local source tarball (cretopass-${VERSION})"
+echo "<INFO>Preparing local source tarball (cretopass-${VERSION})</INFO>"
 rm -f "$TARBALL"
 git -C "$REPO_ROOT" archive \
     --format=tar.gz \
@@ -57,30 +50,22 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 if [[ "$FAILED" != true && -n "$VERSION" ]]; then
-    echo "==> Building Docker image: $IMAGE_TAG"
-    if ! docker build -t "$IMAGE_TAG" -f "$DOCKERFILE" "$SCRIPT_DIR" &>"$AGENT_OUT"; then
+    echo "<INFO>Building Docker image: $IMAGE_TAG</INFO>"
+    if ! docker build -t "$IMAGE_TAG" -f "$DOCKERFILE" "$SCRIPT_DIR"; then
         fail "Docker image build failed"
     fi
 fi
 
 if [[ "$FAILED" != true && -n "$VERSION" ]]; then
-    echo "==> Running AUR package tests in container"
+    echo "<INFO>Running AUR package tests in container</INFO>"
     if ! docker run --rm \
         -e VERSION="$VERSION" \
-        -e AGENT \
         -v "$REPO_ROOT:/home/builder/repo:ro" \
         -v "$TARBALL:/home/builder/target/cretopass-${VERSION}.tar.gz:ro" \
         -v "$GUI_TARBALL:/home/builder/target/cretopass-gui-${VERSION}.tar.gz:ro" \
         -v "$TMP_PKGBUILD_DIR/cretopass/PKGBUILD:/home/builder/repo/packaging/arch/cretopass/PKGBUILD:ro" \
         -v "$TMP_PKGBUILD_DIR/cretopass-gui/PKGBUILD:/home/builder/repo/packaging/arch/cretopass-gui/PKGBUILD:ro" \
         "$IMAGE_TAG" bash -uo pipefail -c '
-        AGENT=${AGENT:-0}
-        if [[ "$AGENT" == "1" ]]; then
-            AGENT_OUT=/dev/null
-        else
-            AGENT_OUT=/dev/stdout
-        fi
-
         SRCDEST=/home/builder/target
         export SRCDEST
         export CARGO_HOME=/home/builder/.cargo
@@ -92,19 +77,19 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         # ---------------------------------------------------------------
         # cretopass
         # ---------------------------------------------------------------
-        echo "==> Building package: cretopass"
+        echo "<INFO>Building package: cretopass</INFO>"
         cd /home/builder/repo/packaging/arch/cretopass
-        makepkg --syncdeps --cleanbuild --force --noconfirm &>"$AGENT_OUT"
+        makepkg --syncdeps --cleanbuild --force --noconfirm
 
         CRETOPASS_PKG=$(ls "$PKGDEST"/cretopass-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
 
-        echo "==> namcap: cretopass"
-        namcap "$CRETOPASS_PKG" &>"$AGENT_OUT"
+        echo "<INFO>namcap: cretopass</INFO>"
+        namcap "$CRETOPASS_PKG"
 
-        echo "==> Installing cretopass"
-        sudo pacman -U --noconfirm "$CRETOPASS_PKG" &>"$AGENT_OUT"
+        echo "<INFO>Installing cretopass</INFO>"
+        sudo pacman -U --noconfirm "$CRETOPASS_PKG"
 
-        echo "==> Smoke testing cretopass"
+        echo "<INFO>Smoke testing cretopass</INFO>"
         cretopass --help >/dev/null
         cretopass --version | grep -q "$VERSION"
         test -f /usr/bin/cretopass
@@ -112,44 +97,44 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         test -f /usr/share/bash-completion/completions/cretopass
         test -f /usr/share/zsh/site-functions/_cretopass
         test -f /usr/share/fish/vendor_completions.d/cretopass.fish
-        echo "=== cretopass OK ==="
+        echo "<INFO>cretopass OK</INFO>"
 
         # ---------------------------------------------------------------
         # cretopass-gui
         # ---------------------------------------------------------------
-        echo "==> Building package: cretopass-gui"
+        echo "<INFO>Building package: cretopass-gui</INFO>"
         cd /home/builder/repo/packaging/arch/cretopass-gui
-        makepkg --syncdeps --cleanbuild --force --noconfirm &>"$AGENT_OUT"
+        makepkg --syncdeps --cleanbuild --force --noconfirm
 
         CRETOPASS_GUI_PKG=$(ls "$PKGDEST"/cretopass-gui-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
 
-        echo "==> namcap: cretopass-gui"
-        namcap "$CRETOPASS_GUI_PKG" &>"$AGENT_OUT"
+        echo "<INFO>namcap: cretopass-gui</INFO>"
+        namcap "$CRETOPASS_GUI_PKG"
 
-        echo "==> Installing cretopass-gui"
-        sudo pacman -U --noconfirm "$CRETOPASS_GUI_PKG" &>"$AGENT_OUT"
+        echo "<INFO>Installing cretopass-gui</INFO>"
+        sudo pacman -U --noconfirm "$CRETOPASS_GUI_PKG"
 
-        echo "==> Smoke testing cretopass-gui"
+        echo "<INFO>Smoke testing cretopass-gui</INFO>"
         desktop-file-validate /usr/share/applications/cretopass-gui.desktop
         for size in 16 22 24 32 48 64 128 256 512; do
             test -f "/usr/share/icons/hicolor/${size}x${size}/apps/cretopass-gui.png"
         done
         test -f /usr/share/icons/hicolor/scalable/apps/cretopass-gui.svg
         test -f /usr/share/icons/hicolor/symbolic/apps/cretopass-gui-symbolic.svg
-        echo "=== cretopass-gui OK ==="
+        echo "<INFO>cretopass-gui OK</INFO>"
 
-        echo "==> All AUR package tests passed"
+        echo "<INFO>All AUR package tests passed</INFO>"
     '; then
         fail "AUR package tests failed"
     fi
 fi
 
-echo "==> Cleaning up"
+echo "<INFO>Cleaning up</INFO>"
 rm -f "$TARBALL" "$GUI_TARBALL"
 rm -rf "$TMP_PKGBUILD_DIR"
 docker image rm -f "$IMAGE_TAG" >/dev/null 2>&1 || true
 
-echo "==> Done"
+echo "<INFO>Done</INFO>"
 if [[ "$FAILED" == true ]]; then
-    echo "==> Script completed with errors (see above)"
+    echo "<ERROR>Script completed with errors</ERROR>"
 fi
