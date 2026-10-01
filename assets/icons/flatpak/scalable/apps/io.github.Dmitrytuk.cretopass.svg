@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000">
+  <defs>
+    <!-- Диагональный градиент корпуса и дужки -->
+    <linearGradient id="blue" gradientUnits="userSpaceOnUse" x1="310" y1="110" x2="760" y2="890">
+      <stop offset="0" stop-color="#2ba2dc"/>
+      <stop offset="1" stop-color="#0b6aa6"/>
+    </linearGradient>
+    <!-- Лёгкая тень буквы C (эффект выреза) -->
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#4a5a63" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- Дужка замка (внешний контур + внутреннее отверстие) -->
+  <path fill="url(#blue)" fill-rule="evenodd"
+        d="M302 450 L302 308 A198 198 0 0 1 698 308 L698 450 Z
+           M370 450 L370 308 A130 130 0 0 1 630 308 L630 450 Z"/>
+
+  <!-- Корпус замка -->
+  <path fill="url(#blue)"
+        d="M228 532
+           C228 462 268 416 332 403
+           C380 383 620 383 668 403
+           C732 416 772 462 772 532
+           L772 678
+           C772 806 652 894 500 894
+           C348 894 228 806 228 678
+           Z"/>
+
+  <!-- Буква C -->
+  <path fill="none" stroke="#f4f6f7" stroke-width="62" filter="url(#shadow)"
+        d="M581.6 596.2 A90 99 0 1 0 581.6 679.8"/>
+</svg>
