@@ -67,6 +67,7 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         export SRCDEST
         export CARGO_HOME=/home/builder/.cargo
         export RUSTUP_HOME=/home/builder/.rustup
+        export BUILDDIR=/tmp/makepkg-build
 
         # ---------------------------------------------------------------
         # cretopass
