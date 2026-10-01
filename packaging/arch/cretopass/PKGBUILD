@@ -28,7 +28,6 @@ package() {
 	install -Dm755 "target/$CARCH-unknown-linux-gnu/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
 
 	install -Dm644 packaging/arch/cretopass.1 "$pkgdir/usr/share/man/man1/$pkgname.1"
-	install -Dm644 packaging/arch/cretopass.desktop "$pkgdir/usr/share/applications/$pkgname.desktop"
 
 	install -Dm644 packaging/arch/completions/cretopass.bash "$pkgdir/usr/share/bash-completion/completions/$pkgname"
 	install -Dm644 packaging/arch/completions/cretopass.zsh "$pkgdir/usr/share/zsh/site-functions/_$pkgname"

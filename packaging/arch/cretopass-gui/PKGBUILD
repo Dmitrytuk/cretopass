@@ -1,0 +1,33 @@
+# Maintainer: Your Name <email@example.com>
+
+pkgname=cretopass-gui
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Desktop launcher for cretopass terminal-based secret keeper"
+arch=('any')
+url="https://github.com/Dmitrytuk/cretopass"
+license=('MIT')
+depends=('cretopass')
+install=cretopass-gui.install
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+	cd "$srcdir/cretopass-$pkgver"
+
+	# Install desktop entry
+	install -Dm644 packaging/arch/cretopass-gui.desktop "$pkgdir/usr/share/applications/cretopass-gui.desktop"
+
+	# Install icons (hicolor theme)
+	for size in 16 22 24 32 48 64 128 256 512; do
+		install -Dm644 "assets/icons/linux/${size}x${size}/apps/io.github.Dmitrytuk.cretopass.png" \
+			"$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/cretopass-gui.png"
+	done
+	install -Dm644 "assets/icons/linux/scalable/apps/io.github.Dmitrytuk.cretopass.svg" \
+		"$pkgdir/usr/share/icons/hicolor/scalable/apps/cretopass-gui.svg"
+	install -Dm644 "assets/icons/linux/symbolic/apps/io.github.Dmitrytuk.cretopass-symbolic.svg" \
+		"$pkgdir/usr/share/icons/hicolor/symbolic/apps/cretopass-gui-symbolic.svg"
+
+	# Install license
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
