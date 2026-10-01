@@ -16,7 +16,7 @@ package() {
 	cd "$srcdir/cretopass-$pkgver"
 
 	# Install desktop entry
-	install -Dm644 packaging/arch/cretopass-gui.desktop "$pkgdir/usr/share/applications/cretopass-gui.desktop"
+	install -Dm644 packaging/arch/cretopass-gui/cretopass-gui.desktop "$pkgdir/usr/share/applications/cretopass-gui.desktop"
 
 	# Install icons (hicolor theme)
 	for size in 16 22 24 32 48 64 128 256 512; do

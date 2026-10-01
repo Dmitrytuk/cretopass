@@ -27,11 +27,11 @@ package() {
 	cd "$pkgname-$pkgver"
 	install -Dm755 "target/$CARCH-unknown-linux-gnu/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
 
-	install -Dm644 packaging/arch/cretopass.1 "$pkgdir/usr/share/man/man1/$pkgname.1"
+	install -Dm644 packaging/arch/cretopass/cretopass.1 "$pkgdir/usr/share/man/man1/$pkgname.1"
 
-	install -Dm644 packaging/arch/completions/cretopass.bash "$pkgdir/usr/share/bash-completion/completions/$pkgname"
-	install -Dm644 packaging/arch/completions/cretopass.zsh "$pkgdir/usr/share/zsh/site-functions/_$pkgname"
-	install -Dm644 packaging/arch/completions/cretopass.fish "$pkgdir/usr/share/fish/vendor_completions.d/$pkgname.fish"
+	install -Dm644 packaging/arch/cretopass/completions/cretopass.bash "$pkgdir/usr/share/bash-completion/completions/$pkgname"
+	install -Dm644 packaging/arch/cretopass/completions/cretopass.zsh "$pkgdir/usr/share/zsh/site-functions/_$pkgname"
+	install -Dm644 packaging/arch/cretopass/completions/cretopass.fish "$pkgdir/usr/share/fish/vendor_completions.d/$pkgname.fish"
 
 	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 	install -Dm644 LICENSE-THIRD-PARTY "$pkgdir/usr/share/licenses/$pkgname/LICENSE-THIRD-PARTY"
