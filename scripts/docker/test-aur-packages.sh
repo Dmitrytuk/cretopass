@@ -3,6 +3,13 @@
 
 FAILED=false
 
+AGENT=${AGENT:-1}
+if [[ "$AGENT" == "1" ]]; then
+    AGENT_OUT=/dev/null
+else
+    AGENT_OUT=/dev/stdout
+fi
+
 fail() {
     local msg="$1"
     echo "" >&2
@@ -49,7 +56,7 @@ fi
 
 if [[ "$FAILED" != true && -n "$VERSION" ]]; then
     echo "==> Building Docker image: $IMAGE_TAG"
-    if ! docker build -t "$IMAGE_TAG" -f "$DOCKERFILE" "$SCRIPT_DIR"; then
+    if ! docker build -t "$IMAGE_TAG" -f "$DOCKERFILE" "$SCRIPT_DIR" >"$AGENT_OUT"; then
         fail "Docker image build failed"
     fi
 fi
@@ -57,12 +64,20 @@ fi
 if [[ "$FAILED" != true && -n "$VERSION" ]]; then
     echo "==> Running AUR package tests in container"
     if ! docker run --rm \
+        -e AGENT \
         -v "$REPO_ROOT:/home/builder/repo:ro" \
         -v "$TARBALL:/home/builder/target/cretopass-${VERSION}.tar.gz:ro" \
         -v "$GUI_TARBALL:/home/builder/target/cretopass-gui-${VERSION}.tar.gz:ro" \
         -v "$TMP_PKGBUILD_DIR/cretopass/PKGBUILD:/home/builder/repo/packaging/arch/cretopass/PKGBUILD:ro" \
         -v "$TMP_PKGBUILD_DIR/cretopass-gui/PKGBUILD:/home/builder/repo/packaging/arch/cretopass-gui/PKGBUILD:ro" \
         "$IMAGE_TAG" bash -euo pipefail -c '
+        AGENT=${AGENT:-0}
+        if [[ "$AGENT" == "1" ]]; then
+            AGENT_OUT=/dev/null
+        else
+            AGENT_OUT=/dev/stdout
+        fi
+
         SRCDEST=/home/builder/target
         export SRCDEST
         export CARGO_HOME=/home/builder/.cargo
@@ -76,13 +91,13 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         # ---------------------------------------------------------------
         echo "==> Building package: cretopass"
         cd /home/builder/repo/packaging/arch/cretopass
-        makepkg --syncdeps --cleanbuild --force --noconfirm
+        makepkg --syncdeps --cleanbuild --force --noconfirm >"$AGENT_OUT"
 
         echo "==> namcap: cretopass"
-        namcap ./cretopass-*.pkg.tar.zst
+        namcap ./cretopass-*.pkg.tar.zst >"$AGENT_OUT"
 
         echo "==> Installing cretopass"
-        sudo pacman -U --noconfirm ./cretopass-*.pkg.tar.zst
+        sudo pacman -U --noconfirm ./cretopass-*.pkg.tar.zst >"$AGENT_OUT"
 
         echo "==> Smoke testing cretopass"
         cretopass --help >/dev/null
@@ -99,13 +114,13 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         # ---------------------------------------------------------------
         echo "==> Building package: cretopass-gui"
         cd /home/builder/repo/packaging/arch/cretopass-gui
-        makepkg --syncdeps --cleanbuild --force --noconfirm
+        makepkg --syncdeps --cleanbuild --force --noconfirm >"$AGENT_OUT"
 
         echo "==> namcap: cretopass-gui"
-        namcap ./cretopass-gui-*.pkg.tar.zst
+        namcap ./cretopass-gui-*.pkg.tar.zst >"$AGENT_OUT"
 
         echo "==> Installing cretopass-gui"
-        sudo pacman -U --noconfirm ./cretopass-gui-*.pkg.tar.zst
+        sudo pacman -U --noconfirm ./cretopass-gui-*.pkg.tar.zst >"$AGENT_OUT"
 
         echo "==> Smoke testing cretopass-gui"
         desktop-file-validate /usr/share/applications/cretopass-gui.desktop
