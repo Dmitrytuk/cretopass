@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
+
+error_handler() {
+    local exit_code=$?
+    echo "" >&2
+    echo "==> Script failed with exit code ${exit_code}" >&2
+    echo "    Error at line ${BASH_LINENO[0]}: ${BASH_COMMAND}" >&2
+    read -r -p "Press Enter to exit..."
+    exit "$exit_code"
+}
+trap error_handler ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -33,6 +43,11 @@ git -C "$REPO_ROOT" archive \
 	HEAD
 
 cp "$TARBALL" "$GUI_TARBALL"
+
+if ! docker info >/dev/null 2>&1; then
+    echo "error: Docker is not running or not accessible" >&2
+    exit 1
+fi
 
 echo "==> Building Docker image: $IMAGE_TAG"
 docker build -t "$IMAGE_TAG" -f "$DOCKERFILE" "$SCRIPT_DIR"
@@ -104,3 +119,4 @@ rm -rf "$TMP_PKGBUILD_DIR"
 docker image rm -f "$IMAGE_TAG" >/dev/null 2>&1 || true
 
 echo "==> Done"
+read -r -p "Press Enter to exit..."
