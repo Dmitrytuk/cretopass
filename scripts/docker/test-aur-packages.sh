@@ -7,9 +7,6 @@ fail() {
     local msg="$1"
     echo "" >&2
     echo "<ERROR>${msg}</ERROR>" >&2
-    if [[ -t 0 ]]; then
-        echo -n "Press Enter to continue..."; read -r
-    fi
     FAILED=true
 }
 
