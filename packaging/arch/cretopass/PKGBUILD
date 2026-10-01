@@ -7,6 +7,7 @@ pkgdesc="Terminal-based secret keeper with vim-style navigation, age-encrypted f
 arch=('x86_64')
 url="https://github.com/Dmitrytuk/cretopass"
 license=('MIT')
+options=(!debug)
 depends=('glibc' 'gcc-libs')
 makedepends=('cargo' 'rust')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
