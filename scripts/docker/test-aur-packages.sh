@@ -14,7 +14,9 @@ fail() {
     local msg="$1"
     echo "" >&2
     echo "==> ERROR: ${msg}" >&2
-    read -r -p "Press Enter to continue..."
+    if [[ -t 0 ]]; then
+        read -r -p "Press Enter to continue..."
+    fi
     FAILED=true
 }
 
@@ -93,11 +95,13 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         cd /home/builder/repo/packaging/arch/cretopass
         makepkg --syncdeps --cleanbuild --force --noconfirm &>"$AGENT_OUT"
 
+        CRETOPASS_PKG=$(ls ./cretopass-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
+
         echo "==> namcap: cretopass"
-        namcap ./cretopass-*.pkg.tar.zst &>"$AGENT_OUT"
+        namcap "$CRETOPASS_PKG" &>"$AGENT_OUT"
 
         echo "==> Installing cretopass"
-        sudo pacman -U --noconfirm ./cretopass-*.pkg.tar.zst &>"$AGENT_OUT"
+        sudo pacman -U --noconfirm "$CRETOPASS_PKG" &>"$AGENT_OUT"
 
         echo "==> Smoke testing cretopass"
         cretopass --help >/dev/null
@@ -116,11 +120,13 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         cd /home/builder/repo/packaging/arch/cretopass-gui
         makepkg --syncdeps --cleanbuild --force --noconfirm &>"$AGENT_OUT"
 
+        CRETOPASS_GUI_PKG=$(ls ./cretopass-gui-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
+
         echo "==> namcap: cretopass-gui"
-        namcap ./cretopass-gui-*.pkg.tar.zst &>"$AGENT_OUT"
+        namcap "$CRETOPASS_GUI_PKG" &>"$AGENT_OUT"
 
         echo "==> Installing cretopass-gui"
-        sudo pacman -U --noconfirm ./cretopass-gui-*.pkg.tar.zst &>"$AGENT_OUT"
+        sudo pacman -U --noconfirm "$CRETOPASS_GUI_PKG" &>"$AGENT_OUT"
 
         echo "==> Smoke testing cretopass-gui"
         desktop-file-validate /usr/share/applications/cretopass-gui.desktop
@@ -146,4 +152,6 @@ echo "==> Done"
 if [[ "$FAILED" == true ]]; then
     echo "==> Script completed with errors (see above)"
 fi
-read -r -p "Press Enter to exit..."
+if [[ -t 0 ]]; then
+    read -r -p "Press Enter to exit..."
+fi
