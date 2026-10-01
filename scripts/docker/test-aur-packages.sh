@@ -13,6 +13,16 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 TARBALL="/tmp/cretopass-${VERSION}.tar.gz"
+GUI_TARBALL="/tmp/cretopass-gui-${VERSION}.tar.gz"
+
+TMP_PKGBUILD_DIR="$(mktemp -d /tmp/cretopass-pkgbuilds.XXXXXX)"
+
+echo "==> Patching pkgver=${VERSION} in PKGBUILD files"
+mkdir -p "$TMP_PKGBUILD_DIR/cretopass" "$TMP_PKGBUILD_DIR/cretopass-gui"
+sed "s/^pkgver=.*/pkgver=${VERSION}/" "$REPO_ROOT/packaging/arch/cretopass/PKGBUILD" \
+	> "$TMP_PKGBUILD_DIR/cretopass/PKGBUILD"
+sed "s/^pkgver=.*/pkgver=${VERSION}/" "$REPO_ROOT/packaging/arch/cretopass-gui/PKGBUILD" \
+	> "$TMP_PKGBUILD_DIR/cretopass-gui/PKGBUILD"
 
 echo "==> Preparing local source tarball (cretopass-${VERSION})"
 rm -f "$TARBALL"
@@ -22,6 +32,8 @@ git -C "$REPO_ROOT" archive \
 	--output="$TARBALL" \
 	HEAD
 
+cp "$TARBALL" "$GUI_TARBALL"
+
 echo "==> Building Docker image: $IMAGE_TAG"
 docker build -t "$IMAGE_TAG" -f "$DOCKERFILE" "$SCRIPT_DIR"
 
@@ -29,8 +41,10 @@ echo "==> Running AUR package tests in container"
 docker run --rm \
 	-v "$REPO_ROOT:/home/builder/repo:ro" \
 	-v "$TARBALL:/home/builder/target/cretopass-${VERSION}.tar.gz:ro" \
+	-v "$GUI_TARBALL:/home/builder/target/cretopass-gui-${VERSION}.tar.gz:ro" \
+	-v "$TMP_PKGBUILD_DIR/cretopass/PKGBUILD:/home/builder/repo/packaging/arch/cretopass/PKGBUILD:ro" \
+	-v "$TMP_PKGBUILD_DIR/cretopass-gui/PKGBUILD:/home/builder/repo/packaging/arch/cretopass-gui/PKGBUILD:ro" \
 	"$IMAGE_TAG" bash -euo pipefail -c '
-	set -euo pipefail
 	SRCDEST=/home/builder/target
 	export SRCDEST
 	export CARGO_HOME=/home/builder/.cargo
@@ -85,7 +99,8 @@ docker run --rm \
 '
 
 echo "==> Cleaning up"
-rm -f "$TARBALL"
+rm -f "$TARBALL" "$GUI_TARBALL"
+rm -rf "$TMP_PKGBUILD_DIR"
 docker image rm -f "$IMAGE_TAG" >/dev/null 2>&1 || true
 
 echo "==> Done"
