@@ -15,7 +15,7 @@ fail() {
     echo "" >&2
     echo "==> ERROR: ${msg}" >&2
     if [[ -t 0 ]]; then
-        read -r -p "Press Enter to continue..."
+        echo -n "Press Enter to continue..."; read -r
     fi
     FAILED=true
 }
@@ -72,7 +72,7 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         -v "$GUI_TARBALL:/home/builder/target/cretopass-gui-${VERSION}.tar.gz:ro" \
         -v "$TMP_PKGBUILD_DIR/cretopass/PKGBUILD:/home/builder/repo/packaging/arch/cretopass/PKGBUILD:ro" \
         -v "$TMP_PKGBUILD_DIR/cretopass-gui/PKGBUILD:/home/builder/repo/packaging/arch/cretopass-gui/PKGBUILD:ro" \
-        "$IMAGE_TAG" bash -euo pipefail -c '
+        "$IMAGE_TAG" bash -uo pipefail -c '
         AGENT=${AGENT:-0}
         if [[ "$AGENT" == "1" ]]; then
             AGENT_OUT=/dev/null
@@ -153,5 +153,5 @@ if [[ "$FAILED" == true ]]; then
     echo "==> Script completed with errors (see above)"
 fi
 if [[ -t 0 ]]; then
-    read -r -p "Press Enter to exit..."
+    echo -n "Press Enter to exit..."; read -r
 fi
