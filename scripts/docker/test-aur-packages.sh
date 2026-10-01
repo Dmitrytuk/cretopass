@@ -62,7 +62,7 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         -v "$GUI_TARBALL:/home/builder/target/cretopass-gui-${VERSION}.tar.gz:ro" \
         -v "$TMP_PKGBUILD_DIR/cretopass/PKGBUILD:/home/builder/repo/packaging/arch/cretopass/PKGBUILD:ro" \
         -v "$TMP_PKGBUILD_DIR/cretopass-gui/PKGBUILD:/home/builder/repo/packaging/arch/cretopass-gui/PKGBUILD:ro" \
-        "$IMAGE_TAG" bash -uo pipefail -c '
+        "$IMAGE_TAG" bash -euo pipefail -c '
         SRCDEST=/home/builder/target
         export SRCDEST
         export CARGO_HOME=/home/builder/.cargo
@@ -81,7 +81,8 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         CRETOPASS_PKG=$(ls "$PKGDEST"/cretopass-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
 
         echo "<INFO>namcap: cretopass</INFO>"
-        echo "<NAMCAP>$(namcap "$CRETOPASS_PKG")</NAMCAP>"
+        NAMCAP_OUT=$(namcap "$CRETOPASS_PKG")
+        echo "<NAMCAP>$NAMCAP_OUT</NAMCAP>"
 
         echo "<INFO>Installing cretopass</INFO>"
         sudo pacman -U --noconfirm "$CRETOPASS_PKG"
@@ -106,7 +107,8 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         CRETOPASS_GUI_PKG=$(ls "$PKGDEST"/cretopass-gui-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
 
         echo "<INFO>namcap: cretopass-gui</INFO>"
-        echo "<NAMCAP>$(namcap "$CRETOPASS_GUI_PKG")</NAMCAP>"
+        NAMCAP_OUT=$(namcap "$CRETOPASS_GUI_PKG")
+        echo "<NAMCAP>$NAMCAP_OUT</NAMCAP>"
 
         echo "<INFO>Installing cretopass-gui</INFO>"
         sudo pacman -U --noconfirm "$CRETOPASS_GUI_PKG"
