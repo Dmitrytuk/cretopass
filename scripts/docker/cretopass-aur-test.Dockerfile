@@ -18,3 +18,5 @@ WORKDIR /home/builder
 
 RUN rustup toolchain install 1.92.0 && \
     rustup default 1.92.0
+
+RUN mkdir -p /home/builder/target
