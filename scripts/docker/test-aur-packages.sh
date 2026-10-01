@@ -152,6 +152,3 @@ echo "==> Done"
 if [[ "$FAILED" == true ]]; then
     echo "==> Script completed with errors (see above)"
 fi
-if [[ -t 0 ]]; then
-    echo -n "Press Enter to exit..."; read -r
-fi
