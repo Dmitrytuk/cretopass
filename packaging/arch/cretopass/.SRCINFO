@@ -8,7 +8,7 @@ pkgbase = cretopass
 	makedepends = cargo
 	makedepends = rust
 	depends = glibc
-	depends = gcc-libs
+	options = !debug
 	source = cretopass-1.0.0.tar.gz::https://github.com/Dmitrytuk/cretopass/archive/refs/tags/v1.0.0.tar.gz
 	sha256sums = SKIP
 

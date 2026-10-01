@@ -3,10 +3,10 @@ pkgbase = cretopass-gui
 	pkgver = 1.0.0
 	pkgrel = 1
 	url = https://github.com/Dmitrytuk/cretopass
-	install = cretopass-gui.install
 	arch = any
 	license = MIT
 	depends = cretopass
+	depends = hicolor-icon-theme
 	source = cretopass-gui-1.0.0.tar.gz::https://github.com/Dmitrytuk/cretopass/archive/refs/tags/v1.0.0.tar.gz
 	sha256sums = SKIP
 

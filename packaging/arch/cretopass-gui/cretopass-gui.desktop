@@ -6,5 +6,5 @@ Comment=Terminal-based secret keeper with vim-style navigation and age encryptio
 Exec=cretopass
 Icon=cretopass-gui
 Terminal=true
-Categories=Utility;Security;System;
+Categories=Utility;Security;
 Keywords=password;secrets;encryption;age;tui;terminal;

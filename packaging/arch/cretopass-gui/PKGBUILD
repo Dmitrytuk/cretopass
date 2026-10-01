@@ -7,8 +7,7 @@ pkgdesc="Desktop launcher for cretopass terminal-based secret keeper"
 arch=('any')
 url="https://github.com/Dmitrytuk/cretopass"
 license=('MIT')
-depends=('cretopass')
-install=cretopass-gui.install
+depends=('cretopass' 'hicolor-icon-theme')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 

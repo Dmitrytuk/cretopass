@@ -66,6 +66,7 @@ fi
 if [[ "$FAILED" != true && -n "$VERSION" ]]; then
     echo "==> Running AUR package tests in container"
     if ! docker run --rm \
+        -e VERSION="$VERSION" \
         -e AGENT \
         -v "$REPO_ROOT:/home/builder/repo:ro" \
         -v "$TARBALL:/home/builder/target/cretopass-${VERSION}.tar.gz:ro" \
