@@ -95,7 +95,7 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         cd /home/builder/repo/packaging/arch/cretopass
         makepkg --syncdeps --cleanbuild --force --noconfirm &>"$AGENT_OUT"
 
-        CRETOPASS_PKG=$(ls ./cretopass-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
+        CRETOPASS_PKG=$(ls "$PKGDEST"/cretopass-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
 
         echo "==> namcap: cretopass"
         namcap "$CRETOPASS_PKG" &>"$AGENT_OUT"
@@ -120,7 +120,7 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         cd /home/builder/repo/packaging/arch/cretopass-gui
         makepkg --syncdeps --cleanbuild --force --noconfirm &>"$AGENT_OUT"
 
-        CRETOPASS_GUI_PKG=$(ls ./cretopass-gui-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
+        CRETOPASS_GUI_PKG=$(ls "$PKGDEST"/cretopass-gui-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
 
         echo "==> namcap: cretopass-gui"
         namcap "$CRETOPASS_GUI_PKG" &>"$AGENT_OUT"
