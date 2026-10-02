@@ -9,7 +9,17 @@ VERBOSE=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -v) VERBOSE=true; shift ;;
-        *)  echo "Usage: $0 [-v]" >&2; exit 2 ;;
+        -h)
+            echo "Wrapper that runs AUR package tests with filtered output."
+            echo ""
+            echo "Runs test-aur-packages.sh. By default filters output to <INFO>/<ERROR>/<NAMCAP> tags."
+            echo ""
+            echo "Flags:"
+            echo "  -v    Full verbose output (run test-aur-packages.sh as-is)"
+            echo "  -h    Show this help message"
+            exit 0
+            ;;
+        *)  echo "Usage: $0 [-v] [-h]" >&2; exit 2 ;;
     esac
 done
 
