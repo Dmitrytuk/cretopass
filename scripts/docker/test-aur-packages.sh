@@ -62,7 +62,7 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         -v "$GUI_TARBALL:/home/builder/target/cretopass-gui-${VERSION}.tar.gz:ro" \
         -v "$TMP_PKGBUILD_DIR/cretopass/PKGBUILD:/home/builder/repo/packaging/arch/cretopass/PKGBUILD:ro" \
         -v "$TMP_PKGBUILD_DIR/cretopass-gui/PKGBUILD:/home/builder/repo/packaging/arch/cretopass-gui/PKGBUILD:ro" \
-        "$IMAGE_TAG" bash -euo pipefail -c '
+        "$IMAGE_TAG" bash -uo pipefail -c '
         SRCDEST=/home/builder/target
         export SRCDEST
         export CARGO_HOME=/home/builder/.cargo
@@ -76,25 +76,35 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         # ---------------------------------------------------------------
         echo "<INFO>Building package: cretopass</INFO>"
         cd /home/builder/repo/packaging/arch/cretopass
-        makepkg --syncdeps --cleanbuild --force --noconfirm
+        if ! makepkg --syncdeps --cleanbuild --force --noconfirm; then
+            echo "<ERROR>makepkg failed for cretopass</ERROR>"
+            exit 1
+        fi
 
         CRETOPASS_PKG=$(ls "$PKGDEST"/cretopass-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
+        if [[ -z "$CRETOPASS_PKG" ]]; then
+            echo "<ERROR>cretopass package not found in $PKGDEST</ERROR>"
+            exit 1
+        fi
 
         echo "<INFO>namcap: cretopass</INFO>"
         NAMCAP_OUT=$(namcap "$CRETOPASS_PKG")
         echo "<NAMCAP>$NAMCAP_OUT</NAMCAP>"
 
         echo "<INFO>Installing cretopass</INFO>"
-        sudo pacman -U --noconfirm "$CRETOPASS_PKG"
+        if ! sudo pacman -U --noconfirm "$CRETOPASS_PKG"; then
+            echo "<ERROR>Failed to install cretopass</ERROR>"
+            exit 1
+        fi
 
         echo "<INFO>Smoke testing cretopass</INFO>"
-        cretopass --help >/dev/null
-        cretopass --version | grep -q "$VERSION"
-        test -f /usr/bin/cretopass
-        test -f /usr/share/man/man1/cretopass.1
-        test -f /usr/share/bash-completion/completions/cretopass
-        test -f /usr/share/zsh/site-functions/_cretopass
-        test -f /usr/share/fish/vendor_completions.d/cretopass.fish
+        cretopass --help >/dev/null || { echo "<ERROR>cretopass --help failed</ERROR>"; exit 1; }
+        cretopass --version | grep -q "$VERSION" || { echo "<ERROR>cretopass --version mismatch</ERROR>"; exit 1; }
+        test -f /usr/bin/cretopass || { echo "<ERROR>/usr/bin/cretopass missing</ERROR>"; exit 1; }
+        test -f /usr/share/man/man1/cretopass.1 || { echo "<ERROR>man page missing</ERROR>"; exit 1; }
+        test -f /usr/share/bash-completion/completions/cretopass || { echo "<ERROR>bash completion missing</ERROR>"; exit 1; }
+        test -f /usr/share/zsh/site-functions/_cretopass || { echo "<ERROR>zsh completion missing</ERROR>"; exit 1; }
+        test -f /usr/share/fish/vendor_completions.d/cretopass.fish || { echo "<ERROR>fish completion missing</ERROR>"; exit 1; }
         echo "<INFO>cretopass OK</INFO>"
 
         # ---------------------------------------------------------------
@@ -102,24 +112,34 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         # ---------------------------------------------------------------
         echo "<INFO>Building package: cretopass-gui</INFO>"
         cd /home/builder/repo/packaging/arch/cretopass-gui
-        makepkg --syncdeps --cleanbuild --force --noconfirm
+        if ! makepkg --syncdeps --cleanbuild --force --noconfirm; then
+            echo "<ERROR>makepkg failed for cretopass-gui</ERROR>"
+            exit 1
+        fi
 
         CRETOPASS_GUI_PKG=$(ls "$PKGDEST"/cretopass-gui-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
+        if [[ -z "$CRETOPASS_GUI_PKG" ]]; then
+            echo "<ERROR>cretopass-gui package not found in $PKGDEST</ERROR>"
+            exit 1
+        fi
 
         echo "<INFO>namcap: cretopass-gui</INFO>"
         NAMCAP_OUT=$(namcap "$CRETOPASS_GUI_PKG")
         echo "<NAMCAP>$NAMCAP_OUT</NAMCAP>"
 
         echo "<INFO>Installing cretopass-gui</INFO>"
-        sudo pacman -U --noconfirm "$CRETOPASS_GUI_PKG"
+        if ! sudo pacman -U --noconfirm "$CRETOPASS_GUI_PKG"; then
+            echo "<ERROR>Failed to install cretopass-gui</ERROR>"
+            exit 1
+        fi
 
         echo "<INFO>Smoke testing cretopass-gui</INFO>"
-        desktop-file-validate /usr/share/applications/cretopass-gui.desktop
+        desktop-file-validate /usr/share/applications/cretopass-gui.desktop || { echo "<ERROR>desktop file validation failed</ERROR>"; exit 1; }
         for size in 16 22 24 32 48 64 128 256 512; do
-            test -f "/usr/share/icons/hicolor/${size}x${size}/apps/cretopass-gui.png"
+            test -f "/usr/share/icons/hicolor/${size}x${size}/apps/cretopass-gui.png" || { echo "<ERROR>icon ${size}x${size} missing</ERROR>"; exit 1; }
         done
-        test -f /usr/share/icons/hicolor/scalable/apps/cretopass-gui.svg
-        test -f /usr/share/icons/hicolor/symbolic/apps/cretopass-gui-symbolic.svg
+        test -f /usr/share/icons/hicolor/scalable/apps/cretopass-gui.svg || { echo "<ERROR>scalable icon missing</ERROR>"; exit 1; }
+        test -f /usr/share/icons/hicolor/symbolic/apps/cretopass-gui-symbolic.svg || { echo "<ERROR>symbolic icon missing</ERROR>"; exit 1; }
         echo "<INFO>cretopass-gui OK</INFO>"
 
         echo "<INFO>All AUR package tests passed</INFO>"
