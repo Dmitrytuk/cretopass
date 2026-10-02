@@ -71,6 +71,8 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         export PKGDEST=/tmp/makepkg-pkg
         mkdir -p "$PKGDEST"
 
+        AUR_ERRORS=false
+
         # ---------------------------------------------------------------
         # cretopass
         # ---------------------------------------------------------------
@@ -98,13 +100,13 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         fi
 
         echo "<INFO>Smoke testing cretopass</INFO>"
-        cretopass --help >/dev/null || { echo "<ERROR>cretopass --help failed</ERROR>"; exit 1; }
-        cretopass --version | grep -q "$VERSION" || { echo "<ERROR>cretopass --version mismatch</ERROR>"; exit 1; }
-        test -f /usr/bin/cretopass || { echo "<ERROR>/usr/bin/cretopass missing</ERROR>"; exit 1; }
-        test -f /usr/share/man/man1/cretopass.1 || { echo "<ERROR>man page missing</ERROR>"; exit 1; }
-        test -f /usr/share/bash-completion/completions/cretopass || { echo "<ERROR>bash completion missing</ERROR>"; exit 1; }
-        test -f /usr/share/zsh/site-functions/_cretopass || { echo "<ERROR>zsh completion missing</ERROR>"; exit 1; }
-        test -f /usr/share/fish/vendor_completions.d/cretopass.fish || { echo "<ERROR>fish completion missing</ERROR>"; exit 1; }
+        cretopass --help >/dev/null || { echo "<ERROR>cretopass --help failed</ERROR>"; AUR_ERRORS=true; }
+        cretopass --version | grep -q "$VERSION" || { echo "<ERROR>cretopass --version mismatch</ERROR>"; AUR_ERRORS=true; }
+        test -f /usr/bin/cretopass || { echo "<ERROR>/usr/bin/cretopass missing</ERROR>"; AUR_ERRORS=true; }
+        test -f /usr/share/man/man1/cretopass.1 || { echo "<ERROR>man page missing</ERROR>"; AUR_ERRORS=true; }
+        test -f /usr/share/bash-completion/completions/cretopass || { echo "<ERROR>bash completion missing</ERROR>"; AUR_ERRORS=true; }
+        test -f /usr/share/zsh/site-functions/_cretopass || { echo "<ERROR>zsh completion missing</ERROR>"; AUR_ERRORS=true; }
+        test -f /usr/share/fish/vendor_completions.d/cretopass.fish || { echo "<ERROR>fish completion missing</ERROR>"; AUR_ERRORS=true; }
         echo "<INFO>cretopass OK</INFO>"
 
         # ---------------------------------------------------------------
@@ -134,13 +136,18 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         fi
 
         echo "<INFO>Smoke testing cretopass-gui</INFO>"
-        desktop-file-validate /usr/share/applications/cretopass-gui.desktop || { echo "<ERROR>desktop file validation failed</ERROR>"; exit 1; }
+        desktop-file-validate /usr/share/applications/cretopass-gui.desktop || { echo "<ERROR>desktop file validation failed</ERROR>"; AUR_ERRORS=true; }
         for size in 16 22 24 32 48 64 128 256 512; do
-            test -f "/usr/share/icons/hicolor/${size}x${size}/apps/cretopass-gui.png" || { echo "<ERROR>icon ${size}x${size} missing</ERROR>"; exit 1; }
+            test -f "/usr/share/icons/hicolor/${size}x${size}/apps/cretopass-gui.png" || { echo "<ERROR>icon ${size}x${size} missing</ERROR>"; AUR_ERRORS=true; }
         done
-        test -f /usr/share/icons/hicolor/scalable/apps/cretopass-gui.svg || { echo "<ERROR>scalable icon missing</ERROR>"; exit 1; }
-        test -f /usr/share/icons/hicolor/symbolic/apps/cretopass-gui-symbolic.svg || { echo "<ERROR>symbolic icon missing</ERROR>"; exit 1; }
+        test -f /usr/share/icons/hicolor/scalable/apps/cretopass-gui.svg || { echo "<ERROR>scalable icon missing</ERROR>"; AUR_ERRORS=true; }
+        test -f /usr/share/icons/hicolor/symbolic/apps/cretopass-gui-symbolic.svg || { echo "<ERROR>symbolic icon missing</ERROR>"; AUR_ERRORS=true; }
         echo "<INFO>cretopass-gui OK</INFO>"
+
+        if [[ "$AUR_ERRORS" == true ]]; then
+            echo "<ERROR>One or more AUR smoke tests failed</ERROR>"
+            exit 1
+        fi
 
         echo "<INFO>All AUR package tests passed</INFO>"
     '; then
