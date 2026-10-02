@@ -78,13 +78,14 @@ pub fn decrypt_to_node(data: &[u8], passphrase: &str) -> Result<Node, FileHandli
     json_to_node(&json).map_err(FileHandlingError::Serde)
 }
 
-/// Saves a Node tree to an age-encrypted file with an atomic write and a
-/// `.bak` backup of the previous version.
+/// Saves a Node tree to an age-encrypted file with an atomic write.
 ///
 /// The new ciphertext is written to a temporary file in the same directory,
 /// flushed and `sync`ed, then atomically renamed over the target path so a
 /// crash mid-write never leaves a truncated/corrupt vault. The previous file
-/// (if any) is preserved as `{path}.bak` for recovery.
+/// is temporarily preserved as `{path}.bak` during the write and removed
+/// again once the save succeeds; it only survives if the process is
+/// interrupted mid-save.
 pub fn save_tree(root: &Node, path: &str, passphrase: &[u8]) -> Result<(), FileHandlingError> {
     let passphrase_str = std::str::from_utf8(passphrase)
         .map_err(|_| FileHandlingError::InvalidPassphraseEncoding)?;
@@ -449,7 +450,8 @@ mod tests {
         );
         save_tree(&mutated, &path, passphrase).unwrap();
 
-        assert!(fs::metadata(&backup_path).is_ok());
+        // After a successful save the temporary backup is removed again.
+        assert!(fs::metadata(&backup_path).is_err());
 
         let data = fs::read(&path).unwrap();
         let decoded = decrypt_to_node(&data, passphrase_str).unwrap();

@@ -1,0 +1,137 @@
+.TH CRETOPASS 1 "2026" "cretopass 1.0.0" "User Commands"
+.SH NAME
+cretopass \- terminal-based secret keeper with vim-style navigation
+.SH SYNOPSIS
+.B cretopass
+.SH DESCRIPTION
+.B cretopass
+is a terminal user interface (TUI) application for managing secrets.
+Secrets are organized as a tree of nodes; each node carries a name, a
+description, and optional extra fields (Login, Password, or Custom).
+.PP
+All data is stored in a single encrypted file of the user's choosing,
+protected by a passphrase using age encryption (scrypt key derivation).
+There is no cloud service, no network access, and no telemetry. Decryption
+happens only in process memory; sensitive buffers are zeroized on release.
+Every mutation is auto-saved atomically: the new ciphertext is written to a
+temporary file, synced, then renamed over the original path. A transient
+.I {file}.bak
+copy of the previous version exists only during the write and is removed
+once the save succeeds; it survives only if a save is interrupted.
+.PP
+On startup a settings menu is shown where the user can open an existing
+secret file, create a new one, or select from recently used files.
+.SH USAGE
+The application is controlled entirely by keyboard. The key bindings are
+listed below.
+.SS "Tree view (normal mode)"
+.TP
+.BR j " / " k
+Move selection down / up.
+.TP
+.BR h " / " l
+Collapse / expand node. On a leaf node, \fBl\fP opens the detail overlay.
+.TP
+.B Enter
+Toggle expansion on a parent node, open detail on a leaf node.
+.TP
+.BR Ctrl+Enter " / " i
+Open the detail overlay for any node.
+.TP
+.B d d
+Cut the selected node (press \fBd\fP twice). The root node cannot be cut.
+.TP
+.BR p " / " P
+Paste the clipboard node as a sibling / as a child of the selected node.
+.TP
+.B a
+Add a sibling after the selected node (falls back to child when the root
+is selected).
+.TP
+.B A
+Add a child of the selected node.
+.TP
+.B /
+Start a search. Type the query, \fBEnter\fP to confirm (highlights stay,
+navigation is freed), \fBEsc\fP to cancel. While a search is active,
+\fBj\fP/\fBk\fP move only between matched nodes.
+.TP
+.B Esc
+Clear search highlights.
+.TP
+.B H
+Return to the settings menu.
+.TP
+.BR q " / " Ctrl+C
+Quit the application.
+.SS "Detail overlay"
+.TP
+.BR j " / " k
+Navigate rows (name, description, login, password, custom fields).
+.TP
+.B Enter
+Copy the selected row's data to the system clipboard. A "Copied!" alert is
+shown; any key dismisses it. Clipboard targets: \fBwl-copy\fP/\fBxclip\fP/
+\fBxsel\fP on Linux, \fBpbcopy\fP on macOS.
+.TP
+.B i
+Edit the node.
+.TP
+.BR Esc " / " Space
+Close the overlay. Password values are displayed masked (\fB*****\fP).
+.SS "Add / Edit form"
+.TP
+.BR Tab " / " Up " / " Down
+Switch between fields.
+.TP
+.B Enter
+Save the node. An empty name defaults to "Untitled".
+.TP
+.B Esc
+Cancel. If data was changed, a "Discard changes?" popup appears:
+\fBEnter\fP/\fBy\fP discards, \fBn\fP/\fBEsc\fP returns to editing.
+.TP
+.BR Left " / " Right " / " Home " / " End
+Move the cursor within a field.
+.TP
+.B Enter (on "+ Add Field")
+Add an extra field; pick its type from a popup (\fBj\fP/\fBk\fP or
+\fB1\fP/\fB2\fP/\fB3\fP to choose, \fBEnter\fP to confirm). Custom fields
+prompt for a name first.
+.TP
+.B Delete (on an extra field)
+Delete the field after confirmation (\fBy\fP).
+.PP
+Password field values display as \fB*****\fP when not focused; the raw
+value is shown only while the cursor is inside the field.
+.SH FILES
+.TP
+.I <secret file>
+The age-encrypted secret file; its location is chosen by the user.
+.TP
+.I <secret file>.bak
+Transient copy of the previous version; exists only during a save, or after
+an interrupted one. Encrypted with the same passphrase.
+.TP
+.I ~/.config/cretopass/recent_files.json
+Recently used files list and application settings.
+.SH SECURITY NOTES
+The passphrase is the only protection for the secret file. There is no
+recovery mechanism: if the passphrase is lost, the data cannot be
+decrypted. Keep independent backups of the secret file.
+.PP
+Data copied to the system clipboard may remain readable by other
+applications until overwritten.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+An error occurred (a message is printed to stderr).
+.SH BUGS
+Report bugs at the project repository:
+.IR https://github.com/Dmitrytuk/cretopass/issues .
+.SH LICENSE
+MIT. See \fI/usr/share/licenses/cretopass/LICENSE\fP and
+\fI/usr/share/licenses/cretopass/LICENSE-THIRD-PARTY\fP.
