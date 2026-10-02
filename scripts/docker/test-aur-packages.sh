@@ -73,6 +73,11 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
 
         AUR_ERRORS=false
 
+        echo "<INFO>Tarball: man page and packaging paths</INFO>"
+        tar tzf "/home/builder/target/cretopass-${VERSION}.tar.gz" | grep -E "(cretopass\.1|packaging/arch/cretopass/)" || echo "<ERROR>no packaging files in tarball</ERROR>"
+        echo "<INFO>PKGBUILD man install line</INFO>"
+        grep -n "cretopass.1" /home/builder/repo/packaging/arch/cretopass/PKGBUILD || echo "<ERROR>no cretopass.1 reference in PKGBUILD</ERROR>"
+
         # ---------------------------------------------------------------
         # cretopass
         # ---------------------------------------------------------------
@@ -82,6 +87,15 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
             echo "<ERROR>makepkg failed for cretopass</ERROR>"
             exit 1
         fi
+
+        echo "<INFO>makepkg BUILDDIR listing</INFO>"
+        ls -la "$BUILDDIR" 2>/dev/null || echo "<ERROR>BUILDDIR not found</ERROR>"
+        echo "<INFO>makepkg srcdir: find cretopass.1 under BUILDDIR</INFO>"
+        find "$BUILDDIR" -name "cretopass.1" 2>/dev/null || echo "<ERROR>no cretopass.1 in BUILDDIR</ERROR>"
+        echo "<INFO>makepkg pkgdir: find man dirs under BUILDDIR</INFO>"
+        find "$BUILDDIR" -path "*/man*" 2>/dev/null || echo "<ERROR>no man dirs in BUILDDIR</ERROR>"
+        echo "<INFO>makepkg pkgdir: man1 tree (from PKGDEST maybe)</INFO>"
+        ls -laR "$PKGDEST"/usr/share/man/ 2>/dev/null || echo "<INFO>no man dirs in PKGDEST either</INFO>"
 
         CRETOPASS_PKG=$(ls "$PKGDEST"/cretopass-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
         if [[ -z "$CRETOPASS_PKG" ]]; then
