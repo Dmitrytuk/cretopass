@@ -152,6 +152,8 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
     '; then
         fail "AUR package tests failed"
     fi
+
+    echo "<INFO>Running AUR package tests in container ended.</INFO>"
 fi
 
 echo "<INFO>Cleaning up</INFO>"
