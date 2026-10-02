@@ -1,39 +1,43 @@
 #!/usr/bin/env bash
 set -o pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEST_SCRIPT="$SCRIPT_DIR/test-aur-packages.sh"
+main() {
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    TEST_SCRIPT="$SCRIPT_DIR/test-aur-packages.sh"
 
-VERBOSE=false
+    VERBOSE=false
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -v) VERBOSE=true; shift ;;
-        -h)
-            echo "Wrapper that runs AUR package tests with filtered output."
-            echo ""
-            echo "Runs test-aur-packages.sh. By default filters output to <INFO>/<ERROR>/<NAMCAP> tags."
-            echo ""
-            echo "Flags:"
-            echo "  -v    Full verbose output (run test-aur-packages.sh as-is)"
-            echo "  -h    Show this help message"
-            exit 0
-            ;;
-        *)  echo "Usage: $0 [-v] [-h]" >&2; exit 2 ;;
-    esac
-done
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -v) VERBOSE=true; shift ;;
+            -h)
+                echo "Wrapper that runs AUR package tests with filtered output."
+                echo ""
+                echo "Runs test-aur-packages.sh. By default filters output to <INFO>/<ERROR>/<NAMCAP> tags."
+                echo ""
+                echo "Flags:"
+                echo "  -v    Full verbose output (run test-aur-packages.sh as-is)"
+                echo "  -h    Show this help message"
+                return 0
+                ;;
+            *)  echo "Usage: $0 [-v] [-h]" >&2; return 2 ;;
+        esac
+    done
 
-if [[ "$VERBOSE" == true ]]; then
-    exec "$TEST_SCRIPT"
-fi
+    if [[ "$VERBOSE" == true ]]; then
+        exec "$TEST_SCRIPT"
+    fi
 
-if ! command -v pv >/dev/null 2>&1; then
-    echo "ERROR: pv is required. Install it or use -v for full output." >&2
-    exit 1
-fi
-if ! command -v perl >/dev/null 2>&1; then
-    echo "ERROR: perl is required. Install it or use -v for full output." >&2
-    exit 1
-fi
+    if ! command -v pv >/dev/null 2>&1; then
+        echo "ERROR: pv is required. Install it or use -v for full output." >&2
+        return 1
+    fi
+    if ! command -v perl >/dev/null 2>&1; then
+        echo "ERROR: perl is required. Install it or use -v for full output." >&2
+        return 1
+    fi
 
-"$TEST_SCRIPT" 2>&1 | pv | perl -0777 -ne 'print "$&\n" while /<(INFO|ERROR|NAMCAP)>.*?<\/\1>/gs'
+    "$TEST_SCRIPT" 2>&1 | pv | perl -0777 -ne 'print "$&\n" while /<(INFO|ERROR|NAMCAP)>.*?<\/\1>/gs'
+}
+
+main "$@"
