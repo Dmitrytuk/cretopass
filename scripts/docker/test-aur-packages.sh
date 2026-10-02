@@ -89,25 +89,18 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
             exit 1
         fi
 
-        echo "<INFO>man-related files inside .pkg.tar.zst</INFO>"
-        tar tf "$CRETOPASS_PKG" | grep man | while read -r line; do echo "<INFO>  $line</INFO>"; done
-        if [ ${PIPESTATUS[0]} -ne 0 ]; then echo "<ERROR>no man-related files in package tarball</ERROR>"; fi
-
         echo "<INFO>namcap: cretopass</INFO>"
         NAMCAP_OUT=$(namcap "$CRETOPASS_PKG")
         echo "<NAMCAP>$NAMCAP_OUT</NAMCAP>"
 
         echo "<INFO>Installing cretopass</INFO>"
+        sudo sed -i "s|^NoExtract.*usr/share/man/.*|# MUTED BY TEST: &|" /etc/pacman.conf
         if ! sudo pacman -U --noconfirm "$CRETOPASS_PKG"; then
             echo "<ERROR>Failed to install cretopass</ERROR>"
             exit 1
         fi
 
         echo "<INFO>Smoke testing cretopass</INFO>"
-        echo "<INFO>pacman.conf NoExtract lines</INFO>"
-        grep -i "NoExtract" /etc/pacman.conf | while read -r line; do echo "<INFO>  $line</INFO>"; done
-        echo "<INFO>man dirs under /usr/share after install</INFO>"
-        find /usr/share -type d -name "man*" 2>/dev/null | while read -r d; do echo "<INFO>  dir: $d</INFO>"; done
         cretopass --help >/dev/null || { echo "<ERROR>cretopass --help failed</ERROR>"; AUR_ERRORS=true; }
         cretopass --version | grep -q "$VERSION" || { echo "<ERROR>cretopass --version mismatch</ERROR>"; AUR_ERRORS=true; }
         test -f /usr/bin/cretopass || { echo "<ERROR>/usr/bin/cretopass missing</ERROR>"; AUR_ERRORS=true; }
@@ -120,6 +113,7 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         # ---------------------------------------------------------------
         # cretopass-gui
         # ---------------------------------------------------------------
+        sudo sed -i "s|^# MUTED BY TEST: ||" /etc/pacman.conf
         echo "<INFO>Building package: cretopass-gui</INFO>"
         cd /home/builder/repo/packaging/arch/cretopass-gui
         if ! makepkg --syncdeps --cleanbuild --force --noconfirm; then
