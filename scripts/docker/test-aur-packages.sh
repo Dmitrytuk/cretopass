@@ -145,7 +145,6 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         echo "<INFO>cretopass-gui OK</INFO>"
 
         if [[ "$AUR_ERRORS" == true ]]; then
-            echo "<ERROR>One or more AUR smoke tests failed</ERROR>"
             exit 1
         fi
 
