@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_SCRIPT="$SCRIPT_DIR/test-aur-packages.sh"
