@@ -102,6 +102,8 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         echo "<INFO>makepkg find: man dirs under BUILDDIR</INFO>"
         find "$BUILDDIR" -type d -name "man*" 2>/dev/null | while read -r f; do echo "<INFO>  found: $f</INFO>"; done
         if [ ${PIPESTATUS[0]} -ne 0 ]; then echo "<ERROR>no man dirs in BUILDDIR</ERROR>"; fi
+        echo "<INFO>makepkg pkgdir: list files inside man1</INFO>"
+        ls -la "$BUILDDIR"/cretopass/pkg/cretopass/usr/share/man/man1/ 2>/dev/null | while read -r line; do echo "<INFO>  $line</INFO>"; done
 
         CRETOPASS_PKG=$(ls "$PKGDEST"/cretopass-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
         if [[ -z "$CRETOPASS_PKG" ]]; then
