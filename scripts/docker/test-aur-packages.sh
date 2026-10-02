@@ -73,11 +73,6 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
 
         AUR_ERRORS=false
 
-        echo "<INFO>Tarball: man page and packaging paths</INFO>"
-        tar tzf "/home/builder/target/cretopass-${VERSION}.tar.gz" | grep -E "(cretopass\.1|packaging/arch/cretopass/)" || echo "<ERROR>no packaging files in tarball</ERROR>"
-        echo "<INFO>PKGBUILD man install line</INFO>"
-        grep -n "cretopass.1" /home/builder/repo/packaging/arch/cretopass/PKGBUILD || echo "<ERROR>no cretopass.1 reference in PKGBUILD</ERROR>"
-
         # ---------------------------------------------------------------
         # cretopass
         # ---------------------------------------------------------------
@@ -87,23 +82,6 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
             echo "<ERROR>makepkg failed for cretopass</ERROR>"
             exit 1
         fi
-
-        echo "<INFO>makepkg BUILDDIR top-level</INFO>"
-        ls -la "$BUILDDIR" 2>/dev/null | while read -r line; do echo "<INFO>  $line</INFO>"; done
-        echo "<INFO>makepkg BUILDDIR/src contents</INFO>"
-        if [ -d "$BUILDDIR/src" ]; then
-            ls -la "$BUILDDIR/src" 2>/dev/null | while read -r line; do echo "<INFO>  $line</INFO>"; done
-        else
-            echo "<ERROR>BUILDDIR/src not found</ERROR>"
-        fi
-        echo "<INFO>makepkg find: cretopass.1 under BUILDDIR</INFO>"
-        find "$BUILDDIR" -name "cretopass.1" 2>/dev/null | while read -r f; do echo "<INFO>  found: $f</INFO>"; done
-        if [ ${PIPESTATUS[0]} -ne 0 ]; then echo "<ERROR>no cretopass.1 in BUILDDIR</ERROR>"; fi
-        echo "<INFO>makepkg find: man dirs under BUILDDIR</INFO>"
-        find "$BUILDDIR" -type d -name "man*" 2>/dev/null | while read -r f; do echo "<INFO>  found: $f</INFO>"; done
-        if [ ${PIPESTATUS[0]} -ne 0 ]; then echo "<ERROR>no man dirs in BUILDDIR</ERROR>"; fi
-        echo "<INFO>makepkg pkgdir: list files inside man1</INFO>"
-        ls -la "$BUILDDIR"/cretopass/pkg/cretopass/usr/share/man/man1/ 2>/dev/null | while read -r line; do echo "<INFO>  $line</INFO>"; done
 
         CRETOPASS_PKG=$(ls "$PKGDEST"/cretopass-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
         if [[ -z "$CRETOPASS_PKG" ]]; then
@@ -122,10 +100,18 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
         fi
 
         echo "<INFO>Smoke testing cretopass</INFO>"
+        echo "<INFO>DEBUG: /usr/share/man/man1/ contents after install</INFO>"
+        if [ -d /usr/share/man/man1 ]; then
+            ls -la /usr/share/man/man1/ | while read -r line; do echo "<INFO>  $line</INFO>"; done
+        else
+            echo "<ERROR>/usr/share/man/man1 does not exist after install</ERROR>"
+        fi
+        echo "<INFO>DEBUG: all /usr/share/man directories</INFO>"
+        find /usr/share/man -type d 2>/dev/null | while read -r d; do echo "<INFO>  dir: $d</INFO>"; done
         cretopass --help >/dev/null || { echo "<ERROR>cretopass --help failed</ERROR>"; AUR_ERRORS=true; }
         cretopass --version | grep -q "$VERSION" || { echo "<ERROR>cretopass --version mismatch</ERROR>"; AUR_ERRORS=true; }
         test -f /usr/bin/cretopass || { echo "<ERROR>/usr/bin/cretopass missing</ERROR>"; AUR_ERRORS=true; }
-        test -f /usr/share/man/man1/cretopass.1 || { echo "<ERROR>man page missing</ERROR>"; AUR_ERRORS=true; }
+        test -f /usr/share/man/man1/cretopass.1.gz || { echo "<ERROR>man page missing</ERROR>"; AUR_ERRORS=true; }
         test -f /usr/share/bash-completion/completions/cretopass || { echo "<ERROR>bash completion missing</ERROR>"; AUR_ERRORS=true; }
         test -f /usr/share/zsh/site-functions/_cretopass || { echo "<ERROR>zsh completion missing</ERROR>"; AUR_ERRORS=true; }
         test -f /usr/share/fish/vendor_completions.d/cretopass.fish || { echo "<ERROR>fish completion missing</ERROR>"; AUR_ERRORS=true; }
