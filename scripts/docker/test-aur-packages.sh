@@ -88,14 +88,20 @@ if [[ "$FAILED" != true && -n "$VERSION" ]]; then
             exit 1
         fi
 
-        echo "<INFO>makepkg BUILDDIR listing</INFO>"
-        ls -la "$BUILDDIR" 2>/dev/null || echo "<ERROR>BUILDDIR not found</ERROR>"
-        echo "<INFO>makepkg srcdir: find cretopass.1 under BUILDDIR</INFO>"
-        find "$BUILDDIR" -name "cretopass.1" 2>/dev/null || echo "<ERROR>no cretopass.1 in BUILDDIR</ERROR>"
-        echo "<INFO>makepkg pkgdir: find man dirs under BUILDDIR</INFO>"
-        find "$BUILDDIR" -path "*/man*" 2>/dev/null || echo "<ERROR>no man dirs in BUILDDIR</ERROR>"
-        echo "<INFO>makepkg pkgdir: man1 tree (from PKGDEST maybe)</INFO>"
-        ls -laR "$PKGDEST"/usr/share/man/ 2>/dev/null || echo "<INFO>no man dirs in PKGDEST either</INFO>"
+        echo "<INFO>makepkg BUILDDIR top-level</INFO>"
+        ls -la "$BUILDDIR" 2>/dev/null | while read -r line; do echo "<INFO>  $line</INFO>"; done
+        echo "<INFO>makepkg BUILDDIR/src contents</INFO>"
+        if [ -d "$BUILDDIR/src" ]; then
+            ls -la "$BUILDDIR/src" 2>/dev/null | while read -r line; do echo "<INFO>  $line</INFO>"; done
+        else
+            echo "<ERROR>BUILDDIR/src not found</ERROR>"
+        fi
+        echo "<INFO>makepkg find: cretopass.1 under BUILDDIR</INFO>"
+        find "$BUILDDIR" -name "cretopass.1" 2>/dev/null | while read -r f; do echo "<INFO>  found: $f</INFO>"; done
+        if [ ${PIPESTATUS[0]} -ne 0 ]; then echo "<ERROR>no cretopass.1 in BUILDDIR</ERROR>"; fi
+        echo "<INFO>makepkg find: man dirs under BUILDDIR</INFO>"
+        find "$BUILDDIR" -type d -name "man*" 2>/dev/null | while read -r f; do echo "<INFO>  found: $f</INFO>"; done
+        if [ ${PIPESTATUS[0]} -ne 0 ]; then echo "<ERROR>no man dirs in BUILDDIR</ERROR>"; fi
 
         CRETOPASS_PKG=$(ls "$PKGDEST"/cretopass-*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1)
         if [[ -z "$CRETOPASS_PKG" ]]; then
