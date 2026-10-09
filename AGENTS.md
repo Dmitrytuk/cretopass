@@ -44,7 +44,7 @@ cargo doc --open                     # generate and open API docs from doc comme
 | `/` | Search (type, `Enter` confirm, `Esc` cancel) |
 | `Esc` (normal) | Clear search highlights |
 | `q` / `Ctrl+C` | Quit entire app |
-| `H` (shift+h) | Return to settings menu |
+| `H` (shift+h) | Return to home screen |
 
 Detail overlay: `j`/`k`=navigate rows, `Enter`=copy row data to clipboard, `i`=edit, `Esc`/`Space`=close. Shows extra fields (Login/Password/Custom) below description. Selected row highlighted with `▸`. Copy shows "Copied!" alert popup — any key dismisses it.
 
@@ -65,11 +65,10 @@ Password field values display as `*****` in the detail overlay and when unfocuse
   - `src/tree/node.rs`: Node struct
   - `src/tree/widget.rs`: `TreeState`, `InputMode`, `TreeWidget` — also `current_node_ref()`, `find_node_ref()`
   - `src/tree/app_tree.rs`: event loop, key handlers, overlay rendering — uses `file_handling::save_tree` for auto-save
-  - `src/settings.rs`: module root, re-exports `ui`, `active_file`, and `utils`
-  - `src/settings/ui.rs`: settings GUI — `SettingsState`, `run()`, `render()`
-  - `src/settings/widget.rs`: `handle_modal_key` dispatch, 5 per-modal handlers, uses `file_handling` for all I/O
-  - `src/settings/active_file.rs`: opened-file state — path, passphrase, Node
-  - `src/settings/utils.rs`: `AppSettings`, `config_dir`, `push_recent_file`, `save_settings`/`load_settings` (rkyv format, raw I/O via `file_handling`)
+  - `src/vault.rs`: module root, re-exports `active_file`, and `utils`
+  - `src/vault/widget.rs`: `handle_modal_key` dispatch, 5 per-modal handlers, uses `file_handling` for all I/O
+  - `src/vault/active_file.rs`: active vault state — path, master password, Node
+  - `src/vault/utils.rs`: `Configuration`, `config_dir`, `push_recent_secret_file`, `save_config`/`load_config` (rkyv format, raw I/O via `file_handling`)
   - `src/file_browser.rs`: module root, re-exports `FileEntry` from `file_handling`
   - `src/file_browser/state.rs`: `FileBrowserState`, `FileBrowserMode` — uses `file_handling::list_dir`
   - `src/file_browser/render.rs`: all file browser rendering
@@ -79,7 +78,7 @@ Password field values display as `*****` in the detail overlay and when unfocuse
   - `src/crypt/mod.rs`: age-based encrypt/decrypt
 - **Node**: carries `id: Uuid`, `name`, `description`, `extra_fields: Vec<ExtraField>`, `children: Vec<Node>`
 - **ExtraField/FieldType**: `{field_type: Login|Password|Custom(String), value: String}` — `display_value()` masks Password as `*****`
-- **TreeState**: owns root Node, `expanded: HashSet<Uuid>`, `selected: usize`, clipboard, search state, `mode: InputMode`, `active_file_path`, `active_file_passphrase`, `dirty` flag
+- **TreeState**: owns root Node, `expanded: HashSet<Uuid>`, `selected: usize`, cut buffer, search state, `mode: InputMode`, `active_vault_path`, `active_vault_master_password`, `modified` flag
 - **InputMode**: Normal, Search, AwaitingDd, Detail, Adding{name,desc,extra_fields,field,cursor,delete_pending}, Editing{node_id,...}, SelectFieldType, CustomFieldName, ConfirmDeleteField
 - **TreeWidget::render**: DFS flat list with indentation, ▶/▼ icons, ▸ selection arrow, search highlight (DarkGray bg)
 
@@ -98,34 +97,34 @@ Password field values display as `*****` in the detail overlay and when unfocuse
 - j/k constrained to matched nodes only while search mode is active.
 - Enter keeps highlights but frees navigation. Esc clears everything.
 
-## Clipboard (cut/paste)
+## Cut buffer (cut/paste)
 
-- `clipboard: Option<Node>` is copy-style (can paste multiple times).
+- `cut_buffer: Option<Node>` is copy-style (can paste multiple times).
 - System clipboard only used in detail overlay (`c` key). Targets: `pbcopy` (macOS), `wl-copy`/`xclip`/`xsel` (Linux).
 
 ## Dependencies
 
 ratatui 0.28, crossterm 0.28, uuid 1.0 (features: v4, serde), serde 1 (feature: derive), serde_json 1, age 0.11.
 
-## Settings Menu
+## Home Screen
 
-- `cargo run` opens the settings menu first. Navigate with `j`/`k`, select with `Enter`, quit with `q`/`Esc`.
-- "Open secret file" opens a **FileInput modal** to enter a path (or press Enter on empty field for OS file browser). Validates file (≤50MB, age-encrypted header), then opens a **PassphraseInput modal**. On success, launches the tree app with the decrypted data. Wrong passphrase shows a red error bar; modal stays open. `Esc` cancels.
-- "Create new secret file" opens a **FileInput modal** to enter a path/filename. Validates writability via a temp-file probe, then opens the PassphraseInput modal. On success creates an encrypted file with a root node named `"Secrets"` and opens the tree app.
-- **Recent files** loaded from `~/.config/cretopass/recent_files.json`. Each row is selectable — Enter validates the file then opens the PassphraseInput modal.
-- Active file path shown in the window title bar of both Settings and Tree (`" Settings — /path/to/file "` / `" Tree — /path/to/file "`).
-- After successful open+decrypt, the file path is saved to recent files (deduplicated, most recent first).
+- `cargo run` opens the home screen first. Navigate with `j`/`k`, select with `Enter`, quit with `q`/`Esc`.
+- "Open secret file" opens a **FileInput modal** to enter a path (or press Enter on empty field for OS file browser). Validates file (≤50MB, age-encrypted header), then opens a **PassphraseInput modal**. On success, launches the tree with the decrypted data. Wrong master password shows a red error bar; modal stays open. `Esc` cancels.
+- "Create new secret file" opens a **FileInput modal** to enter a path/filename. Validates writability via a temp-file probe, then opens the PassphraseInput modal. On success creates an encrypted file with a root node named `"Secrets"` and opens the tree.
+- **Recent secret files** loaded from `~/.config/cretopass/config.pwd`. Each row is selectable — Enter validates the file then opens the PassphraseInput modal.
+- Active vault path shown in the window title bar of both Home and Tree (`" Home — /path/to/file "` / `" Tree — /path/to/file "`).
+- After successful open+decrypt, the file path is saved to recent secret files (deduplicated, most recent first).
 
 ## Auto-save
 
-- Every mutation (add, edit, cut, paste) sets `TreeState.dirty = true`.
-- On the next event-loop iteration, if a file is loaded (`active_file_path` is Some), `settings::utils::save_tree()` is called.
-- `save_tree()`: (1) copies the current file to `{path}.bak`, (2) serialises `root` to JSON via `file_handling`, (3) encrypts with the stored passphrase via `crypt`, (4) writes to the original path.
+- Every mutation (add, edit, cut, paste) sets `TreeState.modified = true`.
+- On the next event-loop iteration, if a vault is loaded (`active_vault_path` is Some), `file_handling::save_tree()` is called.
+- `save_tree()`: (1) copies the current file to `{path}.bak`, (2) serialises `root` to JSON via `file_handling`, (3) encrypts with the stored master password via `crypt`, (4) writes to the original path.
 - No explicit save keybinding needed — saves are automatic after every change.
 
 ## Quirks & edge cases
 
-- Quit sets `state.quit` flag → event loop breaks → `main()` runs cleanup (LeaveAlternateScreen, disable_raw_mode, show_cursor). `q` in tree app quits everything (including settings). `H` (shift+h) in tree app returns to settings menu.
+- Quit sets `state.quit` flag → event loop breaks → `main()` runs cleanup (LeaveAlternateScreen, disable_raw_mode, show_cursor). `q` in tree quits everything (including home). `H` (shift+h) in tree returns to home screen.
 - Add form defaults empty name to `"Untitled"`.
 - `remove_node()` only targets children (not root). Root cannot be cut.
 - `insert_after()` finds parent, inserts at `pos+1`. `paste_child()` inserts as first child.

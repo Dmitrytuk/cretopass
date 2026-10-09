@@ -35,9 +35,9 @@ pub enum Action {
     SelectType1,
     SelectType2,
     SelectType3,
-    SettingsDelete,
+    ConfigDelete,
     ToggleSetting,
-    SaveSettings,
+    SaveConfig,
     Yes,
     No,
     ExportNode,
@@ -146,25 +146,25 @@ impl Action {
         }
     }
 
-    pub fn from_settings_menu(key: &KeyEvent) -> Self {
+    pub fn from_home(key: &KeyEvent) -> Self {
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => Self::NavDown,
             KeyCode::Char('k') | KeyCode::Up => Self::NavUp,
             KeyCode::Enter => Self::Confirm,
             KeyCode::Char('q') | KeyCode::Char('Q') => Self::Quit,
             KeyCode::Esc => Self::Back,
-            KeyCode::Char('d') | KeyCode::Delete => Self::SettingsDelete,
+            KeyCode::Char('d') | KeyCode::Delete => Self::ConfigDelete,
             KeyCode::Char('H') => Self::ReturnToMenu,
             _ => Self::None,
         }
     }
 
-    pub fn from_app_settings(key: &KeyEvent) -> Self {
+    pub fn from_config(key: &KeyEvent) -> Self {
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => Self::NavDown,
             KeyCode::Up | KeyCode::Char('k') => Self::NavUp,
             KeyCode::Char(' ') => Self::ToggleSetting,
-            KeyCode::Enter => Self::SaveSettings,
+            KeyCode::Enter => Self::SaveConfig,
             KeyCode::Esc => Self::Cancel,
             _ => Self::None,
         }

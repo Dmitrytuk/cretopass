@@ -11,12 +11,12 @@ use ratatui::{backend::Backend, Frame, Terminal};
 use crate::cursor::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
 use crate::file_browser::{self, FileBrowserAction, FileBrowserMode, FileBrowserState};
 use crate::file_handling;
-use crate::settings::active_file::ActiveFileState;
-use crate::settings::utils::{self, AppSettings};
+use crate::vault::active_file::ActiveVaultState;
+use crate::vault::utils::{self, Configuration};
 use crate::theming::Action;
 use crate::theming::{texts, ElementStyle, Icon};
 
-enum SettingsModal {
+enum HomeModal {
     FileBrowser(FileBrowserState),
     PassphraseInput {
         file_path: String,
@@ -25,7 +25,7 @@ enum SettingsModal {
         cursor: usize,
         error: Option<String>,
     },
-    AppSettings {
+    Configuration {
         setting_idx: usize,
     },
     Alert {
@@ -56,29 +56,29 @@ enum SettingsModal {
     },
 }
 
-pub struct SettingsState {
+pub struct HomeState {
     selected: usize,
-    pub settings: AppSettings,
+    pub config: Configuration,
     pub quit: bool,
-    pub active_file: Option<ActiveFileState>,
-    modal: Option<SettingsModal>,
+    pub active_vault: Option<ActiveVaultState>,
+    modal: Option<HomeModal>,
     pub status: Option<&'static str>,
 }
 
-impl Default for SettingsState {
+impl Default for HomeState {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SettingsState {
+impl HomeState {
     pub fn new() -> Self {
-        let settings = utils::load_settings();
-        let modal = if settings.open_last_opened_file_on_startup {
-            settings.last_opened_file.as_ref().and_then(|path| {
+        let config = utils::load_config();
+        let modal = if config.open_last_opened_file_on_startup {
+            config.last_opened_file.as_ref().and_then(|path| {
                 file_handling::validate_encrypted_file(path)
                     .ok()
-                    .map(|data| SettingsModal::PassphraseInput {
+                    .map(|data| HomeModal::PassphraseInput {
                         file_path: path.clone(),
                         file_data: Some(data),
                         passphrase: String::new(),
@@ -91,16 +91,16 @@ impl SettingsState {
         };
         Self {
             selected: 0,
-            settings,
+            config,
             quit: false,
-            active_file: None,
+            active_vault: None,
             modal,
             status: None,
         }
     }
 
     fn total_navigable(&self) -> usize {
-        texts::MENU_ITEMS.len() + self.settings.recent_files.len()
+        texts::MENU_ITEMS.len() + self.config.recent_files.len()
     }
 
     fn select_next(&mut self) {
@@ -121,7 +121,7 @@ impl SettingsState {
 }
 
 pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
-    let mut state = SettingsState::new();
+    let mut state = HomeState::new();
     loop {
         if state.quit {
             break Ok(());
@@ -140,10 +140,10 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             let is_file_browser = state
                 .modal
                 .as_ref()
-                .is_some_and(|m| matches!(m, SettingsModal::FileBrowser(_)));
+                .is_some_and(|m| matches!(m, HomeModal::FileBrowser(_)));
 
             if state.modal.is_none() {
-                handle_settings_key(key, &mut state, terminal)?;
+                handle_home_key(key, &mut state, terminal)?;
             } else if is_file_browser {
                 handle_file_browser_key(key, &mut state, terminal)?;
             } else {
@@ -155,12 +155,12 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 
 // ── Settings menu key handling (no modal active) ──
 
-fn handle_settings_key<B: Backend>(
+fn handle_home_key<B: Backend>(
     key: event::KeyEvent,
-    state: &mut SettingsState,
+    state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
-    match Action::from_settings_menu(&key) {
+    match Action::from_home(&key) {
         Action::Quit => state.quit = true,
         Action::NavDown => state.select_next(),
         Action::NavUp => state.select_prev(),
@@ -169,7 +169,7 @@ fn handle_settings_key<B: Backend>(
         }
         Action::Back => {
             if state
-                .active_file
+                .active_vault
                 .as_ref()
                 .and_then(|af| af.node.as_ref())
                 .is_some()
@@ -183,62 +183,62 @@ fn handle_settings_key<B: Backend>(
             let idx = state.selected;
             if idx == 0 {
                 let mut fb = FileBrowserState::new(FileBrowserMode::OpenFile);
-                fb.set_active_file_path(
+                fb.set_active_vault_path(
                     state
-                        .active_file
+                        .active_vault
                         .as_ref()
                         .and_then(|af| af.path.as_ref().map(PathBuf::from)),
                 );
-                state.modal = Some(SettingsModal::FileBrowser(fb));
+                state.modal = Some(HomeModal::FileBrowser(fb));
             } else if idx == 1 {
                 let mut fb = FileBrowserState::new(FileBrowserMode::CreateFile);
-                fb.set_active_file_path(
+                fb.set_active_vault_path(
                     state
-                        .active_file
+                        .active_vault
                         .as_ref()
                         .and_then(|af| af.path.as_ref().map(PathBuf::from)),
                 );
-                state.modal = Some(SettingsModal::FileBrowser(fb));
+                state.modal = Some(HomeModal::FileBrowser(fb));
             } else if idx == 2 {
-                state.modal = Some(SettingsModal::AppSettings { setting_idx: 0 });
+                state.modal = Some(HomeModal::Configuration { setting_idx: 0 });
             } else if idx == 3 {
-                if state.active_file.is_some() {
-                    state.modal = Some(SettingsModal::ChangePwConfirm);
+                if state.active_vault.is_some() {
+                    state.modal = Some(HomeModal::ChangePwConfirm);
                 } else {
-                    state.modal = Some(SettingsModal::Alert {
+                    state.modal = Some(HomeModal::Alert {
                         message: texts::MSG_NO_OPEN_FILE.to_string(),
                     });
                 }
             } else if idx == 4 {
-                if state.active_file.is_some() {
-                    state.modal = Some(SettingsModal::ExportSelectType { selected_type: 0 });
+                if state.active_vault.is_some() {
+                    state.modal = Some(HomeModal::ExportSelectType { selected_type: 0 });
                 } else {
-                    state.modal = Some(SettingsModal::Alert {
+                    state.modal = Some(HomeModal::Alert {
                         message: texts::MSG_NO_OPEN_FILE.to_string(),
                     });
                 }
             } else if idx == 5 {
                 let mut fb = FileBrowserState::new(FileBrowserMode::ImportFile);
-                fb.set_active_file_path(
+                fb.set_active_vault_path(
                     state
-                        .active_file
+                        .active_vault
                         .as_ref()
                         .and_then(|af| af.path.as_ref().map(PathBuf::from)),
                 );
-                state.modal = Some(SettingsModal::FileBrowser(fb));
+                state.modal = Some(HomeModal::FileBrowser(fb));
             } else {
                 let file_idx = idx - texts::MENU_ITEMS.len();
-                if file_idx < state.settings.recent_files.len() {
-                    let file_path: String = state.settings.recent_files[file_idx].clone();
+                if file_idx < state.config.recent_files.len() {
+                    let file_path: String = state.config.recent_files[file_idx].clone();
 
-                    if let Some(ref active_file) = state.active_file {
-                        if active_file.path.as_deref() == Some(&file_path) {
-                            if let Some(ref node) = active_file.node {
+                    if let Some(ref active_vault) = state.active_vault {
+                        if active_vault.path.as_deref() == Some(&file_path) {
+                            if let Some(ref node) = active_vault.node {
                                 let mut tree_state =
                                     crate::tree::widget::TreeState::new(node.clone());
-                                tree_state.active_file_path = Some(file_path);
-                                tree_state.active_file_passphrase = active_file.passphrase.clone();
-                                tree_state.display_full_path = state.settings.display_full_path;
+                                tree_state.active_vault_path = Some(file_path);
+                                tree_state.active_vault_master_password = active_vault.passphrase.clone();
+                                tree_state.display_full_path = state.config.display_full_path;
                                 crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
                                 if !tree_state.return_to_menu {
                                     state.quit = true;
@@ -250,12 +250,12 @@ fn handle_settings_key<B: Backend>(
 
                     match file_handling::validate_encrypted_file(&file_path) {
                         Err(e) => {
-                            state.modal = Some(SettingsModal::Alert {
+                            state.modal = Some(HomeModal::Alert {
                                 message: format!("{e}"),
                             });
                         }
                         Ok(data) => {
-                            state.modal = Some(SettingsModal::PassphraseInput {
+                            state.modal = Some(HomeModal::PassphraseInput {
                                 file_path,
                                 file_data: Some(data),
                                 passphrase: String::new(),
@@ -267,20 +267,20 @@ fn handle_settings_key<B: Backend>(
                 }
             }
         }
-        Action::SettingsDelete => {
+        Action::ConfigDelete => {
             let idx = state.selected;
             if idx >= texts::MENU_ITEMS.len() {
                 let file_idx = idx - texts::MENU_ITEMS.len();
-                if file_idx < state.settings.recent_files.len() {
-                    let path = &state.settings.recent_files[file_idx];
+                if file_idx < state.config.recent_files.len() {
+                    let path = &state.config.recent_files[file_idx];
                     let is_active =
-                        state.active_file.as_ref().and_then(|af| af.path.as_deref()) == Some(path);
+                        state.active_vault.as_ref().and_then(|af| af.path.as_deref()) == Some(path);
                     if is_active {
-                        state.modal = Some(SettingsModal::Alert {
+                        state.modal = Some(HomeModal::Alert {
                             message: texts::MSG_CANNOT_DELETE_OPEN.to_string(),
                         });
                     } else {
-                        state.modal = Some(SettingsModal::DeleteConfirm { path: path.clone() });
+                        state.modal = Some(HomeModal::DeleteConfirm { path: path.clone() });
                     }
                 }
             }
@@ -291,15 +291,15 @@ fn handle_settings_key<B: Backend>(
 }
 
 fn reopen_tree<B: Backend>(
-    state: &mut SettingsState,
+    state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
-    if let Some(ref active_file) = state.active_file {
-        if let Some(ref node) = active_file.node {
+    if let Some(ref active_vault) = state.active_vault {
+        if let Some(ref node) = active_vault.node {
             let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
-            tree_state.active_file_path = active_file.path.clone();
-            tree_state.active_file_passphrase = active_file.passphrase.clone();
-            tree_state.display_full_path = state.settings.display_full_path;
+            tree_state.active_vault_path = active_vault.path.clone();
+            tree_state.active_vault_master_password = active_vault.passphrase.clone();
+            tree_state.display_full_path = state.config.display_full_path;
             crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
             if !tree_state.return_to_menu {
                 state.quit = true;
@@ -313,11 +313,11 @@ fn reopen_tree<B: Backend>(
 
 fn handle_file_browser_key<B: Backend>(
     key: event::KeyEvent,
-    state: &mut SettingsState,
+    state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     let mut modal = match state.modal.take() {
-        Some(SettingsModal::FileBrowser(b)) => b,
+        Some(HomeModal::FileBrowser(b)) => b,
         _ => return Ok(()),
     };
 
@@ -325,26 +325,26 @@ fn handle_file_browser_key<B: Backend>(
 
     match action {
         None => {
-            state.modal = Some(SettingsModal::FileBrowser(modal));
+            state.modal = Some(HomeModal::FileBrowser(modal));
         }
         Some(FileBrowserAction::Cancelled) => {}
         Some(FileBrowserAction::Renamed { from, to }) => {
-            if let Some(ref active_file) = state.active_file {
-                if active_file.path.as_deref() == Some(&from) {
-                    state.active_file.as_mut().unwrap().path = Some(to.clone());
+            if let Some(ref active_vault) = state.active_vault {
+                if active_vault.path.as_deref() == Some(&from) {
+                    state.active_vault.as_mut().unwrap().path = Some(to.clone());
                 }
             }
-            if state.settings.last_opened_file.as_deref() == Some(&from) {
-                state.settings.last_opened_file = Some(to.clone());
+            if state.config.last_opened_file.as_deref() == Some(&from) {
+                state.config.last_opened_file = Some(to.clone());
             }
-            for path in state.settings.recent_files.iter_mut() {
+            for path in state.config.recent_files.iter_mut() {
                 if *path == from {
                     *path = to.clone();
                     break;
                 }
             }
-            let _ = utils::save_settings(&state.settings);
-            state.modal = Some(SettingsModal::FileBrowser(modal));
+            let _ = utils::save_config(&state.config);
+            state.modal = Some(HomeModal::FileBrowser(modal));
         }
         Some(FileBrowserAction::Selected(path)) => {
             let creating = modal.mode == FileBrowserMode::CreateFile;
@@ -352,8 +352,8 @@ fn handle_file_browser_key<B: Backend>(
             if modal.mode == FileBrowserMode::ImportFile {
                 match file_handling::import::import_tree(&path) {
                     Ok(imported_node) => {
-                        if let Some(ref mut af) = state.active_file {
-                            if let Some(ref mut root) = af.node {
+                        if let Some(ref mut active_vault) = state.active_vault {
+                            if let Some(ref mut root) = active_vault.node {
                                 let filename = std::path::Path::new(&path)
                                     .file_stem()
                                     .map(|s| s.to_string_lossy().to_string())
@@ -367,16 +367,16 @@ fn handle_file_browser_key<B: Backend>(
                                 wrapper.children = vec![imported_node];
                                 root.add_child(wrapper);
 
-                                let save_path = match af.path.clone() {
+                                let save_path = match active_vault.path.clone() {
                                     Some(p) => p,
                                     None => {
-                                        state.modal = Some(SettingsModal::Alert {
+                                        state.modal = Some(HomeModal::Alert {
                                             message: texts::MSG_NO_FILE_PATH.to_string(),
                                         });
                                         return Ok(());
                                     }
                                 };
-                                let save_pass = af.passphrase.clone();
+                                let save_pass = active_vault.passphrase.clone();
                                 let save_node = root.clone();
 
                                 state.status = Some(texts::STATUS_SAVING);
@@ -384,33 +384,33 @@ fn handle_file_browser_key<B: Backend>(
                                 match file_handling::save_tree(&save_node, &save_path, &save_pass) {
                                     Err(e) => {
                                         state.status = None;
-                                        state.modal = Some(SettingsModal::Alert {
+                                        state.modal = Some(HomeModal::Alert {
                                             message: format!("{}{}", texts::MSG_SAVE_FAILED, e),
                                         });
                                     }
                                     Ok(()) => {
                                         state.status = None;
-                                        state.modal = Some(SettingsModal::Alert {
+                                        state.modal = Some(HomeModal::Alert {
                                             message: texts::MSG_IMPORT_SUCCESS.to_string(),
                                         });
                                     }
                                 }
                             }
                         } else {
-                            state.modal = Some(SettingsModal::Alert {
+                            state.modal = Some(HomeModal::Alert {
                                 message: texts::MSG_IMPORT_NO_OPEN_FILE.to_string(),
                             });
                         }
                     }
                     Err(e) => {
-                        state.modal = Some(SettingsModal::Alert {
+                        state.modal = Some(HomeModal::Alert {
                             message: format!("{e}"),
                         });
                     }
                 }
             } else if creating {
                 if file_handling::probe_path_writable(&path).is_ok() {
-                    state.modal = Some(SettingsModal::PassphraseInput {
+                    state.modal = Some(HomeModal::PassphraseInput {
                         file_path: path,
                         file_data: None,
                         passphrase: String::new(),
@@ -418,19 +418,19 @@ fn handle_file_browser_key<B: Backend>(
                         error: None,
                     });
                 } else {
-                    state.modal = Some(SettingsModal::Alert {
+                    state.modal = Some(HomeModal::Alert {
                         message: texts::MSG_CANNOT_WRITE.to_string(),
                     });
                 }
             } else {
                 match file_handling::validate_encrypted_file(&path) {
                     Err(e) => {
-                        state.modal = Some(SettingsModal::Alert {
+                        state.modal = Some(HomeModal::Alert {
                             message: format!("{e}"),
                         });
                     }
                     Ok(data) => {
-                        state.modal = Some(SettingsModal::PassphraseInput {
+                        state.modal = Some(HomeModal::PassphraseInput {
                             file_path: path,
                             file_data: Some(data),
                             passphrase: String::new(),
@@ -447,10 +447,10 @@ fn handle_file_browser_key<B: Backend>(
 
 // ── Per-modal key handlers ──
 
-fn handle_app_settings_key(key: event::KeyEvent, state: &mut SettingsState) {
-    match Action::from_app_settings(&key) {
+fn handle_config_key(key: event::KeyEvent, state: &mut HomeState) {
+    match Action::from_config(&key) {
         Action::NavDown => {
-            if let Some(SettingsModal::AppSettings {
+            if let Some(HomeModal::Configuration {
                 ref mut setting_idx,
             }) = state.modal
             {
@@ -458,7 +458,7 @@ fn handle_app_settings_key(key: event::KeyEvent, state: &mut SettingsState) {
             }
         }
         Action::NavUp => {
-            if let Some(SettingsModal::AppSettings {
+            if let Some(HomeModal::Configuration {
                 ref mut setting_idx,
             }) = state.modal
             {
@@ -467,39 +467,39 @@ fn handle_app_settings_key(key: event::KeyEvent, state: &mut SettingsState) {
         }
         Action::ToggleSetting => {
             let idx = match state.modal.as_ref() {
-                Some(SettingsModal::AppSettings { setting_idx }) => *setting_idx,
+                Some(HomeModal::Configuration { setting_idx }) => *setting_idx,
                 _ => return,
             };
             if idx == 0 {
-                state.settings.display_full_path = !state.settings.display_full_path;
+                state.config.display_full_path = !state.config.display_full_path;
             } else {
-                state.settings.open_last_opened_file_on_startup =
-                    !state.settings.open_last_opened_file_on_startup;
+                state.config.open_last_opened_file_on_startup =
+                    !state.config.open_last_opened_file_on_startup;
             }
         }
-        Action::SaveSettings => {
-            let _ = utils::save_settings(&state.settings);
-            state.modal = Some(SettingsModal::Alert {
-                message: texts::MSG_SETTINGS_SAVED.to_string(),
+        Action::SaveConfig => {
+            let _ = utils::save_config(&state.config);
+            state.modal = Some(HomeModal::Alert {
+                message: texts::MSG_CONFIG_SAVED.to_string(),
             });
         }
         Action::Cancel => {
-            state.settings = utils::load_settings();
+            state.config = utils::load_config();
             state.modal = None;
         }
         _ => {}
     }
 }
 
-fn handle_delete_confirm_key(key: event::KeyEvent, state: &mut SettingsState) {
+fn handle_delete_confirm_key(key: event::KeyEvent, state: &mut HomeState) {
     match Action::from_confirm(&key) {
         Action::Yes => {
-            if let Some(SettingsModal::DeleteConfirm { path }) = state.modal.take() {
-                state.settings.recent_files.retain(|f| f != &path);
-                if state.settings.last_opened_file.as_deref() == Some(&path) {
-                    state.settings.last_opened_file = None;
+            if let Some(HomeModal::DeleteConfirm { path }) = state.modal.take() {
+                state.config.recent_files.retain(|f| f != &path);
+                if state.config.last_opened_file.as_deref() == Some(&path) {
+                    state.config.last_opened_file = None;
                 }
-                let _ = utils::save_settings(&state.settings);
+                let _ = utils::save_config(&state.config);
             }
         }
         _ => {
@@ -508,10 +508,10 @@ fn handle_delete_confirm_key(key: event::KeyEvent, state: &mut SettingsState) {
     }
 }
 
-fn handle_change_pw_confirm_key(key: event::KeyEvent, state: &mut SettingsState) {
+fn handle_change_pw_confirm_key(key: event::KeyEvent, state: &mut HomeState) {
     match Action::from_confirm(&key) {
         Action::Yes => {
-            state.modal = Some(SettingsModal::ChangePwInput {
+            state.modal = Some(HomeModal::ChangePwInput {
                 current: String::new(),
                 current_cursor: 0,
                 new_pass: String::new(),
@@ -530,12 +530,12 @@ fn handle_change_pw_confirm_key(key: event::KeyEvent, state: &mut SettingsState)
 
 fn handle_change_pw_input_key<B: Backend>(
     key: event::KeyEvent,
-    state: &mut SettingsState,
+    state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     match Action::from_change_pw_input(&key) {
         Action::NextField => {
-            if let Some(SettingsModal::ChangePwInput {
+            if let Some(HomeModal::ChangePwInput {
                 ref mut focused, ..
             }) = state.modal
             {
@@ -543,7 +543,7 @@ fn handle_change_pw_input_key<B: Backend>(
             }
         }
         Action::PrevField => {
-            if let Some(SettingsModal::ChangePwInput {
+            if let Some(HomeModal::ChangePwInput {
                 ref mut focused, ..
             }) = state.modal
             {
@@ -551,7 +551,7 @@ fn handle_change_pw_input_key<B: Backend>(
             }
         }
         Action::InsertChar(c) => {
-            if let Some(SettingsModal::ChangePwInput {
+            if let Some(HomeModal::ChangePwInput {
                 ref mut current,
                 ref mut current_cursor,
                 ref mut new_pass,
@@ -571,7 +571,7 @@ fn handle_change_pw_input_key<B: Backend>(
             }
         }
         Action::Backspace => {
-            if let Some(SettingsModal::ChangePwInput {
+            if let Some(HomeModal::ChangePwInput {
                 ref mut current,
                 ref mut current_cursor,
                 ref mut new_pass,
@@ -598,7 +598,7 @@ fn handle_change_pw_input_key<B: Backend>(
             }
         }
         Action::DeleteChar => {
-            if let Some(SettingsModal::ChangePwInput {
+            if let Some(HomeModal::ChangePwInput {
                 ref mut current,
                 ref mut current_cursor,
                 ref mut new_pass,
@@ -619,7 +619,7 @@ fn handle_change_pw_input_key<B: Backend>(
             }
         }
         Action::CursorLeft => {
-            if let Some(SettingsModal::ChangePwInput {
+            if let Some(HomeModal::ChangePwInput {
                 ref mut current,
                 ref mut current_cursor,
                 ref mut new_pass,
@@ -639,7 +639,7 @@ fn handle_change_pw_input_key<B: Backend>(
             }
         }
         Action::CursorRight => {
-            if let Some(SettingsModal::ChangePwInput {
+            if let Some(HomeModal::ChangePwInput {
                 ref mut current,
                 ref mut current_cursor,
                 ref mut new_pass,
@@ -659,7 +659,7 @@ fn handle_change_pw_input_key<B: Backend>(
             }
         }
         Action::CursorHome => {
-            if let Some(SettingsModal::ChangePwInput {
+            if let Some(HomeModal::ChangePwInput {
                 ref mut current_cursor,
                 ref mut new_cursor,
                 ref mut confirm_cursor,
@@ -675,7 +675,7 @@ fn handle_change_pw_input_key<B: Backend>(
             }
         }
         Action::CursorEnd => {
-            if let Some(SettingsModal::ChangePwInput {
+            if let Some(HomeModal::ChangePwInput {
                 ref mut current,
                 ref mut current_cursor,
                 ref mut new_pass,
@@ -698,7 +698,7 @@ fn handle_change_pw_input_key<B: Backend>(
         }
         Action::Confirm => {
             let mut modal = match state.modal.take() {
-                Some(SettingsModal::ChangePwInput {
+                Some(HomeModal::ChangePwInput {
                     current,
                     current_cursor,
                     new_pass,
@@ -707,7 +707,7 @@ fn handle_change_pw_input_key<B: Backend>(
                     confirm_cursor,
                     focused,
                     error,
-                }) => SettingsModal::ChangePwInput {
+                }) => HomeModal::ChangePwInput {
                     current,
                     current_cursor,
                     new_pass,
@@ -720,7 +720,7 @@ fn handle_change_pw_input_key<B: Backend>(
                 _ => return Ok(()),
             };
             let (_current, new_pass, _confirm, has_error) = match &mut modal {
-                SettingsModal::ChangePwInput {
+                HomeModal::ChangePwInput {
                     current,
                     new_pass,
                     confirm,
@@ -729,7 +729,7 @@ fn handle_change_pw_input_key<B: Backend>(
                 } => {
                     let is_ok = if current.as_bytes()
                         != state
-                            .active_file
+                            .active_vault
                             .as_ref()
                             .map(|af| af.passphrase.as_slice())
                             .unwrap_or(&[])
@@ -753,8 +753,8 @@ fn handle_change_pw_input_key<B: Backend>(
                 state.modal = Some(modal);
             } else {
                 // Save with new passphrase and reopen
-                if let Some(ref active_file) = state.active_file.clone() {
-                    if let (Some(path), Some(node)) = (&active_file.path, &active_file.node)
+                if let Some(ref active_vault) = state.active_vault.clone() {
+                    if let (Some(path), Some(node)) = (&active_vault.path, &active_vault.node)
                     {
                         let new_pass_bytes = zeroize::Zeroizing::new(new_pass.into_bytes());
                         state.status = Some(texts::STATUS_SAVING);
@@ -762,7 +762,7 @@ fn handle_change_pw_input_key<B: Backend>(
                         match file_handling::save_tree(node, path, &new_pass_bytes) {
                             Err(e) => {
                                 state.status = None;
-                                state.modal = Some(SettingsModal::ChangePwInput {
+                                state.modal = Some(HomeModal::ChangePwInput {
                                     current: String::new(),
                                     current_cursor: 0,
                                     new_pass: String::new(),
@@ -775,13 +775,13 @@ fn handle_change_pw_input_key<B: Backend>(
                             }
                             Ok(()) => {
                                 state.status = None;
-                                state.active_file.as_mut().unwrap().passphrase =
+                                state.active_vault.as_mut().unwrap().passphrase =
                                     new_pass_bytes.clone();
                                 let mut tree_state =
                                     crate::tree::widget::TreeState::new(node.clone());
-                                tree_state.active_file_path = Some(path.clone());
-                                tree_state.active_file_passphrase = new_pass_bytes;
-                                tree_state.display_full_path = state.settings.display_full_path;
+                                tree_state.active_vault_path = Some(path.clone());
+                                tree_state.active_vault_master_password = new_pass_bytes;
+                                tree_state.display_full_path = state.config.display_full_path;
                                 crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
                                 if !tree_state.return_to_menu {
                                     state.quit = true;
@@ -799,11 +799,11 @@ fn handle_change_pw_input_key<B: Backend>(
 
 fn handle_confirm_no_passphrase_key<B: Backend>(
     key: event::KeyEvent,
-    state: &mut SettingsState,
+    state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     let file_path = match state.modal.take() {
-        Some(SettingsModal::ConfirmNoPassphrase { file_path }) => file_path,
+        Some(HomeModal::ConfirmNoPassphrase { file_path }) => file_path,
         _ => return Ok(()),
     };
     match key.code {
@@ -813,26 +813,26 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
             match file_handling::create_secret_file(&file_path, "") {
                 Err(e) => {
                     state.status = None;
-                    state.modal = Some(SettingsModal::Alert {
+                    state.modal = Some(HomeModal::Alert {
                         message: format!("{e}"),
                     });
                 }
                 Ok(node) => {
                     state.status = None;
                     let pp_bytes = zeroize::Zeroizing::new(Vec::new());
-                    let active_file = ActiveFileState {
+                    let active_vault = ActiveVaultState {
                         path: Some(file_path.clone()),
                         passphrase: pp_bytes.clone(),
                         node: Some(node.clone()),
                     };
-                    state.active_file = Some(active_file);
+                    state.active_vault = Some(active_vault);
 
-                    let _ = utils::push_recent_file(&mut state.settings, &file_path);
+                    let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
 
                     let mut tree_state = crate::tree::widget::TreeState::new(node);
-                    tree_state.active_file_path = Some(file_path);
-                    tree_state.active_file_passphrase = pp_bytes;
-                    tree_state.display_full_path = state.settings.display_full_path;
+                    tree_state.active_vault_path = Some(file_path);
+                    tree_state.active_vault_master_password = pp_bytes;
+                    tree_state.display_full_path = state.config.display_full_path;
                     crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
 
                     if !tree_state.return_to_menu {
@@ -842,7 +842,7 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
             }
         }
         _ => {
-            state.modal = Some(SettingsModal::PassphraseInput {
+            state.modal = Some(HomeModal::PassphraseInput {
                 file_path,
                 file_data: None,
                 passphrase: String::new(),
@@ -856,13 +856,13 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
 
 // ── Export/Import modal key handlers ──
 
-fn handle_export_select_type_key(key: event::KeyEvent, state: &mut SettingsState) {
+fn handle_export_select_type_key(key: event::KeyEvent, state: &mut HomeState) {
     match Action::from_select_field_type(&key) {
         Action::Cancel => {
             state.modal = None;
         }
         Action::NavDown => {
-            if let Some(SettingsModal::ExportSelectType {
+            if let Some(HomeModal::ExportSelectType {
                 ref mut selected_type,
             }) = state.modal
             {
@@ -870,7 +870,7 @@ fn handle_export_select_type_key(key: event::KeyEvent, state: &mut SettingsState
             }
         }
         Action::NavUp => {
-            if let Some(SettingsModal::ExportSelectType {
+            if let Some(HomeModal::ExportSelectType {
                 ref mut selected_type,
             }) = state.modal
             {
@@ -878,7 +878,7 @@ fn handle_export_select_type_key(key: event::KeyEvent, state: &mut SettingsState
             }
         }
         Action::SelectType1 => {
-            if let Some(SettingsModal::ExportSelectType {
+            if let Some(HomeModal::ExportSelectType {
                 ref mut selected_type,
             }) = state.modal
             {
@@ -886,7 +886,7 @@ fn handle_export_select_type_key(key: event::KeyEvent, state: &mut SettingsState
             }
         }
         Action::SelectType2 => {
-            if let Some(SettingsModal::ExportSelectType {
+            if let Some(HomeModal::ExportSelectType {
                 ref mut selected_type,
             }) = state.modal
             {
@@ -894,7 +894,7 @@ fn handle_export_select_type_key(key: event::KeyEvent, state: &mut SettingsState
             }
         }
         Action::SelectType3 => {
-            if let Some(SettingsModal::ExportSelectType {
+            if let Some(HomeModal::ExportSelectType {
                 ref mut selected_type,
             }) = state.modal
             {
@@ -902,13 +902,13 @@ fn handle_export_select_type_key(key: event::KeyEvent, state: &mut SettingsState
             }
         }
         Action::Confirm => {
-            if let Some(SettingsModal::ExportSelectType { selected_type }) = state.modal.take() {
+            if let Some(HomeModal::ExportSelectType { selected_type }) = state.modal.take() {
                 let format = match selected_type {
                     0 => texts::FORMAT_JSON,
                     1 => texts::FORMAT_XML,
                     _ => texts::FORMAT_CSV,
                 };
-                state.modal = Some(SettingsModal::ExportConfirm {
+                state.modal = Some(HomeModal::ExportConfirm {
                     export_type: format.to_string(),
                 });
             }
@@ -917,15 +917,15 @@ fn handle_export_select_type_key(key: event::KeyEvent, state: &mut SettingsState
     }
 }
 
-fn handle_export_confirm_key(key: event::KeyEvent, state: &mut SettingsState) {
+fn handle_export_confirm_key(key: event::KeyEvent, state: &mut HomeState) {
     match Action::from_confirm(&key) {
         Action::Yes => {
             let export_type = match state.modal.take() {
-                Some(SettingsModal::ExportConfirm { export_type }) => export_type,
+                Some(HomeModal::ExportConfirm { export_type }) => export_type,
                 _ => return,
             };
 
-            let af = match state.active_file.clone() {
+            let af = match state.active_vault.clone() {
                 Some(af) => af,
                 None => return,
             };
@@ -948,12 +948,12 @@ fn handle_export_confirm_key(key: event::KeyEvent, state: &mut SettingsState) {
 
             match file_handling::export::export_tree(&node, &path, format) {
                 Ok(out_path) => {
-                    state.modal = Some(SettingsModal::Alert {
+                    state.modal = Some(HomeModal::Alert {
                         message: format!("{}{}", texts::MSG_EXPORT_SUCCESS, out_path),
                     });
                 }
                 Err(e) => {
-                    state.modal = Some(SettingsModal::Alert {
+                    state.modal = Some(HomeModal::Alert {
                         message: format!("{e}"),
                     });
                 }
@@ -969,53 +969,53 @@ fn handle_export_confirm_key(key: event::KeyEvent, state: &mut SettingsState) {
 
 fn handle_modal_key<B: Backend>(
     key: event::KeyEvent,
-    state: &mut SettingsState,
+    state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     let is_passphrase = matches!(
         state.modal,
-        Some(SettingsModal::PassphraseInput { .. }) | Some(SettingsModal::Alert { .. })
+        Some(HomeModal::PassphraseInput { .. }) | Some(HomeModal::Alert { .. })
     );
     if is_passphrase {
         return handle_passphrase_key(key, state, terminal);
     }
 
-    let is_app_settings = matches!(state.modal, Some(SettingsModal::AppSettings { .. }));
+    let is_app_settings = matches!(state.modal, Some(HomeModal::Configuration { .. }));
     if is_app_settings {
-        handle_app_settings_key(key, state);
+        handle_config_key(key, state);
         return Ok(());
     }
 
-    let is_delete_confirm = matches!(state.modal, Some(SettingsModal::DeleteConfirm { .. }));
+    let is_delete_confirm = matches!(state.modal, Some(HomeModal::DeleteConfirm { .. }));
     if is_delete_confirm {
         handle_delete_confirm_key(key, state);
         return Ok(());
     }
 
-    let is_change_pw_confirm = matches!(state.modal, Some(SettingsModal::ChangePwConfirm));
+    let is_change_pw_confirm = matches!(state.modal, Some(HomeModal::ChangePwConfirm));
     if is_change_pw_confirm {
         handle_change_pw_confirm_key(key, state);
         return Ok(());
     }
 
-    let is_change_pw_input = matches!(state.modal, Some(SettingsModal::ChangePwInput { .. }));
+    let is_change_pw_input = matches!(state.modal, Some(HomeModal::ChangePwInput { .. }));
     if is_change_pw_input {
         return handle_change_pw_input_key(key, state, terminal);
     }
 
     let is_confirm_no_passphrase =
-        matches!(state.modal, Some(SettingsModal::ConfirmNoPassphrase { .. }));
+        matches!(state.modal, Some(HomeModal::ConfirmNoPassphrase { .. }));
     if is_confirm_no_passphrase {
         return handle_confirm_no_passphrase_key(key, state, terminal);
     }
 
-    let is_export_select = matches!(state.modal, Some(SettingsModal::ExportSelectType { .. }));
+    let is_export_select = matches!(state.modal, Some(HomeModal::ExportSelectType { .. }));
     if is_export_select {
         handle_export_select_type_key(key, state);
         return Ok(());
     }
 
-    let is_export_confirm = matches!(state.modal, Some(SettingsModal::ExportConfirm { .. }));
+    let is_export_confirm = matches!(state.modal, Some(HomeModal::ExportConfirm { .. }));
     if is_export_confirm {
         handle_export_confirm_key(key, state);
         return Ok(());
@@ -1027,7 +1027,7 @@ fn handle_modal_key<B: Backend>(
 
 fn handle_passphrase_key<B: Backend>(
     key: event::KeyEvent,
-    state: &mut SettingsState,
+    state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     let mut modal = match state.modal.take() {
@@ -1038,7 +1038,7 @@ fn handle_passphrase_key<B: Backend>(
     match Action::from_passphrase_input(&key) {
         Action::Cancel => {}
         Action::InsertChar(c) => {
-            if let SettingsModal::PassphraseInput {
+            if let HomeModal::PassphraseInput {
                 passphrase,
                 cursor,
                 error,
@@ -1051,7 +1051,7 @@ fn handle_passphrase_key<B: Backend>(
             state.modal = Some(modal);
         }
         Action::Backspace => {
-            if let SettingsModal::PassphraseInput {
+            if let HomeModal::PassphraseInput {
                 passphrase, cursor, ..
             } = &mut modal
             {
@@ -1062,7 +1062,7 @@ fn handle_passphrase_key<B: Backend>(
             state.modal = Some(modal);
         }
         Action::DeleteChar => {
-            if let SettingsModal::PassphraseInput {
+            if let HomeModal::PassphraseInput {
                 passphrase, cursor, ..
             } = &mut modal
             {
@@ -1071,7 +1071,7 @@ fn handle_passphrase_key<B: Backend>(
             state.modal = Some(modal);
         }
         Action::CursorLeft => {
-            if let SettingsModal::PassphraseInput {
+            if let HomeModal::PassphraseInput {
                 cursor, passphrase, ..
             } = &mut modal
             {
@@ -1080,7 +1080,7 @@ fn handle_passphrase_key<B: Backend>(
             state.modal = Some(modal);
         }
         Action::CursorRight => {
-            if let SettingsModal::PassphraseInput {
+            if let HomeModal::PassphraseInput {
                 cursor, passphrase, ..
             } = &mut modal
             {
@@ -1089,13 +1089,13 @@ fn handle_passphrase_key<B: Backend>(
             state.modal = Some(modal);
         }
         Action::CursorHome => {
-            if let SettingsModal::PassphraseInput { cursor, .. } = &mut modal {
+            if let HomeModal::PassphraseInput { cursor, .. } = &mut modal {
                 *cursor = 0;
             }
             state.modal = Some(modal);
         }
         Action::CursorEnd => {
-            if let SettingsModal::PassphraseInput {
+            if let HomeModal::PassphraseInput {
                 cursor, passphrase, ..
             } = &mut modal
             {
@@ -1104,7 +1104,7 @@ fn handle_passphrase_key<B: Backend>(
             state.modal = Some(modal);
         }
         Action::Confirm => match modal {
-            SettingsModal::PassphraseInput {
+            HomeModal::PassphraseInput {
                 file_path,
                 file_data,
                 passphrase,
@@ -1116,7 +1116,7 @@ fn handle_passphrase_key<B: Backend>(
                     match file_handling::decrypt_to_node(&data, &passphrase) {
                         Err(e) => {
                             state.status = None;
-                            state.modal = Some(SettingsModal::PassphraseInput {
+                            state.modal = Some(HomeModal::PassphraseInput {
                                 file_path,
                                 file_data: Some(data),
                                 passphrase,
@@ -1127,19 +1127,19 @@ fn handle_passphrase_key<B: Backend>(
                         Ok(node) => {
                             state.status = None;
                             let pp_bytes = zeroize::Zeroizing::new(passphrase.into_bytes());
-                            let active_file = ActiveFileState {
+                            let active_vault = ActiveVaultState {
                                 path: Some(file_path.clone()),
                                 passphrase: pp_bytes.clone(),
                                 node: Some(node.clone()),
                             };
-                            state.active_file = Some(active_file);
+                            state.active_vault = Some(active_vault);
 
-                            let _ = utils::push_recent_file(&mut state.settings, &file_path);
+                            let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
 
                             let mut tree_state = crate::tree::widget::TreeState::new(node);
-                            tree_state.active_file_path = Some(file_path);
-                            tree_state.active_file_passphrase = pp_bytes;
-                            tree_state.display_full_path = state.settings.display_full_path;
+                            tree_state.active_vault_path = Some(file_path);
+                            tree_state.active_vault_master_password = pp_bytes;
+                            tree_state.display_full_path = state.config.display_full_path;
                             crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
 
                             if !tree_state.return_to_menu {
@@ -1150,7 +1150,7 @@ fn handle_passphrase_key<B: Backend>(
                 }
                 None => {
                     if passphrase.is_empty() {
-                        state.modal = Some(SettingsModal::ConfirmNoPassphrase { file_path });
+                        state.modal = Some(HomeModal::ConfirmNoPassphrase { file_path });
                         return Ok(());
                     }
                     state.status = Some(texts::STATUS_SAVING);
@@ -1158,26 +1158,26 @@ fn handle_passphrase_key<B: Backend>(
                     match file_handling::create_secret_file(&file_path, &passphrase) {
                         Err(e) => {
                             state.status = None;
-                            state.modal = Some(SettingsModal::Alert {
+                            state.modal = Some(HomeModal::Alert {
                                 message: format!("{e}"),
                             });
                         }
                         Ok(node) => {
                             state.status = None;
                             let pp_bytes = zeroize::Zeroizing::new(passphrase.into_bytes());
-                            let active_file = ActiveFileState {
+                            let active_vault = ActiveVaultState {
                                 path: Some(file_path.clone()),
                                 passphrase: pp_bytes.clone(),
                                 node: Some(node.clone()),
                             };
-                            state.active_file = Some(active_file);
+                            state.active_vault = Some(active_vault);
 
-                            let _ = utils::push_recent_file(&mut state.settings, &file_path);
+                            let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
 
                             let mut tree_state = crate::tree::widget::TreeState::new(node);
-                            tree_state.active_file_path = Some(file_path);
-                            tree_state.active_file_passphrase = pp_bytes;
-                            tree_state.display_full_path = state.settings.display_full_path;
+                            tree_state.active_vault_path = Some(file_path);
+                            tree_state.active_vault_master_password = pp_bytes;
+                            tree_state.display_full_path = state.config.display_full_path;
                             crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
 
                             if !tree_state.return_to_menu {
@@ -1187,7 +1187,7 @@ fn handle_passphrase_key<B: Backend>(
                     }
                 }
             },
-            SettingsModal::Alert { .. } => {}
+            HomeModal::Alert { .. } => {}
             _ => {}
         },
         _ => {
@@ -1199,37 +1199,37 @@ fn handle_passphrase_key<B: Backend>(
 
 // ── Rendering ──
 
-fn render(frame: &mut Frame, area: Rect, state: &SettingsState) {
-    render_settings_window(frame, area, state);
+fn render(frame: &mut Frame, area: Rect, state: &HomeState) {
+    render_home_window(frame, area, state);
 
     match &state.modal {
-        Some(SettingsModal::FileBrowser(browser)) => {
+        Some(HomeModal::FileBrowser(browser)) => {
             file_browser::render_file_browser(frame, area, browser);
         }
-        Some(SettingsModal::PassphraseInput { .. }) => render_passphrase_modal(frame, area, state),
-        Some(SettingsModal::AppSettings { .. }) => render_app_settings_modal(frame, area, state),
-        Some(SettingsModal::Alert { message }) => render_alert_modal(frame, area, message),
-        Some(SettingsModal::DeleteConfirm { path }) => {
+        Some(HomeModal::PassphraseInput { .. }) => render_passphrase_modal(frame, area, state),
+        Some(HomeModal::Configuration { .. }) => render_config_modal(frame, area, state),
+        Some(HomeModal::Alert { message }) => render_alert_modal(frame, area, message),
+        Some(HomeModal::DeleteConfirm { path }) => {
             render_delete_confirm_modal(frame, area, path)
         }
-        Some(SettingsModal::ChangePwConfirm) => render_change_pw_confirm_modal(frame, area),
-        Some(SettingsModal::ConfirmNoPassphrase { .. }) => {
+        Some(HomeModal::ChangePwConfirm) => render_change_pw_confirm_modal(frame, area),
+        Some(HomeModal::ConfirmNoPassphrase { .. }) => {
             render_confirm_no_passphrase_modal(frame, area)
         }
-        Some(SettingsModal::ChangePwInput { .. }) => {
+        Some(HomeModal::ChangePwInput { .. }) => {
             render_change_pw_input_modal(frame, area, state)
         }
-        Some(SettingsModal::ExportSelectType { .. }) => {
+        Some(HomeModal::ExportSelectType { .. }) => {
             render_export_select_type_modal(frame, area, state)
         }
-        Some(SettingsModal::ExportConfirm { export_type }) => {
+        Some(HomeModal::ExportConfirm { export_type }) => {
             render_export_confirm_modal(frame, area, export_type)
         }
         None => {}
     }
 }
 
-fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) {
+fn render_home_window(frame: &mut Frame, area: Rect, state: &HomeState) {
     let layout = Layout::vertical([
         Constraint::Min(1),
         Constraint::Length(1),
@@ -1238,21 +1238,21 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
     .split(area);
 
     let base_title = state
-        .active_file
+        .active_vault
         .as_ref()
         .and_then(|af| af.path.as_deref())
         .map(|p| {
-            if state.settings.display_full_path {
-                format!("{} {} ", texts::TITLE_SETTINGS_PREFIX, p)
+            if state.config.display_full_path {
+                format!("{} {} ", texts::TITLE_HOME_PREFIX, p)
             } else {
                 let name = std::path::Path::new(p)
                     .file_name()
                     .map(|n| n.to_string_lossy())
                     .unwrap_or(std::borrow::Cow::Borrowed(p));
-                format!("{} {} ", texts::TITLE_SETTINGS_PREFIX, name)
+                format!("{} {} ", texts::TITLE_HOME_PREFIX, name)
             }
         })
-        .unwrap_or_else(|| texts::TITLE_SETTINGS_DEFAULT.to_string());
+        .unwrap_or_else(|| texts::TITLE_HOME_DEFAULT.to_string());
 
     let mut title_spans: Vec<Span> = Vec::new();
     if let Some(s) = state.status {
@@ -1269,7 +1269,7 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
     let block = Block::default()
         .title(Line::from(title_spans))
         .borders(Borders::ALL)
-        .border_style(ElementStyle::SettingsBlockBorder.style());
+        .border_style(ElementStyle::HomeBlockBorder.style());
 
     let inner = block.inner(layout[0]);
     frame.render_widget(block, layout[0]);
@@ -1280,9 +1280,9 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
     for (i, item) in texts::MENU_ITEMS.iter().enumerate() {
         let is_selected = state.selected == i;
         let style = if is_selected {
-            ElementStyle::SettingsSelected.style()
+            ElementStyle::HomeSelected.style()
         } else {
-            ElementStyle::SettingsNormal.style()
+            ElementStyle::HomeNormal.style()
         };
         let prefix = if is_selected {
             Icon::SelectionArrow.as_str()
@@ -1298,25 +1298,25 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         texts::SEPARATOR_RECENT_FILES,
-        ElementStyle::SettingsSectionHeader.style(),
+        ElementStyle::HomeSectionHeader.style(),
     )));
     lines.push(Line::from(""));
 
     let menu_len = texts::MENU_ITEMS.len();
-    for (i, file) in state.settings.recent_files.iter().enumerate() {
+    for (i, file) in state.config.recent_files.iter().enumerate() {
         let idx = menu_len + i;
         let is_selected = state.selected == idx;
         let style = if is_selected {
-            ElementStyle::SettingsSelected.style()
+            ElementStyle::HomeSelected.style()
         } else {
-            ElementStyle::SettingsNormal.style()
+            ElementStyle::HomeNormal.style()
         };
         let prefix = if is_selected {
             Icon::SelectionArrow.as_str()
         } else {
             Icon::SelectionPad.as_str()
         };
-        let display = if state.settings.display_full_path {
+        let display = if state.config.display_full_path {
             file.clone()
         } else {
             std::path::Path::new(file)
@@ -1332,8 +1332,8 @@ fn render_settings_window(frame: &mut Frame, area: Rect, state: &SettingsState) 
 
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 
-    render_settings_status_bar(frame, layout[1], state);
-    render_settings_help_bar(frame, layout[2]);
+    render_home_status_bar(frame, layout[1], state);
+    render_home_help_bar(frame, layout[2]);
 }
 
 fn make_overlay(area: Rect, height: u16) -> Rect {
@@ -1346,25 +1346,25 @@ fn make_overlay(area: Rect, height: u16) -> Rect {
     }
 }
 
-fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsState) {
+fn render_config_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
     let setting_idx = match &state.modal {
-        Some(SettingsModal::AppSettings { setting_idx }) => *setting_idx,
+        Some(HomeModal::Configuration { setting_idx }) => *setting_idx,
         _ => 0,
     };
 
     let overlay_area = make_overlay(area, 10);
     let block = Block::default()
-        .title(texts::SETTINGS_APP)
+        .title(texts::CONFIG_TITLE)
         .borders(Borders::ALL)
-        .style(ElementStyle::SettingsOverlayBlock.style());
+        .style(ElementStyle::HomeOverlayBlock.style());
 
     let inner = block.inner(overlay_area);
 
     let rows = [
-        (texts::SETTING_FULL_PATH, state.settings.display_full_path),
+        (texts::SETTING_FULL_PATH, state.config.display_full_path),
         (
             texts::SETTING_LAST_FILE,
-            state.settings.open_last_opened_file_on_startup,
+            state.config.open_last_opened_file_on_startup,
         ),
     ];
 
@@ -1374,9 +1374,9 @@ fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsStat
     for (i, (label, value)) in rows.iter().enumerate() {
         let is_selected = i == setting_idx;
         let style = if is_selected {
-            ElementStyle::SettingsSelected.style()
+            ElementStyle::HomeSelected.style()
         } else {
-            ElementStyle::SettingsNormal.style()
+            ElementStyle::HomeNormal.style()
         };
         let prefix = if is_selected {
             Icon::SelectionArrow.as_str()
@@ -1396,8 +1396,8 @@ fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsStat
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        texts::HINT_APP_SETTINGS,
-        ElementStyle::SettingsHelp.style(),
+        texts::HINT_CONFIG,
+        ElementStyle::HomeHelp.style(),
     )));
 
     frame.render_widget(Clear, overlay_area);
@@ -1408,9 +1408,9 @@ fn render_app_settings_modal(frame: &mut Frame, area: Rect, state: &SettingsStat
 fn render_delete_confirm_modal(frame: &mut Frame, area: Rect, path: &str) {
     let overlay_area = make_overlay(area, 7);
     let block = Block::default()
-        .title(texts::SETTINGS_DELETE_CONFIRM)
+        .title(texts::HOME_DELETE_CONFIRM)
         .borders(Borders::ALL)
-        .style(ElementStyle::SettingsDeleteBlock.style());
+        .style(ElementStyle::HomeDeleteBlock.style());
 
     let inner = block.inner(overlay_area);
 
@@ -1428,7 +1428,7 @@ fn render_delete_confirm_modal(frame: &mut Frame, area: Rect, path: &str) {
         Line::from(""),
         Line::from(Span::styled(
             texts::HINT_DELETE_CONFIRM,
-            ElementStyle::SettingsHelp.style(),
+            ElementStyle::HomeHelp.style(),
         )),
     ];
 
@@ -1440,9 +1440,9 @@ fn render_delete_confirm_modal(frame: &mut Frame, area: Rect, path: &str) {
 fn render_change_pw_confirm_modal(frame: &mut Frame, area: Rect) {
     let overlay_area = make_overlay(area, 7);
     let block = Block::default()
-        .title(texts::SETTINGS_CHANGE_PASSWORD)
+        .title(texts::HOME_CHANGE_PASSWORD)
         .borders(Borders::ALL)
-        .style(ElementStyle::SettingsChangePwBlock.style());
+        .style(ElementStyle::HomeChangePwBlock.style());
 
     let inner = block.inner(overlay_area);
 
@@ -1455,7 +1455,7 @@ fn render_change_pw_confirm_modal(frame: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             texts::HINT_CHANGE_PW_CONFIRM,
-            ElementStyle::SettingsHelp.style(),
+            ElementStyle::HomeHelp.style(),
         )),
     ];
 
@@ -1467,9 +1467,9 @@ fn render_change_pw_confirm_modal(frame: &mut Frame, area: Rect) {
 fn render_confirm_no_passphrase_modal(frame: &mut Frame, area: Rect) {
     let overlay_area = make_overlay(area, 7);
     let block = Block::default()
-        .title(texts::SETTINGS_NO_PASSPHRASE)
+        .title(texts::HOME_NO_PASSPHRASE)
         .borders(Borders::ALL)
-        .style(ElementStyle::SettingsNoPassBlock.style());
+        .style(ElementStyle::HomeNoPassBlock.style());
 
     let inner = block.inner(overlay_area);
 
@@ -1482,7 +1482,7 @@ fn render_confirm_no_passphrase_modal(frame: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             texts::HINT_NO_PASSPHRASE,
-            ElementStyle::SettingsHelp.style(),
+            ElementStyle::HomeHelp.style(),
         )),
     ];
 
@@ -1491,10 +1491,10 @@ fn render_confirm_no_passphrase_modal(frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsState) {
+fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
     let (current, current_cursor, new_pass, new_cursor, confirm, confirm_cursor, focused, error) =
         match &state.modal {
-            Some(SettingsModal::ChangePwInput {
+            Some(HomeModal::ChangePwInput {
                 current,
                 current_cursor,
                 new_pass,
@@ -1518,9 +1518,9 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
 
     let overlay_area = make_overlay(area, if error.is_some() { 13 } else { 12 });
     let block = Block::default()
-        .title(texts::SETTINGS_CHANGE_PASSWORD)
+        .title(texts::HOME_CHANGE_PASSWORD)
         .borders(Borders::ALL)
-        .style(ElementStyle::SettingsChangePwBlock.style());
+        .style(ElementStyle::HomeChangePwBlock.style());
 
     let inner = block.inner(overlay_area);
 
@@ -1551,7 +1551,7 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("  {}: ", label),
-                    ElementStyle::SettingsFieldLabel.style(),
+                    ElementStyle::HomeFieldLabel.style(),
                 ),
                 Span::raw(before.to_string()),
                 Span::styled(
@@ -1564,9 +1564,9 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("  {}: ", label),
-                    ElementStyle::SettingsFieldLabel.style(),
+                    ElementStyle::HomeFieldLabel.style(),
                 ),
-                Span::styled(masked, ElementStyle::SettingsFieldLabel.style()),
+                Span::styled(masked, ElementStyle::HomeFieldLabel.style()),
             ]));
         }
     }
@@ -1574,14 +1574,14 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
     if let Some(ref err_msg) = error {
         lines.push(Line::from(Span::styled(
             format!(" {}", err_msg),
-            ElementStyle::SettingsErrorBar.style(),
+            ElementStyle::HomeErrorBar.style(),
         )));
     }
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         texts::HINT_CHANGE_PW_INPUT,
-        ElementStyle::SettingsHelp.style(),
+        ElementStyle::HomeHelp.style(),
     )));
 
     frame.render_widget(Clear, overlay_area);
@@ -1589,9 +1589,9 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &SettingsS
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-fn render_export_select_type_modal(frame: &mut Frame, area: Rect, state: &SettingsState) {
+fn render_export_select_type_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
     let selected_type = match &state.modal {
-        Some(SettingsModal::ExportSelectType { selected_type }) => *selected_type,
+        Some(HomeModal::ExportSelectType { selected_type }) => *selected_type,
         _ => 0,
     };
 
@@ -1599,7 +1599,7 @@ fn render_export_select_type_modal(frame: &mut Frame, area: Rect, state: &Settin
     let block = Block::default()
         .title(texts::EXPORT_SELECT_TITLE)
         .borders(Borders::ALL)
-        .style(ElementStyle::SettingsOverlayBlock.style());
+        .style(ElementStyle::HomeOverlayBlock.style());
 
     let inner = block.inner(overlay_area);
 
@@ -1609,9 +1609,9 @@ fn render_export_select_type_modal(frame: &mut Frame, area: Rect, state: &Settin
     for (i, item) in texts::EXPORT_TYPE_ITEMS.iter().enumerate() {
         let is_selected = i == selected_type;
         let style = if is_selected {
-            ElementStyle::SettingsSelected.style()
+            ElementStyle::HomeSelected.style()
         } else {
-            ElementStyle::SettingsNormal.style()
+            ElementStyle::HomeNormal.style()
         };
         let prefix = if is_selected {
             Icon::SelectionArrow.as_str()
@@ -1627,7 +1627,7 @@ fn render_export_select_type_modal(frame: &mut Frame, area: Rect, state: &Settin
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         texts::HINT_SELECT_FIELD_TYPE,
-        ElementStyle::SettingsHelp.style(),
+        ElementStyle::HomeHelp.style(),
     )));
 
     frame.render_widget(Clear, overlay_area);
@@ -1640,7 +1640,7 @@ fn render_export_confirm_modal(frame: &mut Frame, area: Rect, export_type: &str)
     let block = Block::default()
         .title(texts::EXPORT_CONFIRM_TITLE)
         .borders(Borders::ALL)
-        .style(ElementStyle::SettingsChangePwBlock.style());
+        .style(ElementStyle::HomeChangePwBlock.style());
 
     let inner = block.inner(overlay_area);
 
@@ -1658,7 +1658,7 @@ fn render_export_confirm_modal(frame: &mut Frame, area: Rect, export_type: &str)
         Line::from(""),
         Line::from(Span::styled(
             texts::HINT_CHANGE_PW_CONFIRM,
-            ElementStyle::SettingsHelp.style(),
+            ElementStyle::HomeHelp.style(),
         )),
     ];
 
@@ -1667,9 +1667,9 @@ fn render_export_confirm_modal(frame: &mut Frame, area: Rect, export_type: &str)
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState) {
+fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
     let (file_path, passphrase, cursor, error) = match &state.modal {
-        Some(SettingsModal::PassphraseInput {
+        Some(HomeModal::PassphraseInput {
             file_path,
             passphrase,
             cursor,
@@ -1679,7 +1679,7 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
         _ => return,
     };
 
-    let display_path = if state.settings.display_full_path {
+    let display_path = if state.config.display_full_path {
         file_path.to_string()
     } else {
         std::path::Path::new(file_path.as_str())
@@ -1691,9 +1691,9 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
     let overlay_area = make_overlay(area, if error.is_some() { 9 } else { 8 });
 
     let block = Block::default()
-        .title(texts::SETTINGS_ENTER_PASSPHRASE)
+        .title(texts::HOME_ENTER_PASSPHRASE)
         .borders(Borders::ALL)
-        .style(ElementStyle::SettingsPassBlock.style());
+        .style(ElementStyle::HomePassBlock.style());
 
     let inner = block.inner(overlay_area);
 
@@ -1719,7 +1719,7 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
     lines.push(Line::from(vec![
         Span::styled(
             texts::LABEL_PASSPHRASE,
-            ElementStyle::SettingsPassLabel.style(),
+            ElementStyle::HomePassLabel.style(),
         ),
         Span::raw(before.to_string()),
         Span::styled(
@@ -1732,14 +1732,14 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
     if let Some(err_msg) = error {
         lines.push(Line::from(Span::styled(
             format!(" {}", err_msg),
-            ElementStyle::SettingsErrorBar.style(),
+            ElementStyle::HomeErrorBar.style(),
         )));
     }
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         texts::HINT_PASSPHRASE,
-        ElementStyle::SettingsHelp.style(),
+        ElementStyle::HomeHelp.style(),
     )));
 
     frame.render_widget(Clear, overlay_area);
@@ -1750,9 +1750,9 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &SettingsState)
 fn render_alert_modal(frame: &mut Frame, area: Rect, message: &str) {
     let overlay_area = make_overlay(area, 6);
     let block = Block::default()
-        .title(texts::SETTINGS_ALERT)
+        .title(texts::HOME_ALERT)
         .borders(Borders::ALL)
-        .style(ElementStyle::SettingsAlertBlock.style());
+        .style(ElementStyle::HomeAlertBlock.style());
 
     let inner = block.inner(overlay_area);
 
@@ -1762,7 +1762,7 @@ fn render_alert_modal(frame: &mut Frame, area: Rect, message: &str) {
         Line::from(""),
         Line::from(Span::styled(
             texts::HINT_ALERT,
-            ElementStyle::SettingsHelp.style(),
+            ElementStyle::HomeHelp.style(),
         )),
     ];
 
@@ -1774,18 +1774,18 @@ fn render_alert_modal(frame: &mut Frame, area: Rect, message: &str) {
     );
 }
 
-fn render_settings_status_bar(frame: &mut Frame, area: Rect, _state: &SettingsState) {
+fn render_home_status_bar(frame: &mut Frame, area: Rect, _state: &HomeState) {
     let text = Text::from(Line::from(vec![Span::styled(
-        texts::STATUS_SETTINGS_LABEL,
-        ElementStyle::SettingsStatusBar.style(),
+        texts::STATUS_HOME_LABEL,
+        ElementStyle::HomeStatusBar.style(),
     )]));
     frame.render_widget(Paragraph::new(text), area);
 }
 
-fn render_settings_help_bar(frame: &mut Frame, area: Rect) {
+fn render_home_help_bar(frame: &mut Frame, area: Rect) {
     let text = Text::from(Line::from(vec![Span::styled(
-        texts::HINT_SETTINGS,
-        ElementStyle::SettingsHelp.style(),
+        texts::HINT_HOME,
+        ElementStyle::HomeHelp.style(),
     )]));
     frame.render_widget(Paragraph::new(text), area);
 }

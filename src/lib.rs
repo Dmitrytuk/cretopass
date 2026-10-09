@@ -10,18 +10,18 @@ pub mod crypt;
 pub mod cursor;
 pub mod file_browser;
 pub mod file_handling;
-pub mod settings;
+pub mod vault;
 pub mod theming;
 pub mod tree;
 
 pub use tree::node::{ExtraField, FieldType, Node};
 pub use tree::widget::{InputMode, TreeState, TreeWidget};
 
-/// Runs the settings menu. Selecting "Open secret file" opens the tree
-/// app with the decrypted contents of the selected encrypted file.
+/// Runs the home screen. Selecting "Open secret file" opens the tree
+/// with the decrypted contents of the selected encrypted file.
 pub fn run() -> io::Result<()> {
     let mut terminal = setup_terminal()?;
-    let res = settings::run(&mut terminal);
+    let res = vault::run(&mut terminal);
     cleanup_terminal(&mut terminal);
     if let Err(ref e) = res {
         eprintln!("Error: {e}");
@@ -29,7 +29,7 @@ pub fn run() -> io::Result<()> {
     res
 }
 
-/// Runs the TUI with a custom root node, skipping the settings menu.
+/// Runs the TUI with a custom root node, skipping the home screen.
 pub fn run_with_root(root: Node) -> io::Result<()> {
     let mut state = TreeState::new(root);
     let mut terminal = setup_terminal()?;

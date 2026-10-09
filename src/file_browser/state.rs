@@ -56,7 +56,7 @@ pub struct FileBrowserState {
     pub confirm_delete: Option<String>,
     /// If set, the file browser will protect this path from deletion
     /// and report renames so the caller can update its state.
-    pub active_file_path: Option<PathBuf>,
+    pub active_vault_path: Option<PathBuf>,
 }
 
 impl FileBrowserState {
@@ -79,13 +79,13 @@ impl FileBrowserState {
             rename_cursor: 0,
             rename_target: String::new(),
             confirm_delete: None,
-            active_file_path: None,
+            active_vault_path: None,
         }
     }
 
     /// Sets the active file path that the browser should protect.
-    pub fn set_active_file_path(&mut self, path: Option<PathBuf>) {
-        self.active_file_path = path;
+    pub fn set_active_vault_path(&mut self, path: Option<PathBuf>) {
+        self.active_vault_path = path;
     }
 
     /// Number of entries after applying the current filter and search query.

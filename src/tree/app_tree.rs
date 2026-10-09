@@ -52,12 +52,12 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) ->
                 InputMode::Help => handle_help(key, state),
             }
 
-            if state.dirty {
+            if state.modified {
                 state.status = Some(texts::STATUS_SAVING);
                 terminal.draw(|f| ui(f, state))?;
-                if let Some(ref p) = state.active_file_path {
-                    state.dirty = false;
-                    if let Err(e) = save_tree(&state.root, p, &state.active_file_passphrase) {
+                if let Some(ref p) = state.active_vault_path {
+                    state.modified = false;
+                    if let Err(e) = save_tree(&state.root, p, &state.active_vault_master_password) {
                         eprintln!("Save failed: {e}");
                     }
                 }
@@ -1115,7 +1115,7 @@ fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
                 n
             };
 
-            let base_path = match &state.active_file_path {
+            let base_path = match &state.active_vault_path {
                 Some(p) => p.clone(),
                 None => {
                     state.mode = InputMode::Alert {

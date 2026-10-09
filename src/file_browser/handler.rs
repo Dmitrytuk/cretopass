@@ -14,7 +14,7 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
             KeyCode::Char('y') | KeyCode::Enter => {
                 if let Some(ref path_str) = state.confirm_delete.clone() {
                     let path = std::path::Path::new(path_str);
-                    if Some(path) == state.active_file_path.as_deref() {
+                    if Some(path) == state.active_vault_path.as_deref() {
                         state.error = Some(texts::MSG_CANNOT_DELETE_FILE.to_string());
                     } else if file_handling::delete_file(path).is_ok() {
                         state.refresh_entries();
@@ -283,9 +283,9 @@ fn handle_rename_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<File
             match file_handling::rename_file(from, &to) {
                 Ok(()) => {
                     let new_path_str = to.to_string_lossy().to_string();
-                    let is_active = state.active_file_path.as_deref() == Some(from);
+                    let is_active = state.active_vault_path.as_deref() == Some(from);
                     if is_active {
-                        state.active_file_path = Some(to);
+                        state.active_vault_path = Some(to);
                     }
                     state.rename_target.clear();
                     state.focus = FocusTarget::List;

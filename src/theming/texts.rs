@@ -1,7 +1,7 @@
 pub const TITLE_TREE_DEFAULT: &str = " File ";
 pub const TITLE_TREE_PREFIX: &str = " File — ";
-pub const TITLE_SETTINGS_DEFAULT: &str = " Settings ";
-pub const TITLE_SETTINGS_PREFIX: &str = " Settings — ";
+pub const TITLE_HOME_DEFAULT: &str = " Home ";
+pub const TITLE_HOME_PREFIX: &str = " Home — ";
 
 pub const OVERLAY_SEARCH: &str = " Search ";
 pub const OVERLAY_ADD_NODE: &str = "Add Node";
@@ -13,13 +13,13 @@ pub const OVERLAY_UNSAVED_CHANGES: &str = " Unsaved Changes ";
 pub const OVERLAY_COPIED: &str = " Copied ";
 pub const OVERLAY_HELP: &str = " Help ";
 
-pub const SETTINGS_APP: &str = " Settings ";
-pub const SETTINGS_CHANGE_PASSWORD: &str = " Change Password ";
-pub const SETTINGS_NO_PASSPHRASE: &str = " No Passphrase ";
-pub const SETTINGS_ENTER_PASSPHRASE: &str = " Enter Passphrase ";
-pub const SETTINGS_ALERT: &str = " Alert ";
+pub const CONFIG_TITLE: &str = " Configuration ";
+pub const HOME_CHANGE_PASSWORD: &str = " Change Password ";
+pub const HOME_NO_PASSPHRASE: &str = " No Passphrase ";
+pub const HOME_ENTER_PASSPHRASE: &str = " Enter Passphrase ";
+pub const HOME_ALERT: &str = " Alert ";
 pub const ALERT_TITLE: &str = " Alert ";
-pub const SETTINGS_DELETE_CONFIRM: &str = " Confirm Delete ";
+pub const HOME_DELETE_CONFIRM: &str = " Confirm Delete ";
 
 pub const BROWSER_OPEN: &str = " Open File ";
 pub const BROWSER_CREATE: &str = " Create New Secret File ";
@@ -28,7 +28,7 @@ pub const BROWSER_IMPORT: &str = " Import File ";
 pub const MENU_ITEMS: &[&str] = &[
     "Open secret file",
     "Create new secret file",
-    "Settings",
+    "Configuration",
     "Change file password",
     "Export active file",
     "Import from file",
@@ -72,9 +72,9 @@ pub const MODE_HELP: &str = "HELP";
 
 pub const STATUS_LOADING: &str = "Loading...";
 pub const STATUS_SAVING: &str = "Saving...";
-pub const STATUS_SETTINGS_LABEL: &str = " SETTINGS ";
+pub const STATUS_HOME_LABEL: &str = " HOME ";
 
-pub const HINT_TREE: &str = "H:settings  /:search  ?:help  q:quit";
+pub const HINT_TREE: &str = "H:home  /:search  ?:help  q:quit";
 pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
 pub const HINT_AWAIT_DD: &str = "Press d again to cut";
 pub const HINT_DETAIL: &str = "j/k:navigate  Enter:copy  i:edit  Esc:close";
@@ -86,8 +86,8 @@ pub const HINT_SELECT_FIELD_TYPE: &str = "j/k:nav  1/2/3:select  Enter:choose  E
 pub const HINT_CUSTOM_FIELD_NAME: &str = "Type name  Enter:done  Esc:cancel";
 pub const HINT_CONFIRM_DELETE: &str = "y:delete  n/Esc:cancel";
 pub const HINT_DISCARD: &str = "Enter/y:discard  n/Esc:continue editing";
-pub const HINT_SETTINGS: &str = "j/k:navigate  Enter:select  d:<delete path> q:quit";
-pub const HINT_APP_SETTINGS: &str = "Space:toggle  Enter:save  Esc:cancel";
+pub const HINT_HOME: &str = "j/k:navigate  Enter:select  d:<delete path> q:quit";
+pub const HINT_CONFIG: &str = "Space:toggle  Enter:save  Esc:cancel";
 pub const HINT_DELETE_CONFIRM: &str = "y/Enter:confirm  any key:cancel";
 pub const HINT_CHANGE_PW_CONFIRM: &str = "y/Enter:yes  any key:no";
 pub const HINT_CHANGE_PW_INPUT: &str = "Tab/↑/↓:switch  Enter:apply  Esc:cancel";
@@ -112,7 +112,7 @@ pub const TREE_HELP_KEY_BINDINGS: &[&str] = &[
     " ?        Show this help",
     " Esc      Clear search highlights",
     " q        Quit the app",
-    " H        Return to settings menu",
+    " H        Return to home screen",
 ];
 
 pub const PROMPT_DELETE_FIELD_START: &str = "Delete \"";
@@ -141,7 +141,7 @@ pub const MSG_WRONG_PW: &str = "wrong password: ";
 pub const MSG_CURRENT_PW_INCORRECT: &str = "Current password is incorrect";
 pub const MSG_PW_EMPTY: &str = "New password fields cannot be empty";
 pub const MSG_PW_MISMATCH: &str = "New passwords do not match";
-pub const MSG_SETTINGS_SAVED: &str = "Settings saved";
+pub const MSG_CONFIG_SAVED: &str = "Settings saved";
 pub const MSG_SAVE_FAILED: &str = "Failed to save: ";
 pub const MSG_EXPORT_SUCCESS: &str = "File exported at ";
 pub const MSG_IMPORT_SUCCESS: &str = "File imported successfully.";

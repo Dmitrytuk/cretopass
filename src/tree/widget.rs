@@ -123,7 +123,7 @@ pub struct TreeState {
     pub root: Node,
     pub expanded: HashSet<Uuid>,
     pub selected: usize,
-    pub clipboard: Option<Node>,
+    pub cut_buffer: Option<Node>,
     pub search_query: String,
     pub search_active: bool,
     pub visible: Vec<VisibleNode>,
@@ -134,12 +134,12 @@ pub struct TreeState {
     pub adding_as_sibling: bool,
     pub quit: bool,
     pub return_to_menu: bool,
-    /// Path of the currently opened encrypted file, if any.
-    pub active_file_path: Option<String>,
-    /// Passphrase for the open file (provided by user), zeroized on drop.
-    pub active_file_passphrase: Zeroizing<Vec<u8>>,
-    /// Set to `true` whenever the tree is mutated; cleared after save.
-    pub dirty: bool,
+    /// Path of the currently opened secret file, if any.
+    pub active_vault_path: Option<String>,
+    /// Master password for the open vault (provided by user), zeroized on drop.
+    pub active_vault_master_password: Zeroizing<Vec<u8>>,
+    /// Set to `true` when the tree has unsaved changes; cleared after auto-save.
+    pub modified: bool,
     /// If `true`, window title shows the full path; otherwise just the filename.
     pub display_full_path: bool,
     /// Status indicator shown in the window title bar (e.g. "Loading..." or "Saving...").
@@ -153,7 +153,7 @@ impl TreeState {
             root,
             expanded: HashSet::new(),
             selected: 0,
-            clipboard: None,
+            cut_buffer: None,
             search_query: String::new(),
             search_active: false,
             visible: Vec::new(),
@@ -162,9 +162,9 @@ impl TreeState {
             adding_as_sibling: false,
             quit: false,
             return_to_menu: false,
-            active_file_path: None,
-            active_file_passphrase: Zeroizing::new(Vec::new()),
-            dirty: false,
+            active_vault_path: None,
+            active_vault_master_password: Zeroizing::new(Vec::new()),
+            modified: false,
             display_full_path: true,
             status: None,
         };
@@ -261,7 +261,7 @@ impl TreeState {
         }
     }
 
-    /// Removes the selected node from the tree and stores it in the clipboard.
+    /// Removes the selected node from the tree and stores it in the cut buffer.
     pub fn cut_selected(&mut self) {
         let id = match self.selected_node_id() {
             Some(id) => id,
@@ -269,18 +269,18 @@ impl TreeState {
         };
         let node = remove_node(&mut self.root, id);
         if let Some(n) = node {
-            self.clipboard = Some(n);
+            self.cut_buffer = Some(n);
             self.update_visible();
             if self.selected >= self.visible.len() && !self.visible.is_empty() {
                 self.selected = self.visible.len().saturating_sub(1);
             }
-            self.dirty = true;
+            self.modified = true;
         }
     }
 
-    /// Inserts the clipboard node as a sibling immediately after the selected node.
+    /// Inserts the cut buffer node as a sibling immediately after the selected node.
     pub fn paste_sibling(&mut self) {
-        let node = match &self.clipboard {
+        let node = match &self.cut_buffer {
             Some(n) => n.clone(),
             None => return,
         };
@@ -291,13 +291,13 @@ impl TreeState {
         if self.root.contains(selected_id) {
             insert_after(&mut self.root, selected_id, node);
             self.update_visible();
-            self.dirty = true;
+            self.modified = true;
         }
     }
 
-    /// Inserts the clipboard node as the first child of the selected node.
+    /// Inserts the cut buffer node as the first child of the selected node.
     pub fn paste_child(&mut self) {
-        let node = match &self.clipboard {
+        let node = match &self.cut_buffer {
             Some(n) => n.clone(),
             None => return,
         };
@@ -309,7 +309,7 @@ impl TreeState {
             target.add_child(node);
             self.expanded.insert(selected_id);
             self.update_visible();
-            self.dirty = true;
+            self.modified = true;
         }
     }
 
@@ -326,7 +326,7 @@ impl TreeState {
             target.description = desc;
             target.extra_fields = extra_fields;
             self.update_visible();
-            self.dirty = true;
+            self.modified = true;
         }
     }
 
@@ -352,7 +352,7 @@ impl TreeState {
             target.add_child(node);
             self.expanded.insert(id);
             self.update_visible();
-            self.dirty = true;
+            self.modified = true;
         }
     }
 
@@ -379,7 +379,7 @@ impl TreeState {
         node.extra_fields = extra_fields;
         if insert_after(&mut self.root, id, node) {
             self.update_visible();
-            self.dirty = true;
+            self.modified = true;
         }
     }
 
@@ -527,7 +527,7 @@ pub struct TreeWidget;
 impl TreeWidget {
     pub fn render(frame: &mut Frame, area: Rect, state: &TreeState) {
         let base_title = state
-            .active_file_path
+            .active_vault_path
             .as_deref()
             .map(|p| {
                 if state.display_full_path {
