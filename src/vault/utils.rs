@@ -71,6 +71,14 @@ pub fn config_dir() -> PathBuf {
             return PathBuf::from(val);
         }
     }
+    #[cfg(debug_assertions)]
+    {
+        if let Ok(val) = std::env::var("CRETOPASS_ENV") {
+            if val == "development" {
+                return PathBuf::from("config_dev");
+            }
+        }
+    }
     if cfg!(target_os = "linux") {
         if let Ok(val) = std::env::var("XDG_CONFIG_HOME") {
             let mut p = PathBuf::from(val);
@@ -316,5 +324,35 @@ mod tests {
         let loaded = load_config();
         assert!(!loaded.display_full_path);
         assert!(!loaded.open_last_opened_file_on_startup);
+    }
+
+    #[test]
+    fn test_dev_mode_config_dir() {
+        // SAFETY: tests run with --test-threads=1
+        unsafe { std::env::set_var("CRETOPASS_ENV", "development") };
+        let dir = config_dir();
+        unsafe { std::env::remove_var("CRETOPASS_ENV") };
+        assert_eq!(dir, PathBuf::from("config_dev"));
+    }
+
+    #[test]
+    fn test_dev_mode_falls_through_on_other_value() {
+        let _tmp = TestConfigDir::new();
+        // SAFETY: tests run with --test-threads=1
+        unsafe { std::env::set_var("CRETOPASS_ENV", "production") };
+        let dir = config_dir();
+        unsafe { std::env::remove_var("CRETOPASS_ENV") };
+        assert!(!dir.ends_with("config_dev"));
+    }
+
+    #[test]
+    fn test_config_dir_override_beats_dev_mode() {
+        let _tmp = TestConfigDir::new();
+        // CRETOPASS_CONFIG_DIR is set by TestConfigDir; dev mode should be ignored.
+        // SAFETY: tests run with --test-threads=1
+        unsafe { std::env::set_var("CRETOPASS_ENV", "development") };
+        let dir = config_dir();
+        unsafe { std::env::remove_var("CRETOPASS_ENV") };
+        assert!(!dir.ends_with("config_dev"));
     }
 }
