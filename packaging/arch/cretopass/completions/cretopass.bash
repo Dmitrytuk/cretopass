@@ -1,14 +1,18 @@
 # bash completion for cretopass
-# cretopass currently accepts no command-line arguments.
-# Extend this file when CLI options are added.
 _cretopass() {
-	local cur
+	local cur prev
 	COMPREPLY=()
 	cur="${COMP_WORDS[COMP_CWORD]}"
+	prev="${COMP_WORDS[COMP_CWORD-1]}"
 
 	case "$cur" in
 	-*)
-		COMPREPLY=($(compgen -W "" -- "$cur"))
+		COMPREPLY=($(compgen -W "-h --help -V --version" -- "$cur"))
+		;;
+	*)
+		if [[ $COMP_CWORD -eq 1 ]]; then
+			COMPREPLY=($(compgen -W "remove update" -- "$cur"))
+		fi
 		;;
 	esac
 }
