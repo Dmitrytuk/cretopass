@@ -60,14 +60,8 @@ fn main() -> ExitCode {
     }
 
     match subcommand.as_deref() {
-        Some("remove") => {
-            println!("cretopass: remove is not yet implemented.");
-            ExitCode::SUCCESS
-        }
-        Some("update") => {
-            println!("cretopass: update is not yet implemented.");
-            ExitCode::SUCCESS
-        }
+        Some("remove") => cretopass::cli::remove::run_remove(),
+        Some("update") => cretopass::cli::update::run_update(),
         None => match cretopass::run() {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {

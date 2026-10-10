@@ -1,18 +1,19 @@
 use std::io;
 
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
 use crossterm::ExecutableCommand;
-use ratatui::{backend::CrosstermBackend, Terminal};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
+use ratatui::{Terminal, backend::CrosstermBackend};
 
+pub mod cli;
 pub mod crypt;
 pub mod cursor;
 pub mod file_browser;
 pub mod file_handling;
-pub mod vault;
 pub mod theming;
 pub mod tree;
+pub mod vault;
 
 pub use tree::node::{ExtraField, FieldType, Node};
 pub use tree::widget::{InputMode, TreeState, TreeWidget};

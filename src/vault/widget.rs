@@ -6,15 +6,15 @@ use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::{backend::Backend, Frame, Terminal};
+use ratatui::{Frame, Terminal, backend::Backend};
 
 use crate::cursor::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
 use crate::file_browser::{self, FileBrowserAction, FileBrowserMode, FileBrowserState};
 use crate::file_handling;
+use crate::theming::Action;
+use crate::theming::{ElementStyle, Icon, texts};
 use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils::{self, Configuration};
-use crate::theming::Action;
-use crate::theming::{texts, ElementStyle, Icon};
 
 enum HomeModal {
     FileBrowser(FileBrowserState),
@@ -237,7 +237,8 @@ fn handle_home_key<B: Backend>(
                                 let mut tree_state =
                                     crate::tree::widget::TreeState::new(node.clone());
                                 tree_state.active_vault_path = Some(file_path);
-                                tree_state.active_vault_master_password = active_vault.passphrase.clone();
+                                tree_state.active_vault_master_password =
+                                    active_vault.passphrase.clone();
                                 tree_state.display_full_path = state.config.display_full_path;
                                 crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
                                 if !tree_state.return_to_menu {
@@ -273,8 +274,11 @@ fn handle_home_key<B: Backend>(
                 let file_idx = idx - texts::MENU_ITEMS.len();
                 if file_idx < state.config.recent_files.len() {
                     let path = &state.config.recent_files[file_idx];
-                    let is_active =
-                        state.active_vault.as_ref().and_then(|af| af.path.as_deref()) == Some(path);
+                    let is_active = state
+                        .active_vault
+                        .as_ref()
+                        .and_then(|af| af.path.as_deref())
+                        == Some(path);
                     if is_active {
                         state.modal = Some(HomeModal::Alert {
                             message: texts::MSG_CANNOT_DELETE_OPEN.to_string(),
@@ -290,10 +294,7 @@ fn handle_home_key<B: Backend>(
     Ok(())
 }
 
-fn reopen_tree<B: Backend>(
-    state: &mut HomeState,
-    terminal: &mut Terminal<B>,
-) -> io::Result<()> {
+fn reopen_tree<B: Backend>(state: &mut HomeState, terminal: &mut Terminal<B>) -> io::Result<()> {
     if let Some(ref active_vault) = state.active_vault {
         if let Some(ref node) = active_vault.node {
             let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
@@ -754,8 +755,7 @@ fn handle_change_pw_input_key<B: Backend>(
             } else {
                 // Save with new passphrase and reopen
                 if let Some(ref active_vault) = state.active_vault.clone() {
-                    if let (Some(path), Some(node)) = (&active_vault.path, &active_vault.node)
-                    {
+                    if let (Some(path), Some(node)) = (&active_vault.path, &active_vault.node) {
                         let new_pass_bytes = zeroize::Zeroizing::new(new_pass.into_bytes());
                         state.status = Some(texts::STATUS_SAVING);
                         terminal.draw(|f| render(f, f.area(), state))?;
@@ -1209,16 +1209,12 @@ fn render(frame: &mut Frame, area: Rect, state: &HomeState) {
         Some(HomeModal::PassphraseInput { .. }) => render_passphrase_modal(frame, area, state),
         Some(HomeModal::Configuration { .. }) => render_config_modal(frame, area, state),
         Some(HomeModal::Alert { message }) => render_alert_modal(frame, area, message),
-        Some(HomeModal::DeleteConfirm { path }) => {
-            render_delete_confirm_modal(frame, area, path)
-        }
+        Some(HomeModal::DeleteConfirm { path }) => render_delete_confirm_modal(frame, area, path),
         Some(HomeModal::ChangePwConfirm) => render_change_pw_confirm_modal(frame, area),
         Some(HomeModal::ConfirmNoPassphrase { .. }) => {
             render_confirm_no_passphrase_modal(frame, area)
         }
-        Some(HomeModal::ChangePwInput { .. }) => {
-            render_change_pw_input_modal(frame, area, state)
-        }
+        Some(HomeModal::ChangePwInput { .. }) => render_change_pw_input_modal(frame, area, state),
         Some(HomeModal::ExportSelectType { .. }) => {
             render_export_select_type_modal(frame, area, state)
         }
@@ -1717,10 +1713,7 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
     let cursor_char = if at.is_empty() { " " } else { &at };
 
     lines.push(Line::from(vec![
-        Span::styled(
-            texts::LABEL_PASSPHRASE,
-            ElementStyle::HomePassLabel.style(),
-        ),
+        Span::styled(texts::LABEL_PASSPHRASE, ElementStyle::HomePassLabel.style()),
         Span::raw(before.to_string()),
         Span::styled(
             cursor_char.to_string(),

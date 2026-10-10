@@ -459,7 +459,7 @@ fn parse_csv_line(line: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::file_handling::export::{export_tree, ExportFormat};
+    use crate::file_handling::export::{ExportFormat, export_tree};
 
     fn sample_xml() -> &'static str {
         r#"<?xml version="1.0" encoding="UTF-8"?>

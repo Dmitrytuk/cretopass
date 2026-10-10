@@ -1,7 +1,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use rkyv::{rancor, Archive, Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize, rancor};
 
 use crate::file_handling;
 

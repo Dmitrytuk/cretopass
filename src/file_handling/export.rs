@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::file_handling::{node_to_json, FileHandlingError};
+use crate::file_handling::{FileHandlingError, node_to_json};
 use crate::tree::node::Node;
 
 #[derive(Debug, Clone, Copy, PartialEq)]

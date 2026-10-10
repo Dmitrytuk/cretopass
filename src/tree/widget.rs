@@ -3,15 +3,15 @@ use std::collections::HashSet;
 use zeroize::Zeroizing;
 
 use ratatui::{
+    Frame,
     layout::Rect,
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 use uuid::Uuid;
 
 use super::node::{ExtraField, Node};
-use crate::theming::{texts, ElementStyle, Icon};
+use crate::theming::{ElementStyle, Icon, texts};
 
 /// A single visible row in the flattened tree display.
 #[derive(Debug, Clone)]

@@ -1,11 +1,11 @@
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
 
 use super::state::{FileBrowserMode, FileBrowserState, FileFilter, FocusTarget};
 use crate::cursor::cursor_field_spans;
-use crate::theming::{texts, ElementStyle, Icon};
+use crate::theming::{ElementStyle, Icon, texts};
 
 const DEFAULT_HEIGHT: u16 = 18;
 
@@ -294,8 +294,8 @@ fn render_error_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
 
 #[cfg(test)]
 mod tests {
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     use super::*;
     use crate::file_handling;

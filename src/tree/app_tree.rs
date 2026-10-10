@@ -7,16 +7,16 @@ use crate::cursor::{
 };
 use crate::file_handling::save_tree;
 use crate::theming::Action;
-use crate::theming::{texts, ElementStyle};
+use crate::theming::{ElementStyle, texts};
 use crate::tree::node::{ExtraField, FieldType};
 use crate::tree::widget::{InputMode, TreeState, TreeWidget};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
-use ratatui::{backend::Backend, Terminal};
+use ratatui::{Terminal, backend::Backend};
 
 pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) -> io::Result<()> {
     loop {
@@ -201,11 +201,7 @@ fn total_fields(extra_fields: &[ExtraField]) -> usize {
 }
 
 fn extra_field_index(field: usize) -> Option<usize> {
-    if field >= 2 {
-        Some(field - 2)
-    } else {
-        None
-    }
+    if field >= 2 { Some(field - 2) } else { None }
 }
 
 fn active_len_for_field(
@@ -1098,7 +1094,7 @@ fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
             };
         }
         Action::Confirm => {
-            use crate::file_handling::export::{export_tree, ExportFormat};
+            use crate::file_handling::export::{ExportFormat, export_tree};
 
             let format = match selected_format {
                 0 => ExportFormat::Json,
