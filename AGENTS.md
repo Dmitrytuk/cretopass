@@ -40,3 +40,5 @@ map and cross-module data flow.
 - [0005 — tree](./src/tree/docs/adr/0005-tree-module.md) — Node model, TreeState, InputMode, event loop, rendering, autosave
 - [0006 — vault](./src/vault/docs/adr/0006-vault-module.md) — Home screen, ActiveVaultState, configuration persistence
 - [0007 — file_browser](./src/file_browser/docs/adr/0007-file-browser.md) — directory browser overlay
+- [0008 — CLI lifecycle commands](./docs/adr/0008-cli-lifecycle-commands.md) — `update`/`remove` architecture, self-managed installs, detached helpers
+- [0009 — CLI module](./src/cli/docs/adr/0009-cli-module.md) — `cli` module facade + sub-module layout (`detect`, `update`, `remove`)

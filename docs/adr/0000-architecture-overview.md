@@ -15,6 +15,7 @@ writes back to an age-encrypted JSON file after every mutation.
 | `tree` | [0005](../src/tree/docs/adr/0005-tree-module.md) | Tree data model, state machine, rendering, event loop |
 | `vault` | [0006](../src/vault/docs/adr/0006-vault-module.md) | Home screen, active vault state, configuration persistence |
 | `file_browser` | [0007](../src/file_browser/docs/adr/0007-file-browser.md) | OS directory browser overlay |
+| `cli` | [0009](../src/cli/docs/adr/0009-cli-module.md) | CLI lifecycle subcommands (`update`, `remove`) — no TUI |
 
 ## Cross-module data flow
 
