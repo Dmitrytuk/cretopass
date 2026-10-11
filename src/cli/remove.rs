@@ -458,3 +458,62 @@ fn create_remove_temp() -> io::Result<PathBuf> {
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Asserts that a marker-wrapped block is removed while surrounding
+    /// content is preserved.
+    #[test]
+    fn remove_marker_block_strips_block() {
+        let content = "line before\n# >>> cretopass PATH >>>\nexport PATH=...\n# <<< cretopass PATH <<<\nline after\n";
+        let cleaned = remove_marker_block(content, PATH_MARKER_START, PATH_MARKER_END);
+        assert_eq!(cleaned, "line before\nline after");
+    }
+
+    /// Returns content unchanged when neither marker is present.
+    #[test]
+    fn remove_marker_block_missing_keeps_content() {
+        let content = "no markers here";
+        assert_eq!(
+            remove_marker_block(content, PATH_MARKER_START, PATH_MARKER_END),
+            content
+        );
+    }
+
+    /// A dangling start marker (no end marker) strips everything from the
+    /// start marker to the end of the content.
+    #[test]
+    fn remove_marker_block_unterminated_start() {
+        let content = "keep\n# >>> cretopass PATH >>>\ntrailing\n";
+        let cleaned = remove_marker_block(content, PATH_MARKER_START, PATH_MARKER_END);
+        assert_eq!(cleaned, "keep");
+    }
+
+    /// An empty block (markers on adjacent lines) is fully removed.
+    #[test]
+    fn remove_marker_block_empty_block() {
+        let content = "keep\n# >>> cretopass PATH >>>\n# <<< cretopass PATH <<<\nkeep\n";
+        let cleaned = remove_marker_block(content, PATH_MARKER_START, PATH_MARKER_END);
+        assert_eq!(cleaned, "keep\nkeep");
+    }
+
+    /// Two different marker blocks (PATH and zsh completion) are both removed.
+    #[test]
+    fn remove_marker_block_multiple_blocks() {
+        let content = "# >>> cretopass PATH >>>\nexport PATH=...\n# <<< cretopass PATH <<<\n\
+# >>> cretopass completion >>>\nfpath=(...)\n# <<< cretopass completion <<<\n";
+        let cleaned_path = remove_marker_block(content, PATH_MARKER_START, PATH_MARKER_END);
+        let cleaned = remove_marker_block(
+            &cleaned_path,
+            ZSH_COMPLETION_MARKER_START,
+            ZSH_COMPLETION_MARKER_END,
+        );
+        assert_eq!(cleaned.trim(), "");
+    }
+}
