@@ -21,7 +21,8 @@ pub fn run_remove() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let artifacts = collect_artifacts(&home);
+    let config_dir = utils::config_dir();
+    let artifacts = collect_artifacts(&home, &config_dir);
 
     if artifacts.is_empty() {
         println!("No cretopass artifacts found to remove.");
@@ -103,7 +104,7 @@ enum Artifact {
     Dir(PathBuf),
 }
 
-fn collect_artifacts(home: &Path) -> Vec<Artifact> {
+fn collect_artifacts(home: &Path, config_dir: &Path) -> Vec<Artifact> {
     let mut out = Vec::new();
 
     // --- Binary ---
@@ -113,12 +114,8 @@ fn collect_artifacts(home: &Path) -> Vec<Artifact> {
     }
 
     // --- Config directory ---
-    let config_dir = utils::config_dir();
-    // config_dir() respects CRETOPASS_CONFIG_DIR — use it as-is but only
-    // remove if it exists and is under the expected pattern (not an
-    // overridden test path).
     if config_dir.exists() {
-        out.push(Artifact::Dir(config_dir));
+        out.push(Artifact::Dir(config_dir.to_path_buf()));
     }
 
     #[cfg(unix)]
