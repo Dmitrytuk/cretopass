@@ -13,7 +13,10 @@ cd "$(dirname "$0")/.."
 echo "==> Building cretopass"
 cargo build --quiet --bin cretopass
 
-BIN="$(pwd)/target/debug/cretopass"
+# Honour CARGO_TARGET_DIR so the script works both on the host and inside a
+# container where the source is mounted read-only and the target lives in /tmp.
+TARGET_DIR="${CARGO_TARGET_DIR:-$(pwd)/target}"
+BIN="$TARGET_DIR/debug/cretopass"
 TMP_HOME="$(mktemp -d)"
 trap 'rm -rf "$TMP_HOME"' EXIT
 
