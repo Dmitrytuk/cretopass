@@ -26,19 +26,7 @@ audit I/O patterns.
 - Import parsers (XML, CSV) are hand-rolled to avoid pulling in parser crates. Max XML nesting depth is 256.
 - `FileEntry` is the public type for directory listings; `file_browser` re-exports it.
 
-## Keybindings — file_browser context
-
-| Keys | Action |
-|------|--------|
-| `j`/`k` | Navigate files |
-| `Enter` | Enter directory or select file |
-| `/` | Search filter |
-| `h` | Go up one directory |
-| `r` | Rename focused entry |
-| `d` / `Delete` | Delete with confirmation |
-| `n` | New folder (CreateFile mode) |
-| `N` | Toggle focus between file list and path input |
-| `f` | Toggle filter: all files / `.pwd` only |
+For file_browser keybindings see [ADR 0007 — file_browser](../../file_browser/docs/adr/0007-file-browser.md).
 
 ## Dependencies
 

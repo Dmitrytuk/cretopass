@@ -28,7 +28,7 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 
 ## InputMode state machine
 
-16 variants: `Normal`, `Search`, `AwaitingDd`, `Detail{selected, alert}`,
+14 variants: `Normal`, `Search`, `AwaitingDd`, `Detail{selected, alert}`,
 `Editing{node_id, name, desc, extra_fields, field, cursor}`,
 `Adding{name, desc, extra_fields, field, cursor}`,
 `SelectFieldType{...}`, `CustomFieldName{...}`, `ConfirmDeleteField{...}`,

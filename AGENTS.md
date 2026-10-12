@@ -1,6 +1,6 @@
 # cretopass
 
-Rust ratatui-based TUI app with a custom tree data structure (not file-system), vim-style navigation, search/filter, and edit/add forms. In-memory only, no persistence.
+Rust ratatui-based TUI app with a custom tree data structure (not file-system), vim-style navigation, search/filter, and edit/add forms. In-memory editing with atomic autosave to an age-encrypted file.
 
 ## Coding Conventions
 

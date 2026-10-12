@@ -24,7 +24,7 @@ leaves your machine**.
 - **Detail overlay** — view a node's fields (`Ctrl+Enter`/`i`), copy any row
   to the system clipboard with `Enter` (uses `wl-copy`/`xclip`/`xsel` on
   Linux, `pbcopy` on macOS).
-- **Settings menu** — the app starts in a settings screen: open an existing
+- **Home screen** — the app starts with a launcher screen: open an existing
   secret file, create a new one, or pick from recently used files.
 - **Auto-save** — every mutation (add, edit, cut, paste) re-encrypts and
   writes the file immediately using an atomic temp-file rename, so a crash
@@ -47,8 +47,24 @@ leaves your machine**.
 | `A` | Add child |
 | `/` | Search (type, `Enter` confirm, `Esc` cancel) |
 | `Esc` (normal) | Clear search highlights |
+| `Ctrl+E` | Export selected node |
 | `q` / `Ctrl+C` | Quit |
-| `H` | Return to settings menu |
+| `H` | Return to home screen |
+
+### File Browser
+
+| Keys | Action |
+|------|--------|
+| `j`/`k` | Navigate files |
+| `Enter` | Enter directory or select file |
+| `/` | Search filter |
+| `h` | Go up one directory |
+| `r` | Rename focused entry |
+| `d` / `Delete` | Delete with confirmation (`y` confirms) |
+| `n` | New folder (CreateFile mode) |
+| `N` | Toggle focus between file list and path input |
+| `f` | Toggle filter: all files / `.pwd` only |
+| `Esc` | Cancel/close browser |
 
 See `man cretopass` after installation for the full reference.
 
@@ -88,7 +104,7 @@ secret file — they are useless to anyone without the passphrase.
 |------|---------|
 | `<secret file>` | The age-encrypted secret file (location chosen by you) |
 | `<secret file>.bak` | Transient copy of the previous version; exists only during a save (or after an interrupted one) |
-| `~/.config/cretopass/recent_files.json` | Recent files list and app settings |
+| `~/.config/cretopass/config.pwd` | App settings and recent files list (rkyv binary) |
 
 ## Build & run
 
