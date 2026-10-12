@@ -40,7 +40,7 @@ fn run_update_unix() -> ExitCode {
     };
 
     let script_path = tmp_dir.join(INSTALLER);
-    let url = format!("https://github.com/{REPO}/releases/latest/download/{INSTALLER}");
+    let url = installer_url();
 
     if let Err(e) = download_with_curl(&url, &script_path) {
         eprintln!("cretopass update: failed to download installer: {e}");
@@ -90,7 +90,7 @@ fn run_update_windows() -> ExitCode {
     };
 
     let script_path = tmp_dir.join(INSTALLER);
-    let url = format!("https://github.com/{REPO}/releases/latest/download/{INSTALLER}");
+    let url = installer_url();
 
     if let Err(e) = download_with_powershell(&url, &script_path) {
         eprintln!("cretopass update: failed to download installer: {e}");
@@ -134,6 +134,30 @@ fn run_update_windows() -> ExitCode {
             let _ = std::fs::remove_dir_all(&tmp_dir);
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Returns the URL of the installer script to download.
+///
+/// Honours the `CRETOPASS_UPDATE_URL` environment variable to allow tests (and
+/// mirrors) to point at a different source. An empty value is treated as unset.
+fn installer_url() -> String {
+    installer_url_from(
+        std::env::var("CRETOPASS_UPDATE_URL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .as_deref(),
+    )
+}
+
+/// Resolves the installer URL from an optional override.
+///
+/// Returns `base` unchanged when provided, otherwise the default GitHub
+/// Releases URL for the current platform's installer.
+fn installer_url_from(base: Option<&str>) -> String {
+    match base {
+        Some(url) => url.to_string(),
+        None => format!("https://github.com/{REPO}/releases/latest/download/{INSTALLER}"),
     }
 }
 
@@ -184,5 +208,49 @@ fn download_with_powershell(url: &str, dest: &std::path::Path) -> Result<(), Str
         Ok(())
     } else {
         Err(format!("powershell exited with status {status}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Without an override, the installer URL points at the default GitHub
+    /// Releases location for this platform's installer.
+    #[test]
+    fn installer_url_from_none_defaults_to_github() {
+        let expected = format!("https://github.com/{REPO}/releases/latest/download/{INSTALLER}");
+        assert_eq!(installer_url_from(None), expected);
+    }
+
+    /// A provided override is returned verbatim (e.g. a `file://` fixture URL).
+    #[test]
+    fn installer_url_from_some_uses_provided_url() {
+        assert_eq!(
+            installer_url_from(Some("file:///tmp/fake-install.sh")),
+            "file:///tmp/fake-install.sh"
+        );
+    }
+
+    /// `download_with_curl` copies the source at a `file://` URL to the
+    /// destination path. Requires `curl` on `PATH`.
+    #[cfg(unix)]
+    #[test]
+    fn download_with_curl_file_url_copies_content() {
+        let fixture = std::env::temp_dir().join("cretopass-test-fixture.sh");
+        let dest = std::env::temp_dir().join("cretopass-test-dest.sh");
+        let content = "#!/bin/sh\necho cretopass-test\n";
+        std::fs::write(&fixture, content).expect("write fixture");
+
+        let url = format!("file://{}", fixture.display());
+        let result = download_with_curl(&url, &dest);
+
+        let copied = std::fs::read_to_string(&dest).ok();
+
+        let _ = std::fs::remove_file(&fixture);
+        let _ = std::fs::remove_file(&dest);
+
+        result.expect("curl download should succeed");
+        assert_eq!(copied.as_deref(), Some(content));
     }
 }
