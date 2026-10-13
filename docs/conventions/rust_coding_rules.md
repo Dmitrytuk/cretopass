@@ -50,7 +50,7 @@ cargo doc --no-deps   # if public API was touched
 ## 2. Project Structure
 
 - One concept per module. Keep files under ~500 lines; split when they grow.
-- Use `mod.rs`-free layout (`foo.rs` + `foo/bar.rs`) unless the project already uses `mod.rs`.
+- Declare every module with a **facade file**: `module_name.rs` at the parent level, which re-exports the public API from sub-modules placed one-per-file inside the same-named directory (`module_name/`). `mod.rs` is forbidden.
 - `lib.rs` / `main.rs` should be thin: re-exports, top-level docs, and wiring only.
 - For binaries: put logic in a library crate, keep `main.rs` to argument parsing + calling `lib::run()`.
 - Use `pub(crate)` by default for internal items. Only `pub` what is meant to be a stable API.
