@@ -1,20 +1,33 @@
 #compdef cretopass
 # zsh completion for cretopass
+#
+# Installed by the cretopass installer to
+#   ~/.zsh/completions/_cretopass
+# with an fpath entry added to ~/.zshrc.
 
 _cretopass() {
-	_arguments \
+	local context state state_descr line
+	typeset -A opt_args
+
+	_arguments -C \
 		'(-h --help)'{-h,--help}'[show help message]' \
 		'(-V --version)'{-V,--version}'[show version information]' \
-		'1:command:_cretopass_commands'
-}
+		'1:command:->command' \
+		'*::arg:->args' && return 0
 
-_cretopass_commands() {
-	local -a commands
-	commands=(
-		'remove:delete the app and all artifacts from the system'
-		'update:check for a new version and install it'
-	)
-	_describe -t commands 'command' commands
+	case "$state" in
+	command)
+		local -a commands
+		commands=(
+			'remove:delete the app and all artifacts from the system'
+			'update:check for a new version and install it'
+		)
+		_describe -t commands 'cretopass command' commands
+		;;
+	args)
+		# Subcommands currently take no further arguments.
+		;;
+	esac
 }
 
 _cretopass "$@"

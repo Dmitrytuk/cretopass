@@ -4,6 +4,11 @@ set -eu
 REPO="Dmitrytuk/cretopass"
 BIN="cretopass"
 
+# Base URL for release assets.
+# Honours CRETOPASS_INSTALL_URL to allow tests (and mirrors) to point at a
+# different source. An empty value is treated as unset.
+BASE_URL="${CRETOPASS_INSTALL_URL:-https://github.com/$REPO/releases/latest/download}"
+
 # --- Args ---
 FORCE=0
 for arg in "$@"; do
@@ -93,7 +98,7 @@ tty_available() {
 }
 
 # --- Download ---
-URL="https://github.com/$REPO/releases/latest/download/$BIN-$TARGET.tar.gz"
+URL="$BASE_URL/$BIN-$TARGET.tar.gz"
 SHA_URL="$URL.sha256"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -141,12 +146,12 @@ install_linux_desktop() {
   mkdir -p "$APP_DIR" "$ICON_DIR" 2>/dev/null || true
 
   # Icon (best effort)
-  curl -fsSL "https://github.com/$REPO/releases/latest/download/cretopass.png" \
+  curl -fsSL "$BASE_URL/cretopass.png" \
     -o "$ICON_DIR/cretopass.png" 2>/dev/null || true
 
   # .desktop from release, with @EXEC@ substituted to the installed binary path
   TMP_DESKTOP="$APP_DIR/cretopass.desktop.tmp"
-  if curl -fsSL "https://github.com/$REPO/releases/latest/download/cretopass.desktop" \
+  if curl -fsSL "$BASE_URL/cretopass.desktop" \
       -o "$TMP_DESKTOP" 2>/dev/null; then
     sed "s|@EXEC@|$INSTALL_DIR/$BIN|g" "$TMP_DESKTOP" \
       > "$APP_DIR/cretopass.desktop" 2>/dev/null || true
@@ -173,7 +178,7 @@ exec /usr/bin/open -a Terminal "$INSTALL_DIR/$BIN"
 EOF
   chmod +x "$APP/Contents/MacOS/cretopass"
 
-  curl -fsSL "https://github.com/$REPO/releases/latest/download/cretopass.icns" \
+  curl -fsSL "$BASE_URL/cretopass.icns" \
     -o "$APP/Contents/Resources/cretopass.icns" 2>/dev/null || true
 
   cat > "$APP/Contents/Info.plist" <<EOF
@@ -210,21 +215,21 @@ install_completions() {
   # bash
   BASH_DIR="$HOME/.local/share/bash-completion/completions"
   if [ -d "$BASH_DIR" ] || mkdir -p "$BASH_DIR" 2>/dev/null; then
-    curl -fsSL "https://github.com/$REPO/releases/latest/download/cretopass.bash" \
+    curl -fsSL "$BASE_URL/cretopass.bash" \
       -o "$BASH_DIR/$BIN" 2>/dev/null || echo "  bash completion: skipped (not available)"
   fi
 
   # fish
   FISH_DIR="$HOME/.config/fish/completions"
   if mkdir -p "$FISH_DIR" 2>/dev/null; then
-    curl -fsSL "https://github.com/$REPO/releases/latest/download/cretopass.fish" \
+    curl -fsSL "$BASE_URL/cretopass.fish" \
       -o "$FISH_DIR/$BIN.fish" 2>/dev/null || echo "  fish completion: skipped (not available)"
   fi
 
   # zsh
   ZSH_DIR="$HOME/.zsh/completions"
   if mkdir -p "$ZSH_DIR" 2>/dev/null; then
-    if curl -fsSL "https://github.com/$REPO/releases/latest/download/_cretopass" \
+    if curl -fsSL "$BASE_URL/_cretopass" \
         -o "$ZSH_DIR/_cretopass" 2>/dev/null; then
       # Add fpath entry to .zshrc if not already present (marker-wrapped)
       RC="$HOME/.zshrc"
@@ -247,7 +252,6 @@ install_completions() {
             echo "# <<< cretopass completion <<<"
           } >> "$RC"
         fi
-      fi
       fi
     else
       echo "  zsh completion: skipped (not available)"

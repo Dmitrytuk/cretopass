@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Cretopass
+GenericName=Secret Keeper
+Comment=Terminal-based secret keeper with vim-style navigation and age encryption
+Exec=@EXEC@
+Icon=cretopass
+Terminal=true
+Categories=Utility;Security;
+Keywords=password;secrets;encryption;age;tui;terminal;

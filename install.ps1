@@ -7,6 +7,15 @@ $ErrorActionPreference = 'Stop'
 $Repo = "Dmitrytuk/cretopass"
 $Bin  = "cretopass.exe"
 
+# Base URL for release assets.
+# Honours CRETOPASS_INSTALL_URL to allow tests (and mirrors) to point at a
+# different source. An empty value is treated as unset.
+$BaseUrl = if ($env:CRETOPASS_INSTALL_URL) {
+    $env:CRETOPASS_INSTALL_URL
+} else {
+    "https://github.com/$Repo/releases/latest/download"
+}
+
 # --- Architecture (WOW64-aware) ---
 function Get-Arch {
     if ($env:PROCESSOR_ARCHITEW6432) { return $env:PROCESSOR_ARCHITEW6432 }
@@ -59,7 +68,7 @@ if ($PrevVersion -and $LatestVersion -and `
 
 # --- URL ---
 $ZipName = "cretopass-$Target.zip"
-$Url     = "https://github.com/$Repo/releases/latest/download/$ZipName"
+$Url     = "$BaseUrl/$ZipName"
 $ShaUrl  = "$Url.sha256"
 
 # --- Download + verify + install (with temp cleanup) ---
@@ -115,7 +124,7 @@ function Install-StartMenuShortcut {
     $IconPath = Join-Path $InstallDir "cretopass.ico"
     try {
         Invoke-WebRequest `
-            -Uri "https://github.com/$Repo/releases/latest/download/cretopass.ico" `
+            -Uri "$BaseUrl/cretopass.ico" `
             -OutFile $IconPath -UseBasicParsing -ErrorAction Stop
     } catch {
         Write-Warning "Icon not installed: $_"
@@ -154,7 +163,7 @@ function Install-PowerShellCompletion {
     $CompPath = Join-Path $CompDir "cretopass.ps1"
     try {
         Invoke-WebRequest `
-            -Uri "https://github.com/$Repo/releases/latest/download/cretopass.ps1" `
+            -Uri "$BaseUrl/cretopass.ps1" `
             -OutFile $CompPath -UseBasicParsing -ErrorAction Stop
     } catch {
         Write-Warning "PowerShell completion not installed: $_"

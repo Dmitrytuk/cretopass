@@ -281,7 +281,7 @@ dependencies = [
 
 [[package]]
 name = "cretopass"
-version = "1.0.0"
+version = "0.1.0"
 dependencies = [
  "age",
  "chrono",
@@ -293,6 +293,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "uuid",
+ "winres",
  "zeroize",
 ]
 
@@ -2042,6 +2043,15 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+
+[[package]]
+name = "winres"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b68db261ef59e9e52806f688020631e987592bd83619edccda9c47d42cde4f6c"
+dependencies = [
+ "toml",
+]
 
 [[package]]
 name = "wit-bindgen"
