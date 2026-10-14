@@ -3,6 +3,7 @@ name: release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -13,15 +14,31 @@ jobs:
   validate-tag:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.ref }}
 
-      - name: Check Cargo.toml version matches tag
+      - name: Resolve version
+        id: version
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION=$(grep -m1 '^version' Cargo.toml \
+              | sed -E 's/.*"([^"]+)".*/\1/')
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION (ref type: ${GITHUB_REF_TYPE})"
+        shell: bash
+
+      - name: Check Cargo.toml version matches tag
+        if: github.ref_type == 'tag'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
           CARGO_VERSION=$(grep -m1 '^version' Cargo.toml \
             | sed -E 's/.*"([^"]+)".*/\1/')
           if [ "$CARGO_VERSION" != "$VERSION" ]; then
@@ -31,9 +48,9 @@ jobs:
           echo "Version $VERSION matches Cargo.toml."
         shell: bash
 
-      - name: Check CHANGELOG has a non-empty section for the tag
+      - name: Check CHANGELOG has a non-empty section for the version
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${{ steps.version.outputs.version }}"
           awk -v ver="$VERSION" '
             $0 ~ "^## \\[" ver "\\]" { found=1; next }
             found && /^## \[/ { exit }
@@ -131,7 +148,7 @@ jobs:
 
       - name: Verify binary reports the tagged version
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${{ needs.validate-tag.outputs.version }}"
           BIN="target/${{ matrix.target }}/release/cretopass"
           if [ "${{ runner.os }}" = "Windows" ]; then BIN="$BIN.exe"; fi
 
@@ -199,7 +216,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: build
+    needs: [validate-tag, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -246,7 +263,7 @@ jobs:
       - name: Extract release notes from CHANGELOG
         id: changelog
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${{ needs.validate-tag.outputs.version }}"
           awk -v ver="$VERSION" '
             $0 ~ "^## \\[" ver "\\]" { found=1; next }
             found && /^## \[/ { exit }
@@ -259,6 +276,7 @@ jobs:
         shell: bash
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
             install.sh
