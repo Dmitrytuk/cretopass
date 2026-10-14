@@ -231,22 +231,19 @@ fn handle_home_key<B: Backend>(
                 if file_idx < state.config.recent_files.len() {
                     let file_path: String = state.config.recent_files[file_idx].clone();
 
-                    if let Some(ref active_vault) = state.active_vault {
-                        if active_vault.path.as_deref() == Some(&file_path) {
-                            if let Some(ref node) = active_vault.node {
-                                let mut tree_state =
-                                    crate::tree::widget::TreeState::new(node.clone());
-                                tree_state.active_vault_path = Some(file_path);
-                                tree_state.active_vault_master_password =
-                                    active_vault.passphrase.clone();
-                                tree_state.display_full_path = state.config.display_full_path;
-                                crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
-                                if !tree_state.return_to_menu {
-                                    state.quit = true;
-                                }
-                                return Ok(());
-                            }
+                    if let Some(ref active_vault) = state.active_vault
+                        && active_vault.path.as_deref() == Some(&file_path)
+                        && let Some(ref node) = active_vault.node
+                    {
+                        let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
+                        tree_state.active_vault_path = Some(file_path);
+                        tree_state.active_vault_master_password = active_vault.passphrase.clone();
+                        tree_state.display_full_path = state.config.display_full_path;
+                        crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
+                        if !tree_state.return_to_menu {
+                            state.quit = true;
                         }
+                        return Ok(());
                     }
 
                     match file_handling::validate_encrypted_file(&file_path) {
@@ -295,16 +292,16 @@ fn handle_home_key<B: Backend>(
 }
 
 fn reopen_tree<B: Backend>(state: &mut HomeState, terminal: &mut Terminal<B>) -> io::Result<()> {
-    if let Some(ref active_vault) = state.active_vault {
-        if let Some(ref node) = active_vault.node {
-            let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
-            tree_state.active_vault_path = active_vault.path.clone();
-            tree_state.active_vault_master_password = active_vault.passphrase.clone();
-            tree_state.display_full_path = state.config.display_full_path;
-            crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
-            if !tree_state.return_to_menu {
-                state.quit = true;
-            }
+    if let Some(ref active_vault) = state.active_vault
+        && let Some(ref node) = active_vault.node
+    {
+        let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
+        tree_state.active_vault_path = active_vault.path.clone();
+        tree_state.active_vault_master_password = active_vault.passphrase.clone();
+        tree_state.display_full_path = state.config.display_full_path;
+        crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
+        if !tree_state.return_to_menu {
+            state.quit = true;
         }
     }
     Ok(())
@@ -330,10 +327,10 @@ fn handle_file_browser_key<B: Backend>(
         }
         Some(FileBrowserAction::Cancelled) => {}
         Some(FileBrowserAction::Renamed { from, to }) => {
-            if let Some(ref active_vault) = state.active_vault {
-                if active_vault.path.as_deref() == Some(&from) {
-                    state.active_vault.as_mut().unwrap().path = Some(to.clone());
-                }
+            if let Some(ref active_vault) = state.active_vault
+                && active_vault.path.as_deref() == Some(&from)
+            {
+                state.active_vault.as_mut().unwrap().path = Some(to.clone());
             }
             if state.config.last_opened_file.as_deref() == Some(&from) {
                 state.config.last_opened_file = Some(to.clone());
@@ -754,38 +751,37 @@ fn handle_change_pw_input_key<B: Backend>(
                 state.modal = Some(modal);
             } else {
                 // Save with new passphrase and reopen
-                if let Some(ref active_vault) = state.active_vault.clone() {
-                    if let (Some(path), Some(node)) = (&active_vault.path, &active_vault.node) {
-                        let new_pass_bytes = zeroize::Zeroizing::new(new_pass.into_bytes());
-                        state.status = Some(texts::STATUS_SAVING);
-                        terminal.draw(|f| render(f, f.area(), state))?;
-                        match file_handling::save_tree(node, path, &new_pass_bytes) {
-                            Err(e) => {
-                                state.status = None;
-                                state.modal = Some(HomeModal::ChangePwInput {
-                                    current: String::new(),
-                                    current_cursor: 0,
-                                    new_pass: String::new(),
-                                    new_cursor: 0,
-                                    confirm: String::new(),
-                                    confirm_cursor: 0,
-                                    focused: 0,
-                                    error: Some(format!("{}{e}", texts::MSG_SAVE_FAILED)),
-                                });
-                            }
-                            Ok(()) => {
-                                state.status = None;
-                                state.active_vault.as_mut().unwrap().passphrase =
-                                    new_pass_bytes.clone();
-                                let mut tree_state =
-                                    crate::tree::widget::TreeState::new(node.clone());
-                                tree_state.active_vault_path = Some(path.clone());
-                                tree_state.active_vault_master_password = new_pass_bytes;
-                                tree_state.display_full_path = state.config.display_full_path;
-                                crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
-                                if !tree_state.return_to_menu {
-                                    state.quit = true;
-                                }
+                if let Some(ref active_vault) = state.active_vault.clone()
+                    && let (Some(path), Some(node)) = (&active_vault.path, &active_vault.node)
+                {
+                    let new_pass_bytes = zeroize::Zeroizing::new(new_pass.into_bytes());
+                    state.status = Some(texts::STATUS_SAVING);
+                    terminal.draw(|f| render(f, f.area(), state))?;
+                    match file_handling::save_tree(node, path, &new_pass_bytes) {
+                        Err(e) => {
+                            state.status = None;
+                            state.modal = Some(HomeModal::ChangePwInput {
+                                current: String::new(),
+                                current_cursor: 0,
+                                new_pass: String::new(),
+                                new_cursor: 0,
+                                confirm: String::new(),
+                                confirm_cursor: 0,
+                                focused: 0,
+                                error: Some(format!("{}{e}", texts::MSG_SAVE_FAILED)),
+                            });
+                        }
+                        Ok(()) => {
+                            state.status = None;
+                            state.active_vault.as_mut().unwrap().passphrase =
+                                new_pass_bytes.clone();
+                            let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
+                            tree_state.active_vault_path = Some(path.clone());
+                            tree_state.active_vault_master_password = new_pass_bytes;
+                            tree_state.display_full_path = state.config.display_full_path;
+                            crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
+                            if !tree_state.return_to_menu {
+                                state.quit = true;
                             }
                         }
                     }
@@ -1054,10 +1050,9 @@ fn handle_passphrase_key<B: Backend>(
             if let HomeModal::PassphraseInput {
                 passphrase, cursor, ..
             } = &mut modal
+                && *cursor > 0
             {
-                if *cursor > 0 {
-                    *cursor = backspace_at(passphrase, *cursor);
-                }
+                *cursor = backspace_at(passphrase, *cursor);
             }
             state.modal = Some(modal);
         }

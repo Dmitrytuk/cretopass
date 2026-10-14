@@ -957,10 +957,10 @@ fn handle_detail(key: event::KeyEvent, state: &mut TreeState) {
                     node.extra_fields.get(idx).map(|ef| ef.value.clone())
                 }
             });
-            if let Some(ref t) = text {
-                if !t.is_empty() {
-                    copy_to_clipboard(t);
-                }
+            if let Some(ref t) = text
+                && !t.is_empty()
+            {
+                copy_to_clipboard(t);
             }
             state.mode = InputMode::Detail {
                 selected,

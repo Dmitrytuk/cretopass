@@ -66,17 +66,17 @@ impl Default for Configuration {
 /// When the `CRETOPASS_CONFIG_DIR` environment variable is set, its value is
 /// used instead (primarily for tests).
 pub fn config_dir() -> PathBuf {
-    if let Ok(val) = std::env::var("CRETOPASS_CONFIG_DIR") {
-        if !val.is_empty() {
-            return PathBuf::from(val);
-        }
+    if let Ok(val) = std::env::var("CRETOPASS_CONFIG_DIR")
+        && !val.is_empty()
+    {
+        return PathBuf::from(val);
     }
     #[cfg(debug_assertions)]
     {
-        if let Ok(val) = std::env::var("CRETOPASS_ENV") {
-            if val == "development" {
-                return PathBuf::from("config_dev");
-            }
+        if let Ok(val) = std::env::var("CRETOPASS_ENV")
+            && val == "development"
+        {
+            return PathBuf::from("config_dev");
         }
     }
     if cfg!(target_os = "linux") {
@@ -96,12 +96,12 @@ pub fn config_dir() -> PathBuf {
             p.push("Library/Application Support/cretopass");
             return p;
         }
-    } else if cfg!(target_os = "windows") {
-        if let Ok(val) = std::env::var("APPDATA") {
-            let mut p = PathBuf::from(val);
-            p.push("cretopass");
-            return p;
-        }
+    } else if cfg!(target_os = "windows")
+        && let Ok(val) = std::env::var("APPDATA")
+    {
+        let mut p = PathBuf::from(val);
+        p.push("cretopass");
+        return p;
     }
     let mut p = PathBuf::from(".");
     p.push(".cretopass");

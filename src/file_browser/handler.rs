@@ -169,21 +169,25 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
             None
         }
         KeyCode::Char('r') => {
-            if let Some(entry) = state.entries.get(state.selected) {
-                if entry.is_age_file && !entry.is_dir && state.mode != FileBrowserMode::ImportFile {
-                    state.focus = FocusTarget::Rename;
-                    state.rename_name = entry.name.clone();
-                    state.rename_cursor = entry.name.len();
-                    state.rename_target = entry.path.to_string_lossy().to_string();
-                }
+            if let Some(entry) = state.entries.get(state.selected)
+                && entry.is_age_file
+                && !entry.is_dir
+                && state.mode != FileBrowserMode::ImportFile
+            {
+                state.focus = FocusTarget::Rename;
+                state.rename_name = entry.name.clone();
+                state.rename_cursor = entry.name.len();
+                state.rename_target = entry.path.to_string_lossy().to_string();
             }
             None
         }
         KeyCode::Char('d') | KeyCode::Delete => {
-            if let Some(entry) = state.entries.get(state.selected) {
-                if entry.is_age_file && !entry.is_dir && state.mode != FileBrowserMode::ImportFile {
-                    state.confirm_delete = Some(entry.path.to_string_lossy().to_string());
-                }
+            if let Some(entry) = state.entries.get(state.selected)
+                && entry.is_age_file
+                && !entry.is_dir
+                && state.mode != FileBrowserMode::ImportFile
+            {
+                state.confirm_delete = Some(entry.path.to_string_lossy().to_string());
             }
             None
         }
