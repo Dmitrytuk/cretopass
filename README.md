@@ -5,6 +5,35 @@ It stores your secrets — logins, passwords, notes, and custom fields — in a
 hierarchical tree, and keeps everything in **one encrypted file that never
 leaves your machine**.
 
+## Installation
+
+### Linux & macOS
+
+```sh
+curl -fsSL https://github.com/Dmitrytuk/cretopass/releases/latest/download/install.sh | sh
+```
+
+The script downloads the latest release, verifies its checksum, installs the
+binary to `~/.local/bin`, and sets up shell completions and desktop
+integration. Re-running it is safe: if the installed version is already
+current it exits early (pass `--force` to reinstall).
+
+### Windows
+
+```powershell
+irm https://github.com/Dmitrytuk/cretopass/releases/latest/download/install.ps1 | iex
+```
+
+The script installs the binary to `%LOCALAPPDATA%\Programs\cretopass` and adds
+it to `PATH`. Pass `-Force` to reinstall.
+
+### Updating & uninstalling
+
+```sh
+cretopass update   # check for a new version and install it
+cretopass remove   # delete the app and all its artifacts
+```
+
 ## Core functionality
 
 - **Secret tree** — organize secrets as a tree of nodes. Every node has a
@@ -31,42 +60,6 @@ leaves your machine**.
   mid-save cannot corrupt the vault.
 - **Import / export** — secrets can be imported from and exported to
   JSON/CSV/XML files via the file browser.
-
-## Keybindings
-
-| Keys | Action |
-|------|--------|
-| `j`/`k` | Navigate up/down |
-| `h`/`l` | Collapse/expand (leaf: `l` opens detail) |
-| `Enter` | Toggle expand (parent) or detail (leaf) |
-| `Ctrl+Enter` / `i` | Detail overlay for any node |
-| `Enter` (detail) | Copy selected row to clipboard |
-| `d d` | Cut selected node |
-| `p` / `P` | Paste as sibling / as child |
-| `a` | Add sibling (after selected; falls back to child when root selected) |
-| `A` | Add child |
-| `/` | Search (type, `Enter` confirm, `Esc` cancel) |
-| `Esc` (normal) | Clear search highlights |
-| `Ctrl+E` | Export selected node |
-| `q` / `Ctrl+C` | Quit |
-| `H` | Return to home screen |
-
-### File Browser
-
-| Keys | Action |
-|------|--------|
-| `j`/`k` | Navigate files |
-| `Enter` | Enter directory or select file |
-| `/` | Search filter |
-| `h` | Go up one directory |
-| `r` | Rename focused entry |
-| `d` / `Delete` | Delete with confirmation (`y` confirms) |
-| `n` | New folder (CreateFile mode) |
-| `N` | Toggle focus between file list and path input |
-| `f` | Toggle filter: all files / `.pwd` only |
-| `Esc` | Cancel/close browser |
-
-See `man cretopass` after installation for the full reference.
 
 ## Security model
 
@@ -105,26 +98,6 @@ secret file — they are useless to anyone without the passphrase.
 | `<secret file>` | The age-encrypted secret file (location chosen by you) |
 | `<secret file>.bak` | Transient copy of the previous version; exists only during a save (or after an interrupted one) |
 | `~/.config/cretopass/config.pwd` | App settings and recent files list (rkyv binary) |
-
-## Build & run
-
-Requires a Rust toolchain (edition 2024).
-
-```sh
-cargo build --release     # build
-cargo run                 # launch TUI
-cargo doc --open          # API docs
-```
-
-### Arch Linux (AUR)
-
-```sh
-yay -S cretopass
-# or
-paru -S cretopass
-```
-
-Packaging sources live under `packaging/`.
 
 ## License
 
