@@ -20,8 +20,16 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Read pinned Rust toolchain
+        id: rust
+        run: |
+          CHANNEL=$(sed -nE 's/^channel *= *"([^"]+)".*/\1/p' rust-toolchain)
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "Pinned toolchain: $CHANNEL"
+
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.rust.outputs.channel }}
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
