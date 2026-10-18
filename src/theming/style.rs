@@ -9,6 +9,8 @@ pub enum ElementStyle {
     ModeNormal,
     ModeSearch,
     ModeAwaitingDd,
+    ModePendingPaste,
+    ModePendingAdd,
     ModeDetail,
     ModeEdit,
     ModeAdd,
@@ -92,6 +94,14 @@ impl ElementStyle {
             Self::ModeAwaitingDd => Style::default()
                 .bg(Color::Red)
                 .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+            Self::ModePendingPaste => Style::default()
+                .bg(Color::Cyan)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+            Self::ModePendingAdd => Style::default()
+                .bg(Color::Green)
+                .fg(Color::Black)
                 .add_modifier(Modifier::BOLD),
             Self::ModeDetail => Style::default()
                 .bg(Color::Magenta)

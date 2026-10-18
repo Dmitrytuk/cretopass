@@ -32,6 +32,10 @@ pub enum InputMode {
     Search,
     /// Waiting for the second `d` to confirm a cut operation.
     AwaitingDd,
+    /// Waiting for the direction key after the first `p` (`PendingPaste`).
+    PendingPaste,
+    /// Waiting for the direction key after the first `a` (`PendingAdd`).
+    PendingAdd,
     /// Detail overlay shown for the selected node.
     Detail {
         /// Currently highlighted row index (0 = description, 1+ = extra fields).
@@ -117,6 +121,20 @@ pub enum InputMode {
     Help,
 }
 
+/// Where a pending "Add" form should place the newly created node.
+///
+/// Chosen by the direction key inside `InputMode::PendingAdd` and consumed
+/// when the form is confirmed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddPosition {
+    /// Insert immediately after the selected node.
+    SiblingAfter,
+    /// Insert immediately before the selected node.
+    SiblingBefore,
+    /// Append as the last child of the selected node.
+    Child,
+}
+
 /// Central application state.
 #[derive(Debug, Clone)]
 pub struct TreeState {
@@ -129,9 +147,8 @@ pub struct TreeState {
     pub visible: Vec<VisibleNode>,
     pub matched: HashSet<usize>,
     pub mode: InputMode,
-    /// Whether the pending "Add" form should create a sibling (true) rather
-    /// than a child (false) of the selected node.
-    pub adding_as_sibling: bool,
+    /// Where the pending "Add" form should place the new node.
+    pub add_position: AddPosition,
     pub quit: bool,
     pub return_to_menu: bool,
     /// Path of the currently opened secret file, if any.
@@ -159,7 +176,7 @@ impl TreeState {
             visible: Vec::new(),
             matched: HashSet::new(),
             mode: InputMode::Normal,
-            adding_as_sibling: false,
+            add_position: AddPosition::Child,
             quit: false,
             return_to_menu: false,
             active_vault_path: None,
@@ -261,6 +278,43 @@ impl TreeState {
         }
     }
 
+    /// Vim-style `h` behaviour: collapse the selected node if it is an expanded
+    /// parent, otherwise jump the cursor to its parent.
+    ///
+    /// A no-op when the root row is selected (it has no parent).
+    pub fn collapse_or_select_parent(&mut self) {
+        let Some(current) = self.visible.get(self.selected) else {
+            return;
+        };
+        if current.is_parent && current.expanded {
+            let id = current.id;
+            self.expanded.remove(&id);
+            self.update_visible();
+            return;
+        }
+        self.select_parent();
+    }
+
+    /// Moves the cursor to the parent row of the selected node, if any.
+    ///
+    /// Uses the `depth` stored on each visible row to find the closest
+    /// preceding row with a smaller depth. A no-op on the root row.
+    pub fn select_parent(&mut self) {
+        let Some(current) = self.visible.get(self.selected) else {
+            return;
+        };
+        if current.depth == 0 {
+            return;
+        }
+        let target_depth = current.depth - 1;
+        if let Some(parent_pos) = self.visible[..self.selected]
+            .iter()
+            .rposition(|v| v.depth == target_depth)
+        {
+            self.selected = parent_pos;
+        }
+    }
+
     /// Removes the selected node from the tree and stores it in the cut buffer.
     pub fn cut_selected(&mut self) {
         let id = match self.selected_node_id() {
@@ -295,7 +349,26 @@ impl TreeState {
         }
     }
 
-    /// Inserts the cut buffer node as the first child of the selected node.
+    /// Inserts the cut buffer node as a sibling immediately before the selected node.
+    ///
+    /// No-op when the selected node is the root (it has no parent to provide
+    /// a sibling slot).
+    pub fn paste_sibling_before(&mut self) {
+        let node = match &self.cut_buffer {
+            Some(n) => n.clone(),
+            None => return,
+        };
+        let selected_id = match self.selected_node_id() {
+            Some(id) => id,
+            None => return,
+        };
+        if insert_before(&mut self.root, selected_id, node) {
+            self.update_visible();
+            self.modified = true;
+        }
+    }
+
+    /// Inserts the cut buffer node as the last child of the selected node.
     pub fn paste_child(&mut self) {
         let node = match &self.cut_buffer {
             Some(n) => n.clone(),
@@ -378,6 +451,33 @@ impl TreeState {
         let mut node = Node::new(&final_name, &desc);
         node.extra_fields = extra_fields;
         if insert_after(&mut self.root, id, node) {
+            self.update_visible();
+            self.modified = true;
+        }
+    }
+
+    /// Creates a new sibling node immediately before the currently selected node.
+    ///
+    /// No-op when the selected node is the root (it has no parent to provide
+    /// a sibling slot).
+    pub fn add_sibling_before_to_selected(
+        &mut self,
+        name: String,
+        desc: String,
+        extra_fields: Vec<ExtraField>,
+    ) {
+        let id = match self.selected_node_id() {
+            Some(id) => id,
+            None => return,
+        };
+        let final_name = if name.is_empty() {
+            texts::DEFAULT_NAME.to_string()
+        } else {
+            name
+        };
+        let mut node = Node::new(&final_name, &desc);
+        node.extra_fields = extra_fields;
+        if insert_before(&mut self.root, id, node) {
             self.update_visible();
             self.modified = true;
         }
@@ -509,6 +609,17 @@ fn insert_after(root: &mut Node, target_id: Uuid, node: Node) -> bool {
     false
 }
 
+fn insert_before(root: &mut Node, target_id: Uuid, node: Node) -> bool {
+    if let Some(parent) = find_parent_mut(root, target_id) {
+        let pos = parent.children.iter().position(|c| c.id == target_id);
+        if let Some(pos) = pos {
+            parent.children.insert(pos, node);
+            return true;
+        }
+    }
+    false
+}
+
 fn find_parent_mut(root: &mut Node, id: Uuid) -> Option<&mut Node> {
     if root.children.iter().any(|c| c.id == id) {
         return Some(root);
@@ -602,5 +713,90 @@ impl TreeWidget {
             .style(ElementStyle::TreeRow.style())
             .scroll((scroll_row as u16, 0));
         frame.render_widget(paragraph, inner);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Root "Secrets" with one expanded branch "A" (children A1, A2) and a leaf "B".
+    fn make_tree() -> TreeState {
+        let a1 = Node::new("A1", "");
+        let a2 = Node::new("A2", "");
+        let a = Node::with_children("A", "", vec![a1, a2]);
+        let a_id = a.id;
+        let b = Node::new("B", "");
+        let root = Node::with_children("Secrets", "", vec![a, b]);
+        let root_id = root.id;
+        let mut state = TreeState::new(root);
+        state.expanded.insert(root_id);
+        state.expanded.insert(a_id);
+        state.update_visible();
+        state
+    }
+
+    fn names(state: &TreeState) -> Vec<String> {
+        state.visible.iter().map(|v| v.name.clone()).collect()
+    }
+
+    #[test]
+    fn collapse_or_select_parent_collapses_expanded_parent() {
+        let mut state = make_tree();
+        state.selected = 1; // "A", expanded parent
+        state.collapse_or_select_parent();
+        assert_eq!(names(&state), vec!["Secrets", "A", "B"]);
+        assert_eq!(state.selected, 1);
+    }
+
+    #[test]
+    fn collapse_or_select_parent_moves_leaf_to_parent() {
+        let mut state = make_tree();
+        state.selected = 2; // "A1", leaf
+        state.collapse_or_select_parent();
+        assert_eq!(state.selected, 1); // parent "A"
+    }
+
+    #[test]
+    fn collapse_or_select_parent_jumps_from_collapsed_parent() {
+        let mut state = make_tree();
+        state.expanded.remove(&state.visible[1].id);
+        state.update_visible();
+        state.selected = 1; // "A", collapsed parent
+        state.collapse_or_select_parent();
+        assert_eq!(state.selected, 0); // parent "Secrets"
+    }
+
+    #[test]
+    fn collapse_or_select_parent_is_noop_on_root() {
+        let mut state = make_tree();
+        state.selected = 0;
+        state.collapse_or_select_parent();
+        assert_eq!(state.selected, 0);
+    }
+
+    #[test]
+    fn paste_sibling_before_inserts_in_front() {
+        let mut state = make_tree();
+        state.selected = 4; // "B"
+        state.cut_buffer = Some(Node::new("X", ""));
+        state.paste_sibling_before();
+        assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "X", "B"]);
+    }
+
+    #[test]
+    fn add_sibling_before_to_selected_inserts_in_front() {
+        let mut state = make_tree();
+        state.selected = 4; // "B"
+        state.add_sibling_before_to_selected("X".to_string(), String::new(), Vec::new());
+        assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "X", "B"]);
+    }
+
+    #[test]
+    fn add_sibling_before_is_noop_for_root() {
+        let mut state = make_tree();
+        state.selected = 0;
+        state.add_sibling_before_to_selected("X".to_string(), String::new(), Vec::new());
+        assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "B"]);
     }
 }

@@ -20,10 +20,14 @@ pub enum Action {
     EditNode,
     CopyField,
     Cut,
+    PasteStart,
     PasteSibling,
     PasteChild,
+    PasteBefore,
+    AddStart,
     AddNode,
     AddSiblingNode,
+    AddBefore,
     ToggleSearch,
     ConfirmSearch,
     ClearSearch,
@@ -64,16 +68,34 @@ impl Action {
             KeyCode::Esc => Self::Cancel,
             KeyCode::Char(' ') => Self::ToggleExpand,
             KeyCode::Char('d') => Self::Cut,
-            KeyCode::Char('p') => Self::PasteSibling,
-            KeyCode::Char('P') => Self::PasteChild,
-            KeyCode::Char('a') => Self::AddSiblingNode,
-            KeyCode::Char('A') => Self::AddNode,
-            KeyCode::Char('i') | KeyCode::Char('I') => Self::OpenDetail,
+            KeyCode::Char('p') => Self::PasteStart,
+            KeyCode::Char('a') => Self::AddStart,
+            KeyCode::Char('i') => Self::OpenDetail,
             KeyCode::Char('/') => Self::ToggleSearch,
-            KeyCode::Char('q') | KeyCode::Char('Q') => Self::Quit,
+            KeyCode::Char('q') => Self::Quit,
             KeyCode::Char('H') => Self::ReturnToMenu,
             KeyCode::Char('?') => Self::OpenHelp,
             _ => Self::None,
+        }
+    }
+
+    /// Dispatch for the `PendingPaste` mode entered by the first `p` press.
+    pub fn from_pending_paste(key: &KeyEvent) -> Self {
+        match key.code {
+            KeyCode::Char('p') => Self::PasteSibling,
+            KeyCode::Char('P') => Self::PasteBefore,
+            KeyCode::Char('l') | KeyCode::Right => Self::PasteChild,
+            _ => Self::Cancel,
+        }
+    }
+
+    /// Dispatch for the `PendingAdd` mode entered by the first `a` press.
+    pub fn from_pending_add(key: &KeyEvent) -> Self {
+        match key.code {
+            KeyCode::Char('a') => Self::AddSiblingNode,
+            KeyCode::Char('A') => Self::AddBefore,
+            KeyCode::Char('l') | KeyCode::Right => Self::AddNode,
+            _ => Self::Cancel,
         }
     }
 

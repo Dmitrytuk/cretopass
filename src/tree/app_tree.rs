@@ -9,7 +9,7 @@ use crate::file_handling::save_tree;
 use crate::theming::Action;
 use crate::theming::{ElementStyle, texts};
 use crate::tree::node::{ExtraField, FieldType};
-use crate::tree::widget::{InputMode, TreeState, TreeWidget};
+use crate::tree::widget::{AddPosition, InputMode, TreeState, TreeWidget};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -40,6 +40,8 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) ->
                         state.cut_selected();
                     }
                 }
+                InputMode::PendingPaste => handle_pending_paste(key, state),
+                InputMode::PendingAdd => handle_pending_add(key, state),
                 InputMode::Adding { .. } | InputMode::Editing { .. } => handle_form(key, state),
                 InputMode::SelectFieldType { .. } => handle_select_field_type(key, state),
                 InputMode::CustomFieldName { .. } => handle_custom_field_name(key, state),
@@ -101,7 +103,7 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
             }
         }
         Action::NavLeft => {
-            state.expand_collapse(false);
+            state.collapse_or_select_parent();
         }
         Action::Confirm => {
             if is_leaf_selected(state) {
@@ -119,37 +121,16 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
         Action::Cut => {
             state.mode = InputMode::AwaitingDd;
         }
-        Action::PasteSibling => {
-            state.paste_sibling();
+        Action::PasteStart => {
+            state.mode = InputMode::PendingPaste;
         }
-        Action::PasteChild => {
-            state.paste_child();
+        Action::AddStart => {
+            state.mode = InputMode::PendingAdd;
         }
         Action::OpenDetail => {
             state.mode = InputMode::Detail {
                 selected: 0,
                 alert: None,
-            };
-        }
-        Action::AddNode => {
-            state.adding_as_sibling = false;
-            state.mode = InputMode::Adding {
-                name: String::new(),
-                desc: String::new(),
-                extra_fields: Vec::new(),
-                field: 0,
-                cursor: 0,
-            };
-        }
-        Action::AddSiblingNode => {
-            let is_root = state.selected_node_id() == Some(state.root.id);
-            state.adding_as_sibling = !is_root;
-            state.mode = InputMode::Adding {
-                name: String::new(),
-                desc: String::new(),
-                extra_fields: Vec::new(),
-                field: 0,
-                cursor: 0,
             };
         }
         Action::ToggleSearch => {
@@ -171,6 +152,46 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
         }
         _ => {}
     }
+}
+
+fn handle_pending_paste(key: event::KeyEvent, state: &mut TreeState) {
+    match Action::from_pending_paste(&key) {
+        Action::PasteSibling => {
+            state.paste_sibling();
+            state.mode = InputMode::Normal;
+        }
+        Action::PasteBefore => {
+            state.paste_sibling_before();
+            state.mode = InputMode::Normal;
+        }
+        Action::PasteChild => {
+            state.paste_child();
+            state.mode = InputMode::Normal;
+        }
+        _ => {
+            state.mode = InputMode::Normal;
+        }
+    }
+}
+
+fn handle_pending_add(key: event::KeyEvent, state: &mut TreeState) {
+    let position = match Action::from_pending_add(&key) {
+        Action::AddSiblingNode => AddPosition::SiblingAfter,
+        Action::AddBefore => AddPosition::SiblingBefore,
+        Action::AddNode => AddPosition::Child,
+        _ => {
+            state.mode = InputMode::Normal;
+            return;
+        }
+    };
+    state.add_position = position;
+    state.mode = InputMode::Adding {
+        name: String::new(),
+        desc: String::new(),
+        extra_fields: Vec::new(),
+        field: 0,
+        cursor: 0,
+    };
 }
 
 fn handle_search(key: event::KeyEvent, state: &mut TreeState) {
@@ -380,10 +401,16 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
         }
         Action::Confirm => {
             if is_adding {
-                if state.adding_as_sibling {
-                    state.add_sibling_to_selected(name, desc, extra_fields);
-                } else {
-                    state.add_child_to_selected(name, desc, extra_fields);
+                match state.add_position {
+                    AddPosition::SiblingAfter => {
+                        state.add_sibling_to_selected(name, desc, extra_fields);
+                    }
+                    AddPosition::SiblingBefore => {
+                        state.add_sibling_before_to_selected(name, desc, extra_fields);
+                    }
+                    AddPosition::Child => {
+                        state.add_child_to_selected(name, desc, extra_fields);
+                    }
                 }
                 state.mode = InputMode::Normal;
             } else {
@@ -1264,6 +1291,11 @@ fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         InputMode::Normal => (texts::MODE_NORMAL, ElementStyle::ModeNormal.style()),
         InputMode::Search => (texts::MODE_SEARCH, ElementStyle::ModeSearch.style()),
         InputMode::AwaitingDd => (texts::MODE_AWAIT_DD, ElementStyle::ModeAwaitingDd.style()),
+        InputMode::PendingPaste => (texts::MODE_PASTE, ElementStyle::ModePendingPaste.style()),
+        InputMode::PendingAdd => (
+            texts::MODE_PENDING_ADD,
+            ElementStyle::ModePendingAdd.style(),
+        ),
         InputMode::Detail { .. } => (texts::MODE_DETAIL, ElementStyle::ModeDetail.style()),
         InputMode::Editing { .. } => (texts::MODE_EDIT, ElementStyle::ModeEdit.style()),
         InputMode::Adding { .. } => (texts::MODE_ADD, ElementStyle::ModeAdd.style()),
@@ -1327,6 +1359,8 @@ fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         InputMode::Normal => texts::HINT_TREE,
         InputMode::Search => texts::HINT_SEARCH,
         InputMode::AwaitingDd => texts::HINT_AWAIT_DD,
+        InputMode::PendingPaste => texts::HINT_PASTE,
+        InputMode::PendingAdd => texts::HINT_PENDING_ADD,
         InputMode::Detail { alert, .. } if alert.is_some() => texts::HINT_DETAIL_ALERT,
         InputMode::Detail { .. } => texts::HINT_DETAIL,
         InputMode::Editing {

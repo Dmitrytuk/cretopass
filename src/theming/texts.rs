@@ -61,6 +61,8 @@ pub const LABEL_NAME_INLINE: &str = " Name: ";
 pub const MODE_NORMAL: &str = "NORMAL";
 pub const MODE_SEARCH: &str = "SEARCH";
 pub const MODE_AWAIT_DD: &str = "AWAIT DD";
+pub const MODE_PASTE: &str = "PASTE";
+pub const MODE_PENDING_ADD: &str = "ADD";
 pub const MODE_DETAIL: &str = "DETAIL";
 pub const MODE_EDIT: &str = "EDIT";
 pub const MODE_ADD: &str = "ADD";
@@ -77,6 +79,8 @@ pub const STATUS_HOME_LABEL: &str = " HOME ";
 pub const HINT_TREE: &str = "H:home  /:search  ?:help  q:quit";
 pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
 pub const HINT_AWAIT_DD: &str = "Press d again to cut";
+pub const HINT_PASTE: &str = "p:after  P:before  l/→:child  Esc:cancel";
+pub const HINT_PENDING_ADD: &str = "a:after  A:before  l/→:child  Esc:cancel";
 pub const HINT_DETAIL: &str = "j/k:navigate  Enter:copy  i:edit  Esc:close";
 pub const HINT_DETAIL_ALERT: &str = "Press any key to continue";
 pub const HINT_FORM: &str = "Tab:switch  Enter:save  Esc:cancel";
@@ -99,15 +103,13 @@ pub const HINT_HELP: &str = "Press any key to close";
 pub const TREE_HELP_KEY_BINDINGS: &[&str] = &[
     " j/k      Navigate up/down",
     " ↓/↑      Navigate up/down",
-    " h/l      Collapse/expand",
-    " ←/→      Collapse/expand",
+    " h/←      Collapse, or jump to parent",
+    " l/→      Expand (parent) or detail (leaf)",
     " Enter    Toggle expand (parent) or detail",
     " i        Detail overlay for any node",
-    " l/→      Open detail for record",
     " d d      Cut selected node",
-    " p / P    Paste as sibling / as child",
-    " a        Add record",
-    " A        Add child",
+    " p        Paste: p after, P before, l/→ child",
+    " a        Add: a after, A before, l/→ child",
     " /        Search",
     " ?        Show this help",
     " Esc      Clear search highlights",

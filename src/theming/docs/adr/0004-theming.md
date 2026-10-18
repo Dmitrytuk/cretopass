@@ -17,7 +17,7 @@ impossible without touching every module.
 | File | Responsibility |
 |------|---------------|
 | `icon.rs` | `Icon` enum (7 variants: selection arrow, expand/collapse, checkboxes, password marker). Renders to `&'static str`. |
-| `key.rs` | `Action` enum (46 variants) with 13 per-mode dispatch methods (`from_normal`, `from_search`, `from_form`, etc.). Converts `KeyEvent` → semantic `Action`. |
+| `key.rs` | `Action` enum with per-mode dispatch methods (`from_normal`, `from_search`, `from_pending_paste`, `from_pending_add`, etc.). Converts `KeyEvent` → semantic `Action`. |
 | `style.rs` | `ElementStyle` enum (75 variants) organized by UI area (Tree, Mode, FileBrowser, Home, Cursor, etc.). Each resolves to a concrete `ratatui::style::Style`. |
 | `texts.rs` | All UI string constants: labels, hints, mode names, messages, menu items, keyboard help. ~178 lines. |
 
@@ -28,13 +28,13 @@ impossible without touching every module.
 | Keys | Action |
 |------|--------|
 | `j`/`k` | Navigate up/down |
-| `h`/`l` | Collapse/expand (leaf: `l` opens detail) |
+| `h` | Collapse if expanded parent, else jump to parent |
+| `l` | Expand (leaf: opens detail) |
 | `Enter` | Toggle expand (parent) or detail (leaf) |
 | `Ctrl+Enter` / `i` | Detail overlay for any node |
 | `d d` | Cut selected node |
-| `p` / `P` | Paste as sibling / as child |
-| `a` | Add sibling (after selected; falls back to child when root selected) |
-| `A` (shift+a) | Add child |
+| `p` then `p`/`P`/`l` | Paste as sibling after / before / child (mode `PASTE`) |
+| `a` then `a`/`A`/`l` | Add sibling after / before / child (mode `ADD`) |
 | `/` | Search |
 | `Esc` | Clear search highlights |
 | `q` / `Ctrl+C` | Quit |

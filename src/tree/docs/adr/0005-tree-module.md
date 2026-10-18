@@ -28,7 +28,8 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 
 ## InputMode state machine
 
-14 variants: `Normal`, `Search`, `AwaitingDd`, `Detail{selected, alert}`,
+16 variants: `Normal`, `Search`, `AwaitingDd`, `PendingPaste`, `PendingAdd`,
+`Detail{selected, alert}`,
 `Editing{node_id, name, desc, extra_fields, field, cursor}`,
 `Adding{name, desc, extra_fields, field, cursor}`,
 `SelectFieldType{...}`, `CustomFieldName{...}`, `ConfirmDeleteField{...}`,
@@ -37,6 +38,20 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 
 Each variant carries its transient state inline. Key handlers dispatch on the
 current variant, transform state, and return the next mode.
+
+## Prefix modes
+
+`AwaitingDd`, `PendingPaste`, and `PendingAdd` are one-key prefix modes:
+
+- `d` enters `AwaitingDd`; a second `d` cuts, any other key cancels.
+- `p` enters `PendingPaste`; `p`/`P`/`l`(→) choose paste after/before/child,
+  any other key cancels.
+- `a` enters `PendingAdd`; `a`/`A`/`l`(→) choose add after/before/child,
+  any other key cancels. The choice is stored in `TreeState::add_position`
+  (`AddPosition`) and consumed when the form is confirmed.
+
+`h`/`←` collapses an expanded parent; otherwise it moves the cursor to the
+parent row (`collapse_or_select_parent`).
 
 ## Editing quirks
 
@@ -55,7 +70,8 @@ current variant, transform state, and return the next mode.
 ## Cut buffer
 
 - `cut_buffer: Option<Node>` is copy-style (can paste multiple times).
-- `p` pastes as sibling, `P` pastes as child.
+- `p` enters `PendingPaste`; `p` pastes after, `P` pastes before, `l`/`→`
+  pastes as last child.
 - System clipboard only used in detail overlay (Enter on a row). Targets: `pbcopy` (macOS), `wl-copy`/`xclip`/`xsel` (Linux).
 - `remove_node()` only targets children (not root). Root cannot be cut.
 
