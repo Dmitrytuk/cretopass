@@ -99,11 +99,19 @@ impl Action {
         }
     }
 
+    /// Dispatch for the `PendingCut` mode entered by the first `d` press.
+    pub fn from_pending_cut(key: &KeyEvent) -> Self {
+        match key.code {
+            KeyCode::Char('d') => Self::Cut,
+            _ => Self::Cancel,
+        }
+    }
+
     pub fn from_search(key: &KeyEvent) -> Self {
         match key.code {
             KeyCode::Enter => Self::ConfirmSearch,
             KeyCode::Esc => Self::ClearSearch,
-            KeyCode::Backspace | KeyCode::Delete => Self::Backspace,
+            KeyCode::Backspace => Self::Backspace,
             KeyCode::Char(c) => Self::InsertChar(c),
             _ => Self::None,
         }
@@ -222,5 +230,65 @@ impl Action {
             KeyCode::Char(c) => Self::InsertChar(c),
             _ => Self::None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn from_search_delete_is_none() {
+        assert_eq!(Action::from_search(&key(KeyCode::Delete)), Action::None);
+    }
+
+    #[test]
+    fn from_search_backspace_is_backspace() {
+        assert_eq!(
+            Action::from_search(&key(KeyCode::Backspace)),
+            Action::Backspace
+        );
+    }
+
+    #[test]
+    fn from_search_printable_inserts() {
+        assert_eq!(
+            Action::from_search(&key(KeyCode::Char('x'))),
+            Action::InsertChar('x')
+        );
+    }
+
+    #[test]
+    fn from_search_enter_confirms_and_esc_clears() {
+        assert_eq!(
+            Action::from_search(&key(KeyCode::Enter)),
+            Action::ConfirmSearch
+        );
+        assert_eq!(Action::from_search(&key(KeyCode::Esc)), Action::ClearSearch);
+    }
+
+    #[test]
+    fn from_pending_cut_second_d_cuts() {
+        assert_eq!(
+            Action::from_pending_cut(&key(KeyCode::Char('d'))),
+            Action::Cut
+        );
+    }
+
+    #[test]
+    fn from_pending_cut_any_other_key_cancels() {
+        assert_eq!(
+            Action::from_pending_cut(&key(KeyCode::Char('x'))),
+            Action::Cancel
+        );
+        assert_eq!(Action::from_pending_cut(&key(KeyCode::Esc)), Action::Cancel);
+        assert_eq!(
+            Action::from_pending_cut(&key(KeyCode::Enter)),
+            Action::Cancel
+        );
     }
 }

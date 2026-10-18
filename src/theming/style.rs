@@ -8,7 +8,7 @@ pub enum ElementStyle {
     TreeRowMatched,
     ModeNormal,
     ModeSearch,
-    ModeAwaitingDd,
+    ModePendingCut,
     ModePendingPaste,
     ModePendingAdd,
     ModeDetail,
@@ -91,7 +91,7 @@ impl ElementStyle {
                 .bg(Color::Blue)
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
-            Self::ModeAwaitingDd => Style::default()
+            Self::ModePendingCut => Style::default()
                 .bg(Color::Red)
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),

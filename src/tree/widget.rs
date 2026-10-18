@@ -30,8 +30,8 @@ pub enum InputMode {
     Normal,
     /// Search mode: typing a query, navigating between matches.
     Search,
-    /// Waiting for the second `d` to confirm a cut operation.
-    AwaitingDd,
+    /// Waiting for the second `d` to confirm a cut operation (`PendingCut`).
+    PendingCut,
     /// Waiting for the direction key after the first `p` (`PendingPaste`).
     PendingPaste,
     /// Waiting for the direction key after the first `a` (`PendingAdd`).

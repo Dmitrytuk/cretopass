@@ -60,7 +60,7 @@ pub const LABEL_NAME_INLINE: &str = " Name: ";
 
 pub const MODE_NORMAL: &str = "NORMAL";
 pub const MODE_SEARCH: &str = "SEARCH";
-pub const MODE_AWAIT_DD: &str = "AWAIT DD";
+pub const MODE_PENDING_CUT: &str = "CUT";
 pub const MODE_PASTE: &str = "PASTE";
 pub const MODE_PENDING_ADD: &str = "ADD";
 pub const MODE_DETAIL: &str = "DETAIL";
@@ -78,7 +78,7 @@ pub const STATUS_HOME_LABEL: &str = " HOME ";
 
 pub const HINT_TREE: &str = "H:home  /:search  ?:help  q:quit";
 pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
-pub const HINT_AWAIT_DD: &str = "Press d again to cut";
+pub const HINT_PENDING_CUT: &str = "d:cut  Esc:cancel";
 pub const HINT_PASTE: &str = "p:after  P:before  l/→:child  Esc:cancel";
 pub const HINT_PENDING_ADD: &str = "a:after  A:before  l/→:child  Esc:cancel";
 pub const HINT_DETAIL: &str = "j/k:navigate  Enter:copy  i:edit  Esc:close";

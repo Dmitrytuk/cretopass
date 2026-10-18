@@ -28,7 +28,7 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 
 ## InputMode state machine
 
-16 variants: `Normal`, `Search`, `AwaitingDd`, `PendingPaste`, `PendingAdd`,
+16 variants: `Normal`, `Search`, `PendingCut`, `PendingPaste`, `PendingAdd`,
 `Detail{selected, alert}`,
 `Editing{node_id, name, desc, extra_fields, field, cursor}`,
 `Adding{name, desc, extra_fields, field, cursor}`,
@@ -41,9 +41,9 @@ current variant, transform state, and return the next mode.
 
 ## Prefix modes
 
-`AwaitingDd`, `PendingPaste`, and `PendingAdd` are one-key prefix modes:
+`PendingCut`, `PendingPaste`, and `PendingAdd` are one-key prefix modes:
 
-- `d` enters `AwaitingDd`; a second `d` cuts, any other key cancels.
+- `d` enters `PendingCut`; a second `d` cuts, any other key cancels.
 - `p` enters `PendingPaste`; `p`/`P`/`l`(→) choose paste after/before/child,
   any other key cancels.
 - `a` enters `PendingAdd`; `a`/`A`/`l`(→) choose add after/before/child,
@@ -64,8 +64,9 @@ parent row (`collapse_or_select_parent`).
 ## Search
 
 - `set_search()` auto-expands ancestors of matches via `expand_for_search()` before building the visible list.
-- j/k constrained to matched nodes only while search mode is active.
-- Enter keeps highlights but frees navigation. Esc clears everything.
+- While in Search mode, typing edits the query; `Enter` returns to Normal keeping highlights, `Esc` clears everything.
+- While a search is active (Normal mode), j/k cycle through matched nodes only.
+- `Delete` is not bound in Search — use `Backspace` to erase query chars.
 
 ## Cut buffer
 

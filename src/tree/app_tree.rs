@@ -10,7 +10,7 @@ use crate::theming::Action;
 use crate::theming::{ElementStyle, texts};
 use crate::tree::node::{ExtraField, FieldType};
 use crate::tree::widget::{AddPosition, InputMode, TreeState, TreeWidget};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Modifier;
@@ -34,12 +34,7 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) ->
             match &state.mode {
                 InputMode::Normal => handle_normal(key, state),
                 InputMode::Search => handle_search(key, state),
-                InputMode::AwaitingDd => {
-                    state.mode = InputMode::Normal;
-                    if key.code == KeyCode::Char('d') {
-                        state.cut_selected();
-                    }
-                }
+                InputMode::PendingCut => handle_pending_cut(key, state),
                 InputMode::PendingPaste => handle_pending_paste(key, state),
                 InputMode::PendingAdd => handle_pending_add(key, state),
                 InputMode::Adding { .. } | InputMode::Editing { .. } => handle_form(key, state),
@@ -119,7 +114,7 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
             state.toggle_expand();
         }
         Action::Cut => {
-            state.mode = InputMode::AwaitingDd;
+            state.mode = InputMode::PendingCut;
         }
         Action::PasteStart => {
             state.mode = InputMode::PendingPaste;
@@ -152,6 +147,13 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
         }
         _ => {}
     }
+}
+
+fn handle_pending_cut(key: event::KeyEvent, state: &mut TreeState) {
+    if Action::from_pending_cut(&key) == Action::Cut {
+        state.cut_selected();
+    }
+    state.mode = InputMode::Normal;
 }
 
 fn handle_pending_paste(key: event::KeyEvent, state: &mut TreeState) {
@@ -1290,7 +1292,10 @@ fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
     let (mode_str, mode_style) = match &state.mode {
         InputMode::Normal => (texts::MODE_NORMAL, ElementStyle::ModeNormal.style()),
         InputMode::Search => (texts::MODE_SEARCH, ElementStyle::ModeSearch.style()),
-        InputMode::AwaitingDd => (texts::MODE_AWAIT_DD, ElementStyle::ModeAwaitingDd.style()),
+        InputMode::PendingCut => (
+            texts::MODE_PENDING_CUT,
+            ElementStyle::ModePendingCut.style(),
+        ),
         InputMode::PendingPaste => (texts::MODE_PASTE, ElementStyle::ModePendingPaste.style()),
         InputMode::PendingAdd => (
             texts::MODE_PENDING_ADD,
@@ -1358,7 +1363,7 @@ fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
     let help = match &state.mode {
         InputMode::Normal => texts::HINT_TREE,
         InputMode::Search => texts::HINT_SEARCH,
-        InputMode::AwaitingDd => texts::HINT_AWAIT_DD,
+        InputMode::PendingCut => texts::HINT_PENDING_CUT,
         InputMode::PendingPaste => texts::HINT_PASTE,
         InputMode::PendingAdd => texts::HINT_PENDING_ADD,
         InputMode::Detail { alert, .. } if alert.is_some() => texts::HINT_DETAIL_ALERT,

@@ -17,7 +17,7 @@ impossible without touching every module.
 | File | Responsibility |
 |------|---------------|
 | `icon.rs` | `Icon` enum (7 variants: selection arrow, expand/collapse, checkboxes, password marker). Renders to `&'static str`. |
-| `key.rs` | `Action` enum with per-mode dispatch methods (`from_normal`, `from_search`, `from_pending_paste`, `from_pending_add`, etc.). Converts `KeyEvent` → semantic `Action`. |
+| `key.rs` | `Action` enum with per-mode dispatch methods (`from_normal`, `from_search`, `from_pending_cut`, `from_pending_paste`, `from_pending_add`, etc.). Converts `KeyEvent` → semantic `Action`. |
 | `style.rs` | `ElementStyle` enum (75 variants) organized by UI area (Tree, Mode, FileBrowser, Home, Cursor, etc.). Each resolves to a concrete `ratatui::style::Style`. |
 | `texts.rs` | All UI string constants: labels, hints, mode names, messages, menu items, keyboard help. ~178 lines. |
 
@@ -45,11 +45,20 @@ impossible without touching every module.
 
 | Keys | Action |
 |------|--------|
-| `j`/`k` | Navigate between matches only |
-| `Enter` | Keep highlights, free navigation |
+| `Enter` | Keep highlights, free navigation (back to Normal) |
 | `Esc` | Clear search, return to Normal |
-| Printable chars | Append to search query |
+| Printable chars (incl. `j`/`k`) | Append to search query |
 | `Backspace` | Remove last char from query |
+
+While a search is active (after `Enter`, in Normal mode), `j`/`k` cycle
+through matched rows only.
+
+### Tree — `PendingCut` (after first `d`)
+
+| Keys | Action |
+|------|--------|
+| `d` | Cut selected node |
+| Any other key / `Esc` | Cancel, return to Normal |
 
 ### Detail overlay
 
