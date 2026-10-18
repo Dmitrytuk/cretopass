@@ -50,7 +50,6 @@ pub const PROMPT_EXPORT_CONFIRM_START: &str = "Are you sure you want to export a
 pub const PROMPT_EXPORT_CONFIRM_END: &str = "?";
 
 pub const LABEL_NAME: &str = "Name: ";
-pub const LABEL_DESC: &str = "Desc: ";
 pub const LABEL_PASSPHRASE: &str = "Passphrase: ";
 pub const LABEL_FILE: &str = "File: ";
 pub const LABEL_CURRENT_PW: &str = "Current password";
@@ -159,7 +158,6 @@ pub const MSG_NO_FILE_PATH: &str = "No file path set";
 
 pub const EMPTY_DIR: &str = "  (empty directory)";
 pub const NO_MATCHING_FILES: &str = "  No matching files";
-pub const NO_DESCRIPTION: &str = "No description.";
 pub const ADD_FIELD_BUTTON: &str = "+ Add Field";
 pub const PASSWORD_MASK: &str = "*****";
 pub const COPY_CHECK: &str = "✓ Copied!";

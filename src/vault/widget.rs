@@ -358,10 +358,10 @@ fn handle_file_browser_key<B: Backend>(
                                     .unwrap_or_else(|| texts::IMPORT_NAME_FALLBACK.to_string());
                                 let date_time =
                                     chrono::Local::now().format("%Y-%m-%d_%H%M%S").to_string();
-                                let mut wrapper = crate::tree::node::Node::new(
-                                    format!("imported_{}_{}", filename, date_time),
-                                    "",
-                                );
+                                let mut wrapper = crate::tree::node::Node::new(format!(
+                                    "imported_{}_{}",
+                                    filename, date_time
+                                ));
                                 wrapper.children = vec![imported_node];
                                 root.add_child(wrapper);
 

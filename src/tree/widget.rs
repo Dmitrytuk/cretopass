@@ -38,7 +38,7 @@ pub enum InputMode {
     PendingAdd,
     /// Detail overlay shown for the selected node.
     Detail {
-        /// Currently highlighted row index (0 = description, 1+ = extra fields).
+        /// Currently highlighted extra-field row index.
         selected: usize,
         /// Copy confirmation alert text, if any.
         alert: Option<String>,
@@ -46,7 +46,7 @@ pub enum InputMode {
     /// Add/Edit form. `node_id` distinguishes Edit (`Some`) from Add (`None`).
     Form(FormState),
     /// Popup for selecting a field type to add (login, password, custom,
-    /// and, for a new node, description).
+    /// or description).
     SelectFieldType {
         form: FormState,
         /// Index into the currently available picker items.
@@ -117,9 +117,10 @@ pub enum FormFocus {
 pub enum FormRow {
     /// The node name (always present, never movable or deletable).
     Name,
-    /// The node description (Edit only, or Add after adding it via `+ Add Field`).
-    Desc,
     /// An extra field at the given index into `FormState::extra_fields`.
+    ///
+    /// A node's description is itself an extra field (`Custom("Description")`),
+    /// so it is edited, moved and deleted exactly like any other.
     Extra(usize),
     /// The `+ Add Field` button.
     AddButton,
@@ -152,15 +153,7 @@ pub struct FormState {
     pub node_id: Option<Uuid>,
     /// Node name.
     pub name: String,
-    /// Node description.
-    pub desc: String,
-    /// Whether the description row is currently shown.
-    ///
-    /// Always `true` when editing; in Add mode it starts `false` so the form
-    /// consists of the name alone, and is enabled by adding Description via
-    /// the field-type picker.
-    pub show_desc: bool,
-    /// Extra fields in order.
+    /// Extra fields in order (including the Description field, if any).
     pub extra_fields: Vec<ExtraField>,
     /// Index into [`FormState::rows`].
     pub selected_row: usize,
@@ -180,8 +173,6 @@ impl FormState {
         Self {
             node_id: None,
             name: String::new(),
-            desc: String::new(),
-            show_desc: false,
             extra_fields: Vec::new(),
             selected_row: 0,
             cursor: 0,
@@ -196,8 +187,6 @@ impl FormState {
         Self {
             node_id: Some(node.id),
             name: node.name.clone(),
-            desc: node.description.clone(),
-            show_desc: false,
             extra_fields: node.extra_fields.clone(),
             selected_row: 0,
             cursor: node.name.len(),
@@ -215,9 +204,6 @@ impl FormState {
     /// The ordered list of rows currently shown by this form.
     pub fn rows(&self) -> Vec<FormRow> {
         let mut rows = vec![FormRow::Name];
-        if self.show_desc {
-            rows.push(FormRow::Desc);
-        }
         rows.extend((0..self.extra_fields.len()).map(FormRow::Extra));
         rows.push(FormRow::AddButton);
         rows
@@ -247,7 +233,6 @@ impl FormState {
     pub fn active_text(&self) -> Option<&str> {
         match self.current_row() {
             FormRow::Name => Some(&self.name),
-            FormRow::Desc => Some(&self.desc),
             FormRow::Extra(i) => self.extra_fields.get(i).map(|f| f.value.as_str()),
             FormRow::AddButton => None,
         }
@@ -257,7 +242,6 @@ impl FormState {
     pub fn active_text_mut(&mut self) -> Option<&mut String> {
         match self.current_row() {
             FormRow::Name => Some(&mut self.name),
-            FormRow::Desc => Some(&mut self.desc),
             FormRow::Extra(i) => self.extra_fields.get_mut(i).map(|f| &mut f.value),
             FormRow::AddButton => None,
         }
@@ -321,8 +305,7 @@ impl FormState {
 
     /// Index in [`FormState::rows`] of the `Extra(extra_index)` row.
     fn row_index_of_extra(&self, extra_index: usize) -> usize {
-        let offset = usize::from(self.show_desc);
-        1 + offset + extra_index
+        1 + extra_index
     }
 }
 
@@ -577,17 +560,10 @@ impl TreeState {
         }
     }
 
-    /// Finds a node by [`Uuid`] and replaces its name, description, and extra fields.
-    pub fn update_node(
-        &mut self,
-        node_id: Uuid,
-        name: String,
-        desc: String,
-        extra_fields: Vec<ExtraField>,
-    ) {
+    /// Finds a node by [`Uuid`] and replaces its name and extra fields.
+    pub fn update_node(&mut self, node_id: Uuid, name: String, extra_fields: Vec<ExtraField>) {
         if let Some(target) = self.root.find_mut(node_id) {
             target.name = name;
-            target.description = desc;
             target.extra_fields = extra_fields;
             self.update_visible();
             self.modified = true;
@@ -595,12 +571,7 @@ impl TreeState {
     }
 
     /// Creates a new child node under the currently selected node.
-    pub fn add_child_to_selected(
-        &mut self,
-        name: String,
-        desc: String,
-        extra_fields: Vec<ExtraField>,
-    ) {
+    pub fn add_child_to_selected(&mut self, name: String, extra_fields: Vec<ExtraField>) {
         let id = match self.selected_node_id() {
             Some(id) => id,
             None => return,
@@ -610,7 +581,7 @@ impl TreeState {
         } else {
             name
         };
-        let mut node = Node::new(&final_name, &desc);
+        let mut node = Node::new(&final_name);
         node.extra_fields = extra_fields;
         if let Some(target) = self.root.find_mut(id) {
             target.add_child(node);
@@ -624,12 +595,7 @@ impl TreeState {
     ///
     /// No-op when the selected node is the root (it has no parent to provide
     /// a sibling slot).
-    pub fn add_sibling_to_selected(
-        &mut self,
-        name: String,
-        desc: String,
-        extra_fields: Vec<ExtraField>,
-    ) {
+    pub fn add_sibling_to_selected(&mut self, name: String, extra_fields: Vec<ExtraField>) {
         let id = match self.selected_node_id() {
             Some(id) => id,
             None => return,
@@ -639,7 +605,7 @@ impl TreeState {
         } else {
             name
         };
-        let mut node = Node::new(&final_name, &desc);
+        let mut node = Node::new(&final_name);
         node.extra_fields = extra_fields;
         if insert_after(&mut self.root, id, node) {
             self.update_visible();
@@ -651,12 +617,7 @@ impl TreeState {
     ///
     /// No-op when the selected node is the root (it has no parent to provide
     /// a sibling slot).
-    pub fn add_sibling_before_to_selected(
-        &mut self,
-        name: String,
-        desc: String,
-        extra_fields: Vec<ExtraField>,
-    ) {
+    pub fn add_sibling_before_to_selected(&mut self, name: String, extra_fields: Vec<ExtraField>) {
         let id = match self.selected_node_id() {
             Some(id) => id,
             None => return,
@@ -666,7 +627,7 @@ impl TreeState {
         } else {
             name
         };
-        let mut node = Node::new(&final_name, &desc);
+        let mut node = Node::new(&final_name);
         node.extra_fields = extra_fields;
         if insert_before(&mut self.root, id, node) {
             self.update_visible();
@@ -913,12 +874,12 @@ mod tests {
 
     /// Root "Secrets" with one expanded branch "A" (children A1, A2) and a leaf "B".
     fn make_tree() -> TreeState {
-        let a1 = Node::new("A1", "");
-        let a2 = Node::new("A2", "");
-        let a = Node::with_children("A", "", vec![a1, a2]);
+        let a1 = Node::new("A1");
+        let a2 = Node::new("A2");
+        let a = Node::with_children("A", vec![a1, a2]);
         let a_id = a.id;
-        let b = Node::new("B", "");
-        let root = Node::with_children("Secrets", "", vec![a, b]);
+        let b = Node::new("B");
+        let root = Node::with_children("Secrets", vec![a, b]);
         let root_id = root.id;
         let mut state = TreeState::new(root);
         state.expanded.insert(root_id);
@@ -970,7 +931,7 @@ mod tests {
     fn paste_sibling_before_inserts_in_front() {
         let mut state = make_tree();
         state.selected = 4; // "B"
-        state.cut_buffer = Some(Node::new("X", ""));
+        state.cut_buffer = Some(Node::new("X"));
         state.paste_sibling_before();
         assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "X", "B"]);
     }
@@ -979,7 +940,7 @@ mod tests {
     fn add_sibling_before_to_selected_inserts_in_front() {
         let mut state = make_tree();
         state.selected = 4; // "B"
-        state.add_sibling_before_to_selected("X".to_string(), String::new(), Vec::new());
+        state.add_sibling_before_to_selected("X".to_string(), Vec::new());
         assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "X", "B"]);
     }
 
@@ -987,7 +948,7 @@ mod tests {
     fn add_sibling_before_is_noop_for_root() {
         let mut state = make_tree();
         state.selected = 0;
-        state.add_sibling_before_to_selected("X".to_string(), String::new(), Vec::new());
+        state.add_sibling_before_to_selected("X".to_string(), Vec::new());
         assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "B"]);
     }
 }

@@ -140,7 +140,7 @@ pub fn create_secret_file(path: &str, passphrase: &str) -> Result<Node, FileHand
         .map_err(|_| FileHandlingError::PathNotWritable(path.to_string()))?;
     let _ = fs::remove_file(&probe_path);
 
-    let node = Node::new(texts::DEFAULT_ROOT_NAME, "");
+    let node = Node::new(texts::DEFAULT_ROOT_NAME);
     let json = node_to_json(&node)?;
     let encrypted = crypt::encrypt(&json, passphrase)
         .map_err(|e| FileHandlingError::Crypt(format!("encryption failed: {e}")))?;
@@ -246,38 +246,46 @@ mod tests {
 
     #[test]
     fn test_json_roundtrip() {
-        let node = Node::with_children(
-            "Root",
-            "description",
-            vec![
-                Node::new("Child1", "first child"),
-                Node::new("Child2", "second child"),
-            ],
-        );
+        let mut node = Node::with_children("Root", vec![Node::new("Child1"), Node::new("Child2")]);
+        node.extra_fields = vec![ExtraField::description("description")];
         let json = node_to_json(&node).unwrap();
         let decoded: Node = json_to_node(&json).unwrap();
         assert_eq!(node.id, decoded.id);
         assert_eq!(node.name, decoded.name);
-        assert_eq!(node.description, decoded.description);
+        assert_eq!(node.extra_fields.len(), decoded.extra_fields.len());
+        assert_eq!(node.extra_fields[0].value, decoded.extra_fields[0].value);
         assert_eq!(node.children.len(), decoded.children.len());
     }
 
     #[test]
     fn test_json_roundtrip_empty() {
-        let node = Node::new("", "");
+        let node = Node::new("");
         let json = node_to_json(&node).unwrap();
         let decoded: Node = json_to_node(&json).unwrap();
         assert_eq!(node.id, decoded.id);
         assert_eq!(node.name, decoded.name);
-        assert_eq!(node.description, decoded.description);
         assert!(decoded.children.is_empty());
         assert!(decoded.extra_fields.is_empty());
     }
 
     #[test]
+    fn test_json_roundtrip_migrates_legacy_description() {
+        // A vault written before the description became an extra field.
+        let json = r#"{"id":"00000000-0000-0000-0000-000000000000",
+            "name":"Legacy","description":"old desc","extra_fields":[],"children":[]}"#;
+        let decoded: Node = json_to_node(json).unwrap();
+        assert_eq!(decoded.extra_fields.len(), 1);
+        assert_eq!(decoded.extra_fields[0].value, "old desc");
+        // Saving again drops the legacy key entirely.
+        let reencoded = node_to_json(&decoded).unwrap();
+        assert!(!reencoded.contains("\"description\""));
+    }
+
+    #[test]
     fn test_json_roundtrip_with_extra() {
-        let mut node = Node::new("Entry", "Login credentials");
+        let mut node = Node::new("Entry");
         node.extra_fields = vec![
+            ExtraField::description("Login credentials"),
             ExtraField {
                 field_type: FieldType::Login,
                 value: "admin".to_string(),
@@ -309,14 +317,9 @@ mod tests {
     fn test_json_roundtrip_nested() {
         let node = Node::with_children(
             "Root",
-            "",
             vec![
-                Node::with_children(
-                    "Category",
-                    "",
-                    vec![Node::new("Item1", "leaf"), Node::new("Item2", "leaf")],
-                ),
-                Node::new("Sibling", "leaf"),
+                Node::with_children("Category", vec![Node::new("Item1"), Node::new("Item2")]),
+                Node::new("Sibling"),
             ],
         );
         let json = node_to_json(&node).unwrap();
@@ -379,7 +382,7 @@ mod tests {
     #[test]
     fn test_validate_accepts_valid_file() {
         let path = format!("/tmp/test_valid_{}.age", uuid::Uuid::new_v4());
-        let node = Node::new("Test", "valid file test");
+        let node = Node::new("Test");
         create_test_encrypted_file(&path, "test-pass", &node);
 
         let result = validate_encrypted_file(&path);
@@ -407,7 +410,7 @@ mod tests {
     #[test]
     fn test_decrypt_to_node_roundtrip() {
         let path = format!("/tmp/test_decrypt_{}.age", uuid::Uuid::new_v4());
-        let original = Node::with_children("Root", "root desc", vec![Node::new("Child1", "leaf")]);
+        let original = Node::with_children("Root", vec![Node::new("Child1")]);
         create_test_encrypted_file(&path, "my-pass", &original);
 
         let data = fs::read(&path).unwrap();
@@ -423,7 +426,7 @@ mod tests {
     #[test]
     fn test_decrypt_to_node_wrong_passphrase() {
         let path = format!("/tmp/test_bad_pass_{}.age", uuid::Uuid::new_v4());
-        let node = Node::new("Test", "wrong pass test");
+        let node = Node::new("Test");
         create_test_encrypted_file(&path, "correct-pass", &node);
 
         let data = fs::read(&path).unwrap();
@@ -440,14 +443,10 @@ mod tests {
         let passphrase = b"save-test-pass";
         let passphrase_str = "save-test-pass";
 
-        let initial = Node::new("Initial", "before save");
+        let initial = Node::new("Initial");
         create_test_encrypted_file(&path, passphrase_str, &initial);
 
-        let mutated = Node::with_children(
-            "Updated Root",
-            "after mutation",
-            vec![Node::new("New Child", "added")],
-        );
+        let mutated = Node::with_children("Updated Root", vec![Node::new("New Child")]);
         save_tree(&mutated, &path, passphrase).unwrap();
 
         // After a successful save the temporary backup is removed again.
@@ -469,8 +468,9 @@ mod tests {
         let passphrase = b"extra-test";
         let passphrase_str = "extra-test";
 
-        let mut node = Node::new("Entry", "has extra fields");
+        let mut node = Node::new("Entry");
         node.extra_fields = vec![
+            ExtraField::description("has extra fields"),
             ExtraField {
                 field_type: FieldType::Login,
                 value: "admin".to_string(),
@@ -485,8 +485,8 @@ mod tests {
 
         let data = fs::read(&path).unwrap();
         let decoded = decrypt_to_node(&data, passphrase_str).unwrap();
-        assert_eq!(decoded.extra_fields.len(), 2);
-        assert_eq!(decoded.extra_fields[0].value, "admin");
+        assert_eq!(decoded.extra_fields.len(), 3);
+        assert_eq!(decoded.extra_fields[1].value, "admin");
 
         let _ = fs::remove_file(&path);
         let _ = fs::remove_file(format!("{}.bak", path));
@@ -498,7 +498,7 @@ mod tests {
         let _ = fs::remove_file(&path);
         let _ = fs::remove_file(format!("{}.bak", path));
 
-        let node = Node::new("New", "first save");
+        let node = Node::new("New");
         save_tree(&node, &path, b"pass").unwrap();
 
         assert!(fs::metadata(&path).is_ok());
@@ -686,7 +686,7 @@ mod tests {
         let path = format!("/tmp/test_open_time_{}.age", uuid::Uuid::new_v4());
         let passphrase = "test-passphrase";
 
-        let root = Node::new("Secrets", "");
+        let root = Node::new("Secrets");
         create_test_encrypted_file(&path, passphrase, &root);
 
         let data = validate_encrypted_file(&path).expect("validation should succeed");

@@ -64,7 +64,7 @@ through matched rows only.
 
 | Keys | Action |
 |------|--------|
-| `j`/`k` | Navigate rows (description + extra fields) |
+| `j`/`k` | Navigate rows (a node's extra fields) |
 | `Enter` | Copy selected row to clipboard → "Copied!" alert |
 | `o` | Edit this node |
 | `Esc` | Close overlay |

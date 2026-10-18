@@ -221,7 +221,7 @@ enum PickerItem {
     Login,
     Password,
     Custom,
-    /// Enables the description row (Add mode only, until it is shown).
+    /// Adds a Description extra field (`Custom("Description")`).
     Desc,
 }
 
@@ -309,8 +309,7 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
         }
         // Delete on an extra-field row opens the confirm-delete popup.
         Action::DeleteChar if row == FormRow::AddButton => {}
-        Action::DeleteChar
-            if matches!(row, FormRow::Name | FormRow::Desc) && form.focus == FormFocus::Nav => {}
+        Action::DeleteChar if row == FormRow::Name && form.focus == FormFocus::Nav => {}
         Action::Confirm if row == FormRow::AddButton => {
             state.mode = InputMode::SelectFieldType { form, selected: 0 };
             return;
@@ -398,23 +397,18 @@ fn save_form(state: &mut TreeState, form: FormState) {
     if form.is_adding() {
         match state.add_position {
             AddPosition::SiblingAfter => {
-                state.add_sibling_to_selected(form.name, form.desc, form.extra_fields);
+                state.add_sibling_to_selected(form.name, form.extra_fields);
             }
             AddPosition::SiblingBefore => {
-                state.add_sibling_before_to_selected(form.name, form.desc, form.extra_fields);
+                state.add_sibling_before_to_selected(form.name, form.extra_fields);
             }
             AddPosition::Child => {
-                state.add_child_to_selected(form.name, form.desc, form.extra_fields);
+                state.add_child_to_selected(form.name, form.extra_fields);
             }
         }
         state.mode = InputMode::Normal;
     } else {
-        state.update_node(
-            form.node_id.unwrap(),
-            form.name,
-            form.desc,
-            form.extra_fields,
-        );
+        state.update_node(form.node_id.unwrap(), form.name, form.extra_fields);
         state.mode = InputMode::Detail {
             selected: 0,
             alert: None,
@@ -487,10 +481,11 @@ fn handle_select_field_type(key: event::KeyEvent, state: &mut TreeState) {
                 };
             }
             PickerItem::Desc => {
-                form.show_desc = true;
-                form.selected_row = 1; // Name, Desc, ...
+                form.extra_fields
+                    .push(ExtraField::description(String::new()));
+                form.selected_row = form.rows().len() - 2; // the new field, before AddButton
                 form.focus = FormFocus::Input;
-                form.cursor = form.desc.len();
+                form.cursor = 0;
                 state.mode = InputMode::Form(form);
             }
         },
@@ -501,12 +496,13 @@ fn handle_select_field_type(key: event::KeyEvent, state: &mut TreeState) {
 }
 
 /// Items offered by the field-type picker for the given form.
-fn picker_items(form: &FormState) -> Vec<PickerItem> {
-    let mut items = vec![PickerItem::Login, PickerItem::Password, PickerItem::Custom];
-    if !form.show_desc {
-        items.push(PickerItem::Desc);
-    }
-    items
+fn picker_items(_form: &FormState) -> Vec<PickerItem> {
+    vec![
+        PickerItem::Login,
+        PickerItem::Password,
+        PickerItem::Custom,
+        PickerItem::Desc,
+    ]
 }
 
 fn handle_custom_field_name(key: event::KeyEvent, state: &mut TreeState) {
@@ -587,7 +583,7 @@ fn editing_has_changes(state: &TreeState, form: &FormState) -> bool {
     match original {
         None => false,
         Some(n) => {
-            if form.name != n.name || form.desc != n.description {
+            if form.name != n.name {
                 return true;
             }
             if form.extra_fields.len() != n.extra_fields.len() {
@@ -610,7 +606,7 @@ fn editing_has_changes(state: &TreeState, form: &FormState) -> bool {
 }
 
 fn adding_has_changes(form: &FormState) -> bool {
-    !form.name.is_empty() || !form.desc.is_empty() || !form.extra_fields.is_empty()
+    !form.name.is_empty() || !form.extra_fields.is_empty()
 }
 
 fn handle_confirm_discard(key: event::KeyEvent, state: &mut TreeState) {
@@ -706,14 +702,9 @@ fn handle_detail(key: event::KeyEvent, state: &mut TreeState) {
             };
         }
         Action::CopyField => {
-            let text = state.current_node_ref().and_then(|node| {
-                if selected == 0 {
-                    Some(node.description.clone())
-                } else {
-                    let idx = selected - 1;
-                    node.extra_fields.get(idx).map(|ef| ef.value.clone())
-                }
-            });
+            let text = state
+                .current_node_ref()
+                .and_then(|node| node.extra_fields.get(selected).map(|ef| ef.value.clone()));
             if let Some(ref t) = text
                 && !t.is_empty()
             {
@@ -1315,13 +1306,6 @@ fn render_edit_overlay(frame: &mut Frame, area: Rect, form: &FormState, title: &
                 focused,
                 is_editing,
             )),
-            FormRow::Desc => lines.push(form_row_line(
-                texts::LABEL_DESC,
-                &form.desc,
-                form.cursor,
-                focused,
-                is_editing,
-            )),
             FormRow::Extra(idx) => {
                 if let Some(ef) = form.extra_fields.get(*idx) {
                     lines.push(render_extra_field_line(
@@ -1375,7 +1359,7 @@ fn form_hint(form: &FormState) -> &'static str {
     match form.current_row() {
         FormRow::AddButton => texts::HINT_FORM_ADD,
         FormRow::Extra(_) => texts::HINT_FORM_EXTRA,
-        FormRow::Name | FormRow::Desc => texts::HINT_FORM,
+        FormRow::Name => texts::HINT_FORM,
     }
 }
 
@@ -1587,17 +1571,9 @@ fn render_detail_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
 
     lines.push(Line::from(""));
 
-    let desc = if node.description.is_empty() {
-        texts::NO_DESCRIPTION
-    } else {
-        node.description.as_str()
-    };
-    lines.push(Line::from(selected_span(desc, selected == 0)));
-
     for (i, ef) in node.extra_fields.iter().enumerate() {
-        let ef_index = i + 1;
         let display_val = ef.field_type.display_value(&ef.value);
-        let is_sel = selected == ef_index;
+        let is_sel = selected == i;
         let text = format!("{}: {}", ef.field_type.label(), display_val);
         lines.push(Line::from(selected_span(&text, is_sel)));
     }
@@ -1624,7 +1600,7 @@ mod tests {
     }
 
     fn editing_state() -> TreeState {
-        let root = Node::new("Root", "");
+        let root = Node::new("Root");
         let mut state = TreeState::new(root);
         let node = state.root.clone();
         state.mode = InputMode::Form(FormState::new_edit(&node));
@@ -1648,7 +1624,7 @@ mod tests {
 
     #[test]
     fn form_nav_j_moves_row_to_extra_or_add_button() {
-        let mut node = Node::new("Root", "d");
+        let mut node = Node::new("Root");
         node.extra_fields.push(ExtraField {
             field_type: FieldType::Login,
             value: "x".to_string(),
@@ -1658,7 +1634,7 @@ mod tests {
         handle_form(key(KeyCode::Char('j')), &mut state);
         let form = form_of(&state);
         assert_eq!(form.name, "Root");
-        assert_eq!(form.selected_row, 1); // moved to Extra(0) (desc hidden)
+        assert_eq!(form.selected_row, 1); // moved to Extra(0)
         assert_eq!(form.current_row(), FormRow::Extra(0));
     }
 
@@ -1698,19 +1674,16 @@ mod tests {
     fn add_form_starts_with_only_name_and_add_button() {
         let form = FormState::new_add();
         assert_eq!(form.rows(), vec![FormRow::Name, FormRow::AddButton]);
-        assert!(!form.show_desc);
     }
 
     #[test]
-    fn edit_form_hides_desc_until_added() {
-        let mut node = Node::new("n", "d");
+    fn edit_form_rows_are_name_fields_and_add_button() {
+        let mut node = Node::new("n");
         node.extra_fields.push(ExtraField {
             field_type: FieldType::Login,
             value: String::new(),
         });
         let form = FormState::new_edit(&node);
-        // desc is hidden until explicitly added via the field-type picker.
-        assert!(!form.show_desc);
         assert_eq!(
             form.rows(),
             vec![FormRow::Name, FormRow::Extra(0), FormRow::AddButton]
@@ -1718,8 +1691,8 @@ mod tests {
     }
 
     #[test]
-    fn adding_desc_enables_the_desc_row() {
-        let mut state = TreeState::new(Node::new("Root", ""));
+    fn adding_desc_appends_a_description_field_in_input() {
+        let mut state = TreeState::new(Node::new("Root"));
         state.add_position = AddPosition::Child;
         state.mode = InputMode::Form(FormState::new_add());
         // Position the selection on the add button and open the picker.
@@ -1729,14 +1702,14 @@ mod tests {
         handle_form(key(KeyCode::Enter), &mut state);
         assert!(matches!(state.mode, InputMode::SelectFieldType { .. }));
 
-        // Description is offered last for a new node without desc.
+        // Description is offered last for a new node.
         let items = match &state.mode {
             InputMode::SelectFieldType { form, .. } => picker_items(form),
             _ => unreachable!(),
         };
         assert_eq!(items.last(), Some(&PickerItem::Desc));
 
-        // Choose it and verify the row appears.
+        // Choose it and verify the field appears focused for input.
         let desc_index = items.len() - 1;
         let mut state2 = state;
         if let InputMode::SelectFieldType {
@@ -1747,8 +1720,11 @@ mod tests {
         }
         handle_select_field_type(key(KeyCode::Enter), &mut state2);
         let form = form_of(&state2);
-        assert!(form.show_desc);
-        assert_eq!(form.current_row(), FormRow::Desc);
+        assert_eq!(form.focus, FormFocus::Input);
+        assert_eq!(form.current_row(), FormRow::Extra(0));
+        assert_eq!(form.extra_fields.len(), 1);
+        assert_eq!(form.extra_fields[0].field_type.label(), "Description");
+        assert_eq!(form.extra_fields[0].value, "");
     }
 
     #[test]
@@ -1770,7 +1746,7 @@ mod tests {
     }
 
     fn form_with_fields() -> FormState {
-        let mut node = Node::new("n", "");
+        let mut node = Node::new("n");
         for value in ["a", "b", "c"] {
             node.extra_fields.push(ExtraField {
                 field_type: FieldType::Login,
@@ -1785,14 +1761,13 @@ mod tests {
     }
 
     fn select_extra(form: &mut FormState, extra_index: usize) {
-        // rows: Name, [Desc,] Extra(0..), AddButton
-        let desc_offset = usize::from(form.show_desc);
-        form.select_row(1 + desc_offset + extra_index);
+        // rows: Name, Extra(0..), AddButton
+        form.select_row(1 + extra_index);
     }
 
     #[test]
     fn field_cut_requires_two_d_presses() {
-        let mut state = TreeState::new(Node::new("Root", ""));
+        let mut state = TreeState::new(Node::new("Root"));
         let mut form = form_with_fields();
         select_extra(&mut form, 1);
         state.mode = InputMode::Form(form);
@@ -1810,7 +1785,7 @@ mod tests {
 
     #[test]
     fn field_cut_is_cancelled_by_other_keys() {
-        let mut state = TreeState::new(Node::new("Root", ""));
+        let mut state = TreeState::new(Node::new("Root"));
         let mut form = form_with_fields();
         select_extra(&mut form, 0);
         state.mode = InputMode::Form(form);
@@ -1825,7 +1800,7 @@ mod tests {
 
     #[test]
     fn field_cut_is_noop_on_name_row() {
-        let mut state = TreeState::new(Node::new("Root", ""));
+        let mut state = TreeState::new(Node::new("Root"));
         let mut form = form_with_fields();
         form.select_row(0);
         state.mode = InputMode::Form(form);
@@ -1836,7 +1811,7 @@ mod tests {
 
     #[test]
     fn field_paste_after_moves_field_down() {
-        let mut state = TreeState::new(Node::new("Root", ""));
+        let mut state = TreeState::new(Node::new("Root"));
         let mut form = form_with_fields();
         select_extra(&mut form, 0); // "a"
         state.mode = InputMode::Form(form);
@@ -1859,7 +1834,7 @@ mod tests {
 
     #[test]
     fn field_paste_before_moves_field_up() {
-        let mut state = TreeState::new(Node::new("Root", ""));
+        let mut state = TreeState::new(Node::new("Root"));
         let mut form = form_with_fields();
         select_extra(&mut form, 2); // "c"
         state.mode = InputMode::Form(form);
@@ -1879,7 +1854,7 @@ mod tests {
 
     #[test]
     fn paste_without_buffer_does_nothing() {
-        let mut state = TreeState::new(Node::new("Root", ""));
+        let mut state = TreeState::new(Node::new("Root"));
         let mut form = form_with_fields();
         select_extra(&mut form, 0);
         state.mode = InputMode::Form(form);
@@ -1891,7 +1866,7 @@ mod tests {
 
     #[test]
     fn confirm_delete_removes_the_field_and_clamps_selection() {
-        let mut node = Node::new("n", "");
+        let mut node = Node::new("n");
         node.extra_fields.push(ExtraField {
             field_type: FieldType::Login,
             value: "a".to_string(),
@@ -1901,8 +1876,8 @@ mod tests {
             value: "b".to_string(),
         });
         let mut initial = FormState::new_edit(&node);
-        initial.select_row(3); // second extra field
-        let mut state = TreeState::new(Node::new("Root", ""));
+        initial.select_row(2); // second extra field
+        let mut state = TreeState::new(Node::new("Root"));
         state.mode = InputMode::ConfirmDeleteField {
             form: initial,
             target_index: 1,

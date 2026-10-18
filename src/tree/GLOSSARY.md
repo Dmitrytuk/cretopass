@@ -4,7 +4,7 @@ The data model and workspace for organizing secrets in a hierarchical tree.
 
 ## Language
 
-**Node**: The fundamental data unit. A named, described item that can carry ExtraFields and optionally contain child Nodes. Nodes with children are branch nodes; nodes without are leaf nodes.
+**Node**: The fundamental data unit. A named item that can carry ExtraFields and optionally contain child Nodes. Nodes with children are branch nodes; nodes without are leaf nodes.
 _Avoid_: Entry, Item, Record
 
 **Root**: The top-level Node of the tree. Cannot be cut or deleted. Every secret file has exactly one Root.
@@ -15,8 +15,11 @@ _Avoid_: Folder, Category
 **Leaf**: A Node with no children.
 _Avoid_: Entry, Item, Endpoint
 
-**ExtraField**: A key-value pair attached to a Node beyond its name and description. Three types: Login, Password, or Custom.
+**ExtraField**: A key-value pair attached to a Node beyond its name. Three types: Login, Password, or Custom.
 _Avoid_: Attribute, Property, Field
+
+**Description**: The conventional Custom ExtraField labelled "Description" holding a Node's free-text description. It is an ordinary ExtraField: addable, movable, duplicable and deletable like any other, and absent when the Node has no description. There is no dedicated Description field or type.
+_Avoid_: Desc, Note
 
 **FieldType**: The kind of an ExtraField — `Login`, `Password`, or `Custom(name)`.
 
@@ -29,13 +32,13 @@ _Avoid_: Attribute, Property, Field
 **Tree**: The main workspace where the node tree is navigated, searched, and edited. Entered from Home after opening a secret file.
 _Avoid_: Tree view, Tree app, Workspace
 
-**Detail**: Overlay showing a selected Node's description and ExtraFields. Rows can be navigated and copied to the system clipboard.
+**Detail**: Overlay listing a selected Node's ExtraFields. Rows can be navigated and copied to the system clipboard.
 _Avoid_: Info panel, View mode
 
-**Edit**: Inline two-level form for modifying an existing Node's name, description, and ExtraFields. Nav level moves fields and triggers actions; Input level edits text.
+**Edit**: Inline two-level form for modifying an existing Node's name and ExtraFields. Nav level moves fields and triggers actions; Input level edits text.
 _Avoid_: Editing mode
 
-**Add**: Inline two-level form for creating a new Node. Starts with the Name row alone; the Description row and ExtraFields are added via `+ Add Field`. Empty name defaults to "Untitled".
+**Add**: Inline two-level form for creating a new Node. Starts with the Name row alone; Description and ExtraFields are added via `+ Add Field`. Empty name defaults to "Untitled".
 _Avoid_: Adding mode
 
 **Form**: The shared Add/Edit state (`FormState`). Holds the node data being edited, the ordered row list (`FormRow`), the focused row, the Nav/Input level, and the field cut buffer.
