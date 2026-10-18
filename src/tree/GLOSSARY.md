@@ -32,10 +32,10 @@ _Avoid_: Tree view, Tree app, Workspace
 **Detail**: Overlay showing a selected Node's description and ExtraFields. Rows can be navigated and copied to the system clipboard.
 _Avoid_: Info panel, View mode
 
-**Edit**: Inline form for modifying an existing Node's name, description, and ExtraFields.
+**Edit**: Inline two-level form for modifying an existing Node's name, description, and ExtraFields. Nav level moves fields and triggers actions; Input level edits text.
 _Avoid_: Editing mode
 
-**Add**: Inline form for creating a new Node. Supports name, description, and ExtraFields. Empty name defaults to "Untitled".
+**Add**: Inline two-level form for creating a new Node. Supports name, description, and ExtraFields. Empty name defaults to "Untitled".
 _Avoid_: Adding mode
 
 **Expand**: Revealing a Branch Node's children in the Tree view. Collapse hides them again.

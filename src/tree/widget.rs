@@ -135,6 +135,19 @@ pub enum AddPosition {
     Child,
 }
 
+/// Which level of the two-level Add/Edit form currently has focus.
+///
+/// `Nav` moves between fields and triggers form-level actions (save, add
+/// field, cancel); `Input` edits the focused field's text. Entered with `i`,
+/// left with `Esc`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormFocus {
+    /// Navigation level: `j`/`k`/arrows/Tab move between fields.
+    Nav,
+    /// Input level: printable keys edit the focused field.
+    Input,
+}
+
 /// Central application state.
 #[derive(Debug, Clone)]
 pub struct TreeState {
@@ -149,6 +162,8 @@ pub struct TreeState {
     pub mode: InputMode,
     /// Where the pending "Add" form should place the new node.
     pub add_position: AddPosition,
+    /// Which level of the Add/Edit form has focus (`Nav` or `Input`).
+    pub form_focus: FormFocus,
     pub quit: bool,
     pub return_to_menu: bool,
     /// Path of the currently opened secret file, if any.
@@ -177,6 +192,7 @@ impl TreeState {
             matched: HashSet::new(),
             mode: InputMode::Normal,
             add_position: AddPosition::Child,
+            form_focus: FormFocus::Nav,
             quit: false,
             return_to_menu: false,
             active_vault_path: None,

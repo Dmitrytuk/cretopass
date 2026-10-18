@@ -31,6 +31,8 @@ pub enum Action {
     ToggleSearch,
     ConfirmSearch,
     ClearSearch,
+    BeginInput,
+    ExitInput,
     NextField,
     PrevField,
     InsertChar(char),
@@ -118,10 +120,24 @@ impl Action {
         }
     }
 
-    pub fn from_form(key: &KeyEvent) -> Self {
+    /// Dispatch for the form's navigation level. Text is not editable here;
+    /// `i`/`Enter` enter the input level, `j`/`k`/arrows/Tab move between fields.
+    pub fn from_form_nav(key: &KeyEvent) -> Self {
         match key.code {
-            KeyCode::Tab | KeyCode::Down => Self::NextField,
-            KeyCode::Up => Self::PrevField,
+            KeyCode::Char('j') | KeyCode::Down | KeyCode::Tab => Self::NextField,
+            KeyCode::Char('k') | KeyCode::Up | KeyCode::BackTab => Self::PrevField,
+            KeyCode::Char('i') => Self::BeginInput,
+            KeyCode::Enter => Self::Confirm,
+            KeyCode::Delete => Self::DeleteChar,
+            KeyCode::Esc => Self::Cancel,
+            _ => Self::None,
+        }
+    }
+
+    /// Dispatch for the form's input level. Printable keys edit the active
+    /// field; `Esc` returns to the navigation level; `Enter` saves.
+    pub fn from_form_input(key: &KeyEvent) -> Self {
+        match key.code {
             KeyCode::Left => Self::CursorLeft,
             KeyCode::Right => Self::CursorRight,
             KeyCode::Home => Self::CursorHome,
@@ -129,7 +145,7 @@ impl Action {
             KeyCode::Backspace => Self::Backspace,
             KeyCode::Delete => Self::DeleteChar,
             KeyCode::Enter => Self::Confirm,
-            KeyCode::Esc => Self::Cancel,
+            KeyCode::Esc => Self::ExitInput,
             KeyCode::Char(c) => Self::InsertChar(c),
             _ => Self::None,
         }
@@ -321,5 +337,80 @@ mod tests {
     #[test]
     fn from_detail_enter_copies() {
         assert_eq!(Action::from_detail(&key(KeyCode::Enter)), Action::CopyField);
+    }
+
+    #[test]
+    fn from_form_nav_jk_move_fields_and_i_enters_input() {
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('j'))),
+            Action::NextField
+        );
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Down)),
+            Action::NextField
+        );
+        assert_eq!(Action::from_form_nav(&key(KeyCode::Tab)), Action::NextField);
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('k'))),
+            Action::PrevField
+        );
+        assert_eq!(Action::from_form_nav(&key(KeyCode::Up)), Action::PrevField);
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::BackTab)),
+            Action::PrevField
+        );
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('i'))),
+            Action::BeginInput
+        );
+        assert_eq!(Action::from_form_nav(&key(KeyCode::Enter)), Action::Confirm);
+        assert_eq!(Action::from_form_nav(&key(KeyCode::Esc)), Action::Cancel);
+    }
+
+    #[test]
+    fn from_form_nav_does_not_insert_chars() {
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('x'))),
+            Action::None
+        );
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('5'))),
+            Action::None
+        );
+    }
+
+    #[test]
+    fn from_form_input_inserts_and_esc_exits() {
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Char('x'))),
+            Action::InsertChar('x')
+        );
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Char('j'))),
+            Action::InsertChar('j')
+        );
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Esc)),
+            Action::ExitInput
+        );
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Enter)),
+            Action::Confirm
+        );
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Left)),
+            Action::CursorLeft
+        );
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Backspace)),
+            Action::Backspace
+        );
+    }
+
+    #[test]
+    fn from_form_input_does_not_navigate_fields() {
+        assert_eq!(Action::from_form_input(&key(KeyCode::Tab)), Action::None);
+        assert_eq!(Action::from_form_input(&key(KeyCode::Down)), Action::None);
+        assert_eq!(Action::from_form_input(&key(KeyCode::Up)), Action::None);
     }
 }

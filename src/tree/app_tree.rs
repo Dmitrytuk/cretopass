@@ -9,7 +9,7 @@ use crate::file_handling::save_tree;
 use crate::theming::Action;
 use crate::theming::{ElementStyle, texts};
 use crate::tree::node::{ExtraField, FieldType};
-use crate::tree::widget::{AddPosition, InputMode, TreeState, TreeWidget};
+use crate::tree::widget::{AddPosition, FormFocus, InputMode, TreeState, TreeWidget};
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -187,6 +187,7 @@ fn handle_pending_add(key: event::KeyEvent, state: &mut TreeState) {
         }
     };
     state.add_position = position;
+    state.form_focus = FormFocus::Nav;
     state.mode = InputMode::Adding {
         name: String::new(),
         desc: String::new(),
@@ -378,8 +379,25 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
     let is_on_add_button = field == 2 + extra_fields.len();
     let active_len = active_len_for_field(&name, &desc, &extra_fields, field);
 
-    match Action::from_form(&key) {
-        Action::DeleteChar if is_on_extra => {
+    let action = match state.form_focus {
+        FormFocus::Nav => Action::from_form_nav(&key),
+        FormFocus::Input => Action::from_form_input(&key),
+    };
+
+    match action {
+        Action::BeginInput => {
+            if is_on_add_button {
+                state.mode = build_mode(name, desc, extra_fields, field, cursor);
+            } else {
+                state.form_focus = FormFocus::Input;
+                state.mode = build_mode(name, desc, extra_fields, field, cursor);
+            }
+        }
+        Action::ExitInput => {
+            state.form_focus = FormFocus::Nav;
+            state.mode = build_mode(name, desc, extra_fields, field, cursor);
+        }
+        Action::DeleteChar if is_on_extra && state.form_focus == FormFocus::Nav => {
             state.mode = InputMode::ConfirmDeleteField {
                 node_id,
                 name,
@@ -389,6 +407,10 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
                 cursor,
                 target_index: field - 2,
             };
+        }
+        // In Nav, Delete has no meaning on name/description rows.
+        Action::DeleteChar if state.form_focus == FormFocus::Nav => {
+            state.mode = build_mode(name, desc, extra_fields, field, cursor);
         }
         Action::Confirm if is_on_add_button => {
             state.mode = InputMode::SelectFieldType {
@@ -577,6 +599,7 @@ fn handle_select_field_type(key: event::KeyEvent, state: &mut TreeState) {
 
     match Action::from_select_field_type(&key) {
         Action::Cancel => {
+            state.form_focus = FormFocus::Nav;
             state.mode =
                 build_editing_mode(node_id, name, desc, extra_fields, field, cursor, is_adding);
         }
@@ -645,6 +668,7 @@ fn handle_select_field_type(key: event::KeyEvent, state: &mut TreeState) {
                     value: String::new(),
                 });
                 let new_field = 2 + ef.len() - 1;
+                state.form_focus = FormFocus::Input;
                 state.mode = build_editing_mode(node_id, name, desc, ef, new_field, 0, is_adding);
             }
             1 => {
@@ -654,6 +678,7 @@ fn handle_select_field_type(key: event::KeyEvent, state: &mut TreeState) {
                     value: String::new(),
                 });
                 let new_field = 2 + ef.len() - 1;
+                state.form_focus = FormFocus::Input;
                 state.mode = build_editing_mode(node_id, name, desc, ef, new_field, 0, is_adding);
             }
             _ => {
@@ -726,6 +751,7 @@ fn handle_custom_field_name(key: event::KeyEvent, state: &mut TreeState) {
                 value: String::new(),
             });
             let new_field = 2 + ef.len() - 1;
+            state.form_focus = FormFocus::Input;
             state.mode = build_editing_mode(node_id, name, desc, ef, new_field, 0, is_adding);
         }
         Action::Backspace => {
@@ -805,6 +831,7 @@ fn handle_confirm_delete(key: event::KeyEvent, state: &mut TreeState) {
             let total = total_fields(&ef);
             let new_field = field.min(total.saturating_sub(1));
             let new_cursor = cursor_on_new_field(new_field, &name, &desc, &ef);
+            state.form_focus = FormFocus::Nav;
             state.mode =
                 build_editing_mode(node_id, name, desc, ef, new_field, new_cursor, is_adding);
         }
@@ -881,6 +908,7 @@ fn handle_confirm_discard(key: event::KeyEvent, state: &mut TreeState) {
             }
         }
         Action::No => {
+            state.form_focus = FormFocus::Nav;
             if let Some(nid) = node_id {
                 state.mode = InputMode::Editing {
                     node_id: nid,
@@ -999,11 +1027,16 @@ fn handle_detail(key: event::KeyEvent, state: &mut TreeState) {
         Action::EditNode => {
             if let Some(node) = state.current_node_ref() {
                 let cursor = node.name.len();
+                let node_id = node.id;
+                let name = node.name.clone();
+                let desc = node.description.clone();
+                let extra_fields = node.extra_fields.clone();
+                state.form_focus = FormFocus::Nav;
                 state.mode = InputMode::Editing {
-                    node_id: node.id,
-                    name: node.name.clone(),
-                    desc: node.description.clone(),
-                    extra_fields: node.extra_fields.clone(),
+                    node_id,
+                    name,
+                    desc,
+                    extra_fields,
                     field: 0,
                     cursor,
                 };
@@ -1236,6 +1269,7 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
                     field: *field,
                     cursor: *cursor,
                     title: texts::OVERLAY_ADD_NODE,
+                    is_editing: state.form_focus == FormFocus::Input,
                 },
             );
         }
@@ -1257,6 +1291,7 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
                     field: *field,
                     cursor: *cursor,
                     title: texts::OVERLAY_EDIT_NODE,
+                    is_editing: state.form_focus == FormFocus::Input,
                 },
             );
         }
@@ -1372,30 +1407,16 @@ fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
             extra_fields,
             field,
             ..
-        } => {
-            let is_on_extra = extra_field_index(*field).is_some_and(|i| i < extra_fields.len());
-            if is_on_extra {
-                texts::HINT_FORM_EXTRA
-            } else if *field == 2 + extra_fields.len() {
-                texts::HINT_FORM_ADD
-            } else {
-                texts::HINT_FORM
-            }
         }
-        InputMode::Adding {
+        | InputMode::Adding {
             extra_fields,
             field,
             ..
-        } => {
-            let is_on_extra = extra_field_index(*field).is_some_and(|i| i < extra_fields.len());
-            if is_on_extra {
-                texts::HINT_FORM_EXTRA
-            } else if *field == 2 + extra_fields.len() {
-                texts::HINT_FORM_ADD
-            } else {
-                texts::HINT_FORM
-            }
-        }
+        } => form_hint(
+            *field,
+            extra_fields.len(),
+            state.form_focus == FormFocus::Input,
+        ),
         InputMode::SelectFieldType { .. } => texts::HINT_SELECT_FIELD_TYPE,
         InputMode::CustomFieldName { .. } => texts::HINT_CUSTOM_FIELD_NAME,
         InputMode::ConfirmDeleteField { .. } => texts::HINT_CONFIRM_DELETE,
@@ -1589,12 +1610,36 @@ fn make_overlay_area(area: Rect, extra_fields_len: usize, base_content: u16) -> 
     }
 }
 
+fn form_field_spans(
+    label: &str,
+    text: &str,
+    cursor: usize,
+    is_focused: bool,
+    is_editing: bool,
+) -> Vec<Span<'static>> {
+    if !is_focused {
+        return vec![
+            Span::styled(label.to_string(), ElementStyle::CursorLabel.style()),
+            Span::styled(text.to_string(), ElementStyle::CursorDimmed.style()),
+        ];
+    }
+    if is_editing {
+        return cursor_field_spans(label, text, cursor, true);
+    }
+    // Focused but navigating the form: highlight without showing a cursor.
+    vec![
+        Span::styled(label.to_string(), ElementStyle::CursorLabel.style()),
+        Span::styled(text.to_string(), ElementStyle::CursorNormalText.style()),
+    ]
+}
+
 fn render_extra_field_line(
     ef: &ExtraField,
     ef_index: usize,
     field: usize,
     cursor: usize,
     is_inactive_display: bool,
+    is_editing: bool,
 ) -> Line<'static> {
     let is_active = field == ef_index + 2;
     let display_val = if is_active && !is_inactive_display {
@@ -1603,7 +1648,13 @@ fn render_extra_field_line(
         ef.field_type.display_value(&ef.value)
     };
     let prefix = format!("{}: ", ef.field_type.label());
-    Line::from(cursor_field_spans(&prefix, &display_val, cursor, is_active))
+    Line::from(form_field_spans(
+        &prefix,
+        &display_val,
+        cursor,
+        is_active,
+        is_editing,
+    ))
 }
 
 /// Arguments for rendering the add/edit node overlay form.
@@ -1614,6 +1665,7 @@ struct EditOverlayArgs<'a> {
     field: usize,
     cursor: usize,
     title: &'a str,
+    is_editing: bool,
 }
 
 fn render_edit_overlay(frame: &mut Frame, area: Rect, args: EditOverlayArgs<'_>) {
@@ -1624,6 +1676,7 @@ fn render_edit_overlay(frame: &mut Frame, area: Rect, args: EditOverlayArgs<'_>)
         field,
         cursor,
         title,
+        is_editing,
     } = args;
     let overlay_area = make_overlay_area(area, extra_fields.len(), 5);
 
@@ -1636,21 +1689,25 @@ fn render_edit_overlay(frame: &mut Frame, area: Rect, args: EditOverlayArgs<'_>)
 
     let mut lines: Vec<Line> = Vec::new();
 
-    lines.push(Line::from(cursor_field_spans(
+    lines.push(Line::from(form_field_spans(
         texts::LABEL_NAME,
         name,
         cursor,
         field == 0,
+        is_editing,
     )));
-    lines.push(Line::from(cursor_field_spans(
+    lines.push(Line::from(form_field_spans(
         texts::LABEL_DESC,
         desc,
         cursor,
         field == 1,
+        is_editing,
     )));
 
     for (i, ef) in extra_fields.iter().enumerate() {
-        lines.push(render_extra_field_line(ef, i, field, cursor, false));
+        lines.push(render_extra_field_line(
+            ef, i, field, cursor, false, is_editing,
+        ));
     }
 
     let is_add_active = field == 2 + extra_fields.len();
@@ -1662,13 +1719,7 @@ fn render_edit_overlay(frame: &mut Frame, area: Rect, args: EditOverlayArgs<'_>)
     lines.push(Line::from(Span::styled(texts::ADD_FIELD_BUTTON, add_style)));
     lines.push(Line::from(""));
 
-    let hint = if field >= 2 && field < 2 + extra_fields.len() {
-        texts::HINT_FORM_EXTRA
-    } else if field == 2 + extra_fields.len() {
-        texts::HINT_FORM_ADD
-    } else {
-        texts::HINT_FORM
-    };
+    let hint = form_hint(field, extra_fields.len(), is_editing);
     lines.push(Line::from(Span::styled(
         hint,
         ElementStyle::GrayHint.style(),
@@ -1677,6 +1728,20 @@ fn render_edit_overlay(frame: &mut Frame, area: Rect, args: EditOverlayArgs<'_>)
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+/// Selects the help-bar hint for the Add/Edit form based on the focused
+/// field and whether the input level is active.
+fn form_hint(field: usize, num_extra: usize, is_editing: bool) -> &'static str {
+    if is_editing {
+        texts::HINT_FORM_INPUT
+    } else if field >= 2 && field < 2 + num_extra {
+        texts::HINT_FORM_EXTRA
+    } else if field == 2 + num_extra {
+        texts::HINT_FORM_ADD
+    } else {
+        texts::HINT_FORM
+    }
 }
 
 fn render_select_field_type_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
@@ -1912,4 +1977,82 @@ fn render_detail_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tree::node::Node;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn editing_state() -> TreeState {
+        let root = Node::new("Root", "");
+        let mut state = TreeState::new(root);
+        let node_id = state.root.id;
+        state.mode = InputMode::Editing {
+            node_id,
+            name: "name".to_string(),
+            desc: "desc".to_string(),
+            extra_fields: Vec::new(),
+            field: 0,
+            cursor: 4,
+        };
+        state
+    }
+
+    #[test]
+    fn form_opens_in_nav_and_i_enters_input() {
+        let mut state = editing_state();
+        assert_eq!(state.form_focus, FormFocus::Nav);
+        handle_form(key(KeyCode::Char('i')), &mut state);
+        assert_eq!(state.form_focus, FormFocus::Input);
+    }
+
+    #[test]
+    fn form_nav_j_moves_field_without_inserting() {
+        let mut state = editing_state();
+        handle_form(key(KeyCode::Char('j')), &mut state);
+        if let InputMode::Editing { name, field, .. } = &state.mode {
+            assert_eq!(name, "name");
+            assert_eq!(*field, 1); // moved to desc field
+        } else {
+            panic!("expected Editing mode");
+        }
+        assert_eq!(state.form_focus, FormFocus::Nav);
+    }
+
+    #[test]
+    fn form_input_esc_returns_to_nav() {
+        let mut state = editing_state();
+        state.form_focus = FormFocus::Input;
+        handle_form(key(KeyCode::Esc), &mut state);
+        assert_eq!(state.form_focus, FormFocus::Nav);
+        assert!(matches!(state.mode, InputMode::Editing { .. }));
+    }
+
+    #[test]
+    fn form_nav_esc_with_changes_asks_to_discard() {
+        let mut state = editing_state();
+        handle_form(key(KeyCode::Esc), &mut state);
+        assert!(matches!(
+            state.mode,
+            InputMode::ConfirmDiscardChanges { .. }
+        ));
+    }
+
+    #[test]
+    fn form_input_typing_inserts_char() {
+        let mut state = editing_state();
+        state.form_focus = FormFocus::Input;
+        handle_form(key(KeyCode::Char('j')), &mut state);
+        if let InputMode::Editing { name, .. } = &state.mode {
+            assert_eq!(name, "namej");
+        } else {
+            panic!("expected Editing mode");
+        }
+    }
 }

@@ -71,14 +71,22 @@ through matched rows only.
 
 ### Add/Edit form
 
-| Keys | Action |
-|------|--------|
-| `Tab` / `Up` / `Down` | Switch field |
-| `Enter` | Save |
-| `Esc` | Cancel (confirmation if data changed) |
-| `Left` / `Right` / `Home` / `End` | Cursor movement |
-| `Backspace` / `Delete` | Delete character |
-| `Delete` (on extra field row) | Confirm-delete popup |
+The form has two levels: **Nav** (focus movement, form actions) and **Input**
+(editing the focused field's text). It opens in Nav; `i` enters Input, `Esc`
+returns to Nav.
+
+| Level | Keys | Action |
+|-------|------|--------|
+| Nav | `j`/`k` / `Up` / `Down` / `Tab` / `Shift+Tab` | Switch field |
+| Nav | `i` | Enter Input level (edit focused field) |
+| Nav | `Enter` | Save (or open field-type picker on the "+ Add Field" row) |
+| Nav | `Delete` (on extra field row) | Confirm-delete popup |
+| Nav | `Esc` | Cancel (confirmation if data changed) |
+| Input | Printable chars | Edit the focused field's text |
+| Input | `Left` / `Right` / `Home` / `End` | Cursor movement |
+| Input | `Backspace` / `Delete` | Delete character |
+| Input | `Enter` | Save |
+| Input | `Esc` | Return to Nav level |
 
 ### Home screen
 

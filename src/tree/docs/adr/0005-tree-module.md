@@ -56,6 +56,14 @@ parent row (`collapse_or_select_parent`).
 ## Editing quirks
 
 - Adding and Editing modes share the same form structure: `name`, `desc`, `extra_fields`, `field` index, `cursor` byte-offset.
+- The form is two-level, tracked by `TreeState::form_focus` (`FormFocus::Nav` /
+  `FormFocus::Input`). It opens in `Nav`; `i` enters `Input`, `Esc` returns to
+  `Nav`. Popups (field-type picker, custom name, delete/discard confirms) are
+  only reachable from `Nav` and return to `Nav`.
+- `Nav`: `j`/`k`/arrows/`Tab`/`Shift+Tab` move between fields, `Enter` saves,
+  `Delete` on an extra field row opens the confirm-delete popup.
+- `Input`: printable keys edit the focused field; the cursor is shown only at
+  this level (in `Nav` the focused field is highlighted without a cursor).
 - Extra fields use a `field` index scheme: `0` = name, `1` = desc, `2..2+n-1` = extra fields, `2+n` = "+ Add Field" button.
 - Empty name defaults to `"Untitled"` on save.
 - Password field values display as `*****` when unfocused; raw value when cursor is in the field.
