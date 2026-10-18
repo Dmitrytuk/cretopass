@@ -873,28 +873,12 @@ fn handle_export_select_type_key(key: event::KeyEvent, state: &mut HomeState) {
                 *selected_type = (*selected_type + 2) % 3;
             }
         }
-        Action::SelectType1 => {
+        Action::SelectIndex(i) if i < 3 => {
             if let Some(HomeModal::ExportSelectType {
                 ref mut selected_type,
             }) = state.modal
             {
-                *selected_type = 0;
-            }
-        }
-        Action::SelectType2 => {
-            if let Some(HomeModal::ExportSelectType {
-                ref mut selected_type,
-            }) = state.modal
-            {
-                *selected_type = 1;
-            }
-        }
-        Action::SelectType3 => {
-            if let Some(HomeModal::ExportSelectType {
-                ref mut selected_type,
-            }) = state.modal
-            {
-                *selected_type = 2;
+                *selected_type = i;
             }
         }
         Action::Confirm => {

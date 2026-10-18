@@ -43,62 +43,24 @@ pub enum InputMode {
         /// Copy confirmation alert text, if any.
         alert: Option<String>,
     },
-    /// Inline form for editing an existing node's name/description/extra fields.
-    Editing {
-        node_id: Uuid,
-        name: String,
-        desc: String,
-        extra_fields: Vec<ExtraField>,
-        field: usize,
-        cursor: usize,
-    },
-    /// Inline form for adding a new child node.
-    Adding {
-        name: String,
-        desc: String,
-        extra_fields: Vec<ExtraField>,
-        field: usize,
-        cursor: usize,
-    },
-    /// Popup for selecting a field type to add (login, password, custom).
+    /// Add/Edit form. `node_id` distinguishes Edit (`Some`) from Add (`None`).
+    Form(FormState),
+    /// Popup for selecting a field type to add (login, password, custom,
+    /// and, for a new node, description).
     SelectFieldType {
-        node_id: Option<Uuid>,
-        name: String,
-        desc: String,
-        extra_fields: Vec<ExtraField>,
-        field: usize,
-        cursor: usize,
-        selected_type: usize,
+        form: FormState,
+        /// Index into the currently available picker items.
+        selected: usize,
     },
     /// Popup for entering a custom field name.
-    CustomFieldName {
-        node_id: Option<Uuid>,
-        name: String,
-        desc: String,
-        extra_fields: Vec<ExtraField>,
-        field: usize,
-        cursor: usize,
-        input: String,
-    },
+    CustomFieldName { form: FormState, input: String },
     /// Confirmation popup for deleting an extra field.
     ConfirmDeleteField {
-        node_id: Option<Uuid>,
-        name: String,
-        desc: String,
-        extra_fields: Vec<ExtraField>,
-        field: usize,
-        cursor: usize,
+        form: FormState,
         target_index: usize,
     },
     /// Confirmation popup for discarding unsaved changes in edit/add mode.
-    ConfirmDiscardChanges {
-        node_id: Option<Uuid>,
-        name: String,
-        desc: String,
-        extra_fields: Vec<ExtraField>,
-        field: usize,
-        cursor: usize,
-    },
+    ConfirmDiscardChanges(FormState),
     /// Popup for selecting export scope (node only or with children).
     ExportNodeSelect {
         /// The node being exported.
@@ -148,6 +110,165 @@ pub enum FormFocus {
     Input,
 }
 
+/// A single row of the Add/Edit form, in display order.
+///
+/// The concrete list of rows depends on the form kind; see [`FormRow::rows`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormRow {
+    /// The node name (always present, never movable or deletable).
+    Name,
+    /// The node description (Edit only, or Add after adding it via `+ Add Field`).
+    Desc,
+    /// An extra field at the given index into `FormState::extra_fields`.
+    Extra(usize),
+    /// The `+ Add Field` button.
+    AddButton,
+}
+
+/// A transient prefix state inside the form (field cut/paste).
+///
+/// Mirrors the tree's prefix modes (`PendingCut` / `PendingPaste`) without
+/// introducing new `InputMode` variants: the form stays in `InputMode::Form`
+/// and only its `pending` field changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormPending {
+    /// No prefix pending.
+    None,
+    /// First `d` seen; the next `d` cuts the focused field.
+    Cut,
+    /// First `p` seen; `p`/`P` choose paste after/before.
+    Paste,
+}
+
+/// Editable state of the Add/Edit form.
+///
+/// Owns all transient form data so that the surrounding [`InputMode`] variants
+/// do not each duplicate the same six fields. The selection is an index into
+/// [`FormState::rows`], which is derived from the data instead of being
+/// hard-coded arithmetic.
+#[derive(Debug, Clone)]
+pub struct FormState {
+    /// `Some` = editing an existing node; `None` = adding a new node.
+    pub node_id: Option<Uuid>,
+    /// Node name.
+    pub name: String,
+    /// Node description.
+    pub desc: String,
+    /// Whether the description row is currently shown.
+    ///
+    /// Always `true` when editing; in Add mode it starts `false` so the form
+    /// consists of the name alone, and is enabled by adding Description via
+    /// the field-type picker.
+    pub show_desc: bool,
+    /// Extra fields in order.
+    pub extra_fields: Vec<ExtraField>,
+    /// Index into [`FormState::rows`].
+    pub selected_row: usize,
+    /// Cursor byte-offset inside the focused field's text.
+    pub cursor: usize,
+    /// Whether the form is in Nav or Input level.
+    pub focus: FormFocus,
+    /// Pending field cut/paste prefix, if any.
+    pub pending: FormPending,
+    /// Field removed by `dd`, waiting to be pasted.
+    pub field_cut_buffer: Option<ExtraField>,
+}
+
+impl FormState {
+    /// Creates a form for adding a new node; only the name row is shown.
+    pub fn new_add() -> Self {
+        Self {
+            node_id: None,
+            name: String::new(),
+            desc: String::new(),
+            show_desc: false,
+            extra_fields: Vec::new(),
+            selected_row: 0,
+            cursor: 0,
+            focus: FormFocus::Nav,
+            pending: FormPending::None,
+            field_cut_buffer: None,
+        }
+    }
+
+    /// Creates a form for editing the given node.
+    pub fn new_edit(node: &Node) -> Self {
+        Self {
+            node_id: Some(node.id),
+            name: node.name.clone(),
+            desc: node.description.clone(),
+            show_desc: true,
+            extra_fields: node.extra_fields.clone(),
+            selected_row: 0,
+            cursor: node.name.len(),
+            focus: FormFocus::Nav,
+            pending: FormPending::None,
+            field_cut_buffer: None,
+        }
+    }
+
+    /// Returns `true` when this form creates a new node.
+    pub fn is_adding(&self) -> bool {
+        self.node_id.is_none()
+    }
+
+    /// The ordered list of rows currently shown by this form.
+    pub fn rows(&self) -> Vec<FormRow> {
+        let mut rows = vec![FormRow::Name];
+        if self.show_desc {
+            rows.push(FormRow::Desc);
+        }
+        rows.extend((0..self.extra_fields.len()).map(FormRow::Extra));
+        rows.push(FormRow::AddButton);
+        rows
+    }
+
+    /// The currently focused row, clamped to the valid range.
+    pub fn current_row(&self) -> FormRow {
+        let rows = self.rows();
+        rows[self.selected_row.min(rows.len() - 1)]
+    }
+
+    /// Keeps `selected_row` within bounds after the row list changes.
+    pub fn clamp_selection(&mut self) {
+        let len = self.rows().len();
+        self.selected_row = self.selected_row.min(len.saturating_sub(1));
+    }
+
+    /// Selects the row at `index`, clamping to the valid range and resetting
+    /// the cursor to the end of that row's text.
+    pub fn select_row(&mut self, index: usize) {
+        self.selected_row = index;
+        self.clamp_selection();
+        self.cursor = self.active_len();
+    }
+
+    /// The editable text of the focused row, if it has any.
+    pub fn active_text(&self) -> Option<&str> {
+        match self.current_row() {
+            FormRow::Name => Some(&self.name),
+            FormRow::Desc => Some(&self.desc),
+            FormRow::Extra(i) => self.extra_fields.get(i).map(|f| f.value.as_str()),
+            FormRow::AddButton => None,
+        }
+    }
+
+    /// Mutable access to the editable text of the focused row.
+    pub fn active_text_mut(&mut self) -> Option<&mut String> {
+        match self.current_row() {
+            FormRow::Name => Some(&mut self.name),
+            FormRow::Desc => Some(&mut self.desc),
+            FormRow::Extra(i) => self.extra_fields.get_mut(i).map(|f| &mut f.value),
+            FormRow::AddButton => None,
+        }
+    }
+
+    /// Byte length of the focused row's text (0 for the add button).
+    pub fn active_len(&self) -> usize {
+        self.active_text().map_or(0, str::len)
+    }
+}
+
 /// Central application state.
 #[derive(Debug, Clone)]
 pub struct TreeState {
@@ -162,8 +283,6 @@ pub struct TreeState {
     pub mode: InputMode,
     /// Where the pending "Add" form should place the new node.
     pub add_position: AddPosition,
-    /// Which level of the Add/Edit form has focus (`Nav` or `Input`).
-    pub form_focus: FormFocus,
     pub quit: bool,
     pub return_to_menu: bool,
     /// Path of the currently opened secret file, if any.
@@ -192,7 +311,6 @@ impl TreeState {
             matched: HashSet::new(),
             mode: InputMode::Normal,
             add_position: AddPosition::Child,
-            form_focus: FormFocus::Nav,
             quit: false,
             return_to_menu: false,
             active_vault_path: None,

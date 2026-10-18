@@ -35,8 +35,10 @@ _Avoid_: Info panel, View mode
 **Edit**: Inline two-level form for modifying an existing Node's name, description, and ExtraFields. Nav level moves fields and triggers actions; Input level edits text.
 _Avoid_: Editing mode
 
-**Add**: Inline two-level form for creating a new Node. Supports name, description, and ExtraFields. Empty name defaults to "Untitled".
+**Add**: Inline two-level form for creating a new Node. Starts with the Name row alone; the Description row and ExtraFields are added via `+ Add Field`. Empty name defaults to "Untitled".
 _Avoid_: Adding mode
+
+**Form**: The shared Add/Edit state (`FormState`). Holds the node data being edited, the ordered row list (`FormRow`), the focused row, the Nav/Input level, and the field cut buffer.
 
 **Expand**: Revealing a Branch Node's children in the Tree view. Collapse hides them again.
 _Avoid_: Open

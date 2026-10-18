@@ -37,7 +37,8 @@ pub const MENU_ITEMS: &[&str] = &[
 pub const SETTING_FULL_PATH: &str = "Display full path in title bar";
 pub const SETTING_LAST_FILE: &str = "Start with last file";
 
-pub const FIELD_TYPE_ITEMS: [&str; 3] = ["1. Login", "2. Password", "3. Custom Field"];
+pub const FIELD_ITEM_CUSTOM: &str = "Custom Field";
+pub const FIELD_ITEM_DESC: &str = "Description";
 
 pub const EXPORT_SELECT_TITLE: &str = " Select Export Format ";
 pub const EXPORT_CONFIRM_TITLE: &str = " Confirm Export ";
@@ -87,7 +88,9 @@ pub const HINT_FORM: &str = "j/k:field  i:edit  Enter:save  Esc:cancel";
 pub const HINT_FORM_EXTRA: &str = "j/k:field  i:edit  Del:delete  Enter:save  Esc:cancel";
 pub const HINT_FORM_ADD: &str = "Enter:add field  Esc:cancel";
 pub const HINT_FORM_INPUT: &str = "Type to edit  Enter:save  Esc:back";
-pub const HINT_SELECT_FIELD_TYPE: &str = "j/k:nav  1/2/3:select  Enter:choose  Esc:cancel";
+pub const HINT_FIELD_CUT: &str = "d:cut field  Esc:cancel";
+pub const HINT_FIELD_PASTE: &str = "p:after  P:before  Esc:cancel";
+pub const HINT_SELECT_FIELD_TYPE: &str = "j/k:nav  1-9:select  Enter:choose  Esc:cancel";
 pub const HINT_CUSTOM_FIELD_NAME: &str = "Type name  Enter:done  Esc:cancel";
 pub const HINT_CONFIRM_DELETE: &str = "y:delete  n/Esc:cancel";
 pub const HINT_DISCARD: &str = "Enter/y:discard  n/Esc:continue editing";

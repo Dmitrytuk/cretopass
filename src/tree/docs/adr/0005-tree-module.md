@@ -28,16 +28,20 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 
 ## InputMode state machine
 
-16 variants: `Normal`, `Search`, `PendingCut`, `PendingPaste`, `PendingAdd`,
+13 variants: `Normal`, `Search`, `PendingCut`, `PendingPaste`, `PendingAdd`,
 `Detail{selected, alert}`,
-`Editing{node_id, name, desc, extra_fields, field, cursor}`,
-`Adding{name, desc, extra_fields, field, cursor}`,
-`SelectFieldType{...}`, `CustomFieldName{...}`, `ConfirmDeleteField{...}`,
-`ConfirmDiscardChanges{...}`, `ExportNodeSelect{...}`, `ExportNodeFormat{...}`,
-`Alert{message}`, `Help`.
+`Form(FormState)`, `SelectFieldType{form, selected}`,
+`CustomFieldName{form, input}`, `ConfirmDeleteField{form, target_index}`,
+`ConfirmDiscardChanges(FormState)`, `ExportNodeSelect{...}`,
+`ExportNodeFormat{...}`, `Alert{message}`, `Help`.
 
 Each variant carries its transient state inline. Key handlers dispatch on the
 current variant, transform state, and return the next mode.
+
+All Add/Edit form state lives in a single `FormState` (`node_id`, `name`,
+`desc`, `show_desc`, `extra_fields`, `selected_row`, `cursor`, `focus`,
+`pending`, `field_cut_buffer`), which the four popup variants carry as `form`.
+This replaces the earlier duplication of the same six fields in every variant.
 
 ## Prefix modes
 
@@ -55,19 +59,30 @@ parent row (`collapse_or_select_parent`).
 
 ## Editing quirks
 
-- Adding and Editing modes share the same form structure: `name`, `desc`, `extra_fields`, `field` index, `cursor` byte-offset.
-- The form is two-level, tracked by `TreeState::form_focus` (`FormFocus::Nav` /
+- Add and Edit share one form model: `FormState`. Add is `node_id == None`;
+  Edit is `node_id == Some(id)`.
+- Row order is derived, not hard-coded: `FormState::rows()` returns
+  `Name`, optional `Desc`, one `Extra(i)` per field, then `AddButton`.
+  `selected_row` indexes that list, and `clamp_selection()` keeps it valid
+  after the list changes.
+- A new node starts with **only the Name row**. The Description row is added
+  through `+ Add Field` → `Description` (a picker item shown only while the Add
+  form has no description yet). `Node.description` is unchanged on disk.
+- The form is two-level, tracked by `FormState::focus` (`FormFocus::Nav` /
   `FormFocus::Input`). It opens in `Nav`; `i` enters `Input`, `Esc` returns to
   `Nav`. Popups (field-type picker, custom name, delete/discard confirms) are
   only reachable from `Nav` and return to `Nav`.
-- `Nav`: `j`/`k`/arrows/`Tab`/`Shift+Tab` move between fields, `Enter` saves,
-  `Delete` on an extra field row opens the confirm-delete popup.
-- `Input`: printable keys edit the focused field; the cursor is shown only at
-  this level (in `Nav` the focused field is highlighted without a cursor).
-- Extra fields use a `field` index scheme: `0` = name, `1` = desc, `2..2+n-1` = extra fields, `2+n` = "+ Add Field" button.
+- `Nav`: `j`/`k`/arrows/`Tab`/`Shift+Tab` move between rows, `Enter` saves (or
+  opens the field-type picker on the `+ Add Field` row), `Delete` on an extra
+  field row opens the confirm-delete popup.
+- `Input`: printable keys edit the focused row's text; the cursor is shown only
+  at this level. In `Nav` the focused row uses the same highlight as Detail
+  (`▸ ` + `FormRowFocused`).
 - Empty name defaults to `"Untitled"` on save.
-- Password field values display as `*****` when unfocused; raw value when cursor is in the field.
-- Delete on extra field: `Delete` key → `ConfirmDeleteField` popup → `y` confirms, any other key cancels.
+- Password values render as `*****` at every level except an actively edited
+  (`Input`) row.
+- Delete on extra field: `Delete` key → `ConfirmDeleteField` popup → `y`
+  confirms, any other key cancels.
 
 ## Search
 

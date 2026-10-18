@@ -38,9 +38,8 @@ pub enum Action {
     InsertChar(char),
     Backspace,
     DeleteChar,
-    SelectType1,
-    SelectType2,
-    SelectType3,
+    /// Selects the item at the given index in a numbered list.
+    SelectIndex(usize),
     ConfigDelete,
     ToggleSetting,
     SaveConfig,
@@ -167,9 +166,10 @@ impl Action {
             KeyCode::Esc => Self::Cancel,
             KeyCode::Char('j') | KeyCode::Down => Self::NavDown,
             KeyCode::Char('k') | KeyCode::Up => Self::NavUp,
-            KeyCode::Char('1') => Self::SelectType1,
-            KeyCode::Char('2') => Self::SelectType2,
-            KeyCode::Char('3') => Self::SelectType3,
+            KeyCode::Char(c @ '1'..='9') => {
+                let index = (c as u8 - b'1') as usize;
+                Self::SelectIndex(index)
+            }
             KeyCode::Enter => Self::Confirm,
             _ => Self::None,
         }

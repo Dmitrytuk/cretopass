@@ -4,8 +4,11 @@ use ratatui::style::{Color, Modifier, Style};
 pub enum ElementStyle {
     TreeBorder,
     TreeRow,
-    TreeRowSelected,
+    /// Selected row inside a list-style popup (Detail, field-type picker, …).
+    ListRowSelected,
     TreeRowMatched,
+    /// Focused row inside the Add/Edit form at the Nav level.
+    FormRowFocused,
     ModeNormal,
     ModeSearch,
     ModePendingCut,
@@ -35,8 +38,7 @@ pub enum ElementStyle {
     ConfirmMessage,
     DismissHint,
     SearchText,
-    AddButton,
-    AddButtonActive,
+
     InvertedCursor,
     GrayHint,
     StatusLoading,
@@ -81,8 +83,9 @@ impl ElementStyle {
         match self {
             Self::TreeBorder => Style::default().fg(Color::Cyan),
             Self::TreeRow => Style::default().fg(Color::White),
-            Self::TreeRowSelected => Style::default().bg(Color::DarkGray).fg(Color::White),
+            Self::ListRowSelected => Style::default().bg(Color::DarkGray).fg(Color::White),
             Self::TreeRowMatched => Style::default().bg(Color::DarkGray).fg(Color::White),
+            Self::FormRowFocused => Style::default().bg(Color::DarkGray).fg(Color::White),
             Self::ModeNormal => Style::default()
                 .bg(Color::DarkGray)
                 .fg(Color::White)
@@ -153,8 +156,7 @@ impl ElementStyle {
             Self::ConfirmMessage => Style::default().fg(Color::White),
             Self::DismissHint => Style::default().fg(Color::DarkGray),
             Self::SearchText => Style::default().fg(Color::White),
-            Self::AddButton => Style::default().fg(Color::White),
-            Self::AddButtonActive => Style::default().bg(Color::DarkGray).fg(Color::White),
+
             Self::InvertedCursor => Style::default().bg(Color::White).fg(Color::Black),
             Self::GrayHint => Style::default().fg(Color::DarkGray),
             Self::StatusLoading => Style::default().fg(Color::Green),
