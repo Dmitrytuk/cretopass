@@ -11,6 +11,11 @@ Read the applicable doc before writing or modifying code in its area:
 
 ## Workflow Rules
 
+### Branch Rules
+- Never commit directly to `master`.
+- Work in a feature branch (`feat/...`, `fix/...`, `hotfix/...`) and merge/PR into `master`.
+- The `git-committer` subagent must verify the branch before committing.
+
 ### Workflow
 1. Do one logical task. Follow the `Coding conventions`.
 2. If one logical task is completed, then run subagent "git-committer".
