@@ -71,6 +71,7 @@ impl Action {
             KeyCode::Char('p') => Self::PasteStart,
             KeyCode::Char('a') => Self::AddStart,
             KeyCode::Char('i') => Self::OpenDetail,
+            KeyCode::Tab => Self::OpenDetail,
             KeyCode::Char('/') => Self::ToggleSearch,
             KeyCode::Char('q') => Self::Quit,
             KeyCode::Char('H') => Self::ReturnToMenu,
@@ -139,8 +140,8 @@ impl Action {
             KeyCode::Char('j') | KeyCode::Down => Self::NavDown,
             KeyCode::Char('k') | KeyCode::Up => Self::NavUp,
             KeyCode::Enter => Self::CopyField,
-            KeyCode::Char('i') | KeyCode::Char('I') => Self::EditNode,
-            KeyCode::Esc | KeyCode::Char(' ') => Self::Cancel,
+            KeyCode::Char('o') => Self::EditNode,
+            KeyCode::Esc => Self::Cancel,
             _ => Self::None,
         }
     }
@@ -290,5 +291,35 @@ mod tests {
             Action::from_pending_cut(&key(KeyCode::Enter)),
             Action::Cancel
         );
+    }
+
+    #[test]
+    fn from_normal_tab_opens_detail() {
+        assert_eq!(Action::from_normal(&key(KeyCode::Tab)), Action::OpenDetail);
+        assert_eq!(
+            Action::from_normal(&key(KeyCode::Char('i'))),
+            Action::OpenDetail
+        );
+    }
+
+    #[test]
+    fn from_detail_o_edits_and_i_is_unbound() {
+        assert_eq!(
+            Action::from_detail(&key(KeyCode::Char('o'))),
+            Action::EditNode
+        );
+        assert_eq!(Action::from_detail(&key(KeyCode::Char('i'))), Action::None);
+        assert_eq!(Action::from_detail(&key(KeyCode::Char('I'))), Action::None);
+    }
+
+    #[test]
+    fn from_detail_esc_cancels_and_space_is_unbound() {
+        assert_eq!(Action::from_detail(&key(KeyCode::Esc)), Action::Cancel);
+        assert_eq!(Action::from_detail(&key(KeyCode::Char(' '))), Action::None);
+    }
+
+    #[test]
+    fn from_detail_enter_copies() {
+        assert_eq!(Action::from_detail(&key(KeyCode::Enter)), Action::CopyField);
     }
 }

@@ -31,7 +31,7 @@ impossible without touching every module.
 | `h` | Collapse if expanded parent, else jump to parent |
 | `l` | Expand (leaf: opens detail) |
 | `Enter` | Toggle expand (parent) or detail (leaf) |
-| `Ctrl+Enter` / `i` | Detail overlay for any node |
+| `Ctrl+Enter` / `i` / `Tab` | Detail overlay for any node |
 | `d d` | Cut selected node |
 | `p` then `p`/`P`/`l` | Paste as sibling after / before / child (mode `PASTE`) |
 | `a` then `a`/`A`/`l` | Add sibling after / before / child (mode `ADD`) |
@@ -66,8 +66,8 @@ through matched rows only.
 |------|--------|
 | `j`/`k` | Navigate rows (description + extra fields) |
 | `Enter` | Copy selected row to clipboard → "Copied!" alert |
-| `i` | Edit this node |
-| `Esc` / `Space` | Close overlay |
+| `o` | Edit this node |
+| `Esc` | Close overlay |
 
 ### Add/Edit form
 

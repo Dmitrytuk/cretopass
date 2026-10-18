@@ -81,7 +81,7 @@ pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
 pub const HINT_PENDING_CUT: &str = "d:cut  Esc:cancel";
 pub const HINT_PASTE: &str = "p:after  P:before  l/→:child  Esc:cancel";
 pub const HINT_PENDING_ADD: &str = "a:after  A:before  l/→:child  Esc:cancel";
-pub const HINT_DETAIL: &str = "j/k:navigate  Enter:copy  i:edit  Esc:close";
+pub const HINT_DETAIL: &str = "j/k:navigate  Enter:copy  o:edit  Esc:close";
 pub const HINT_DETAIL_ALERT: &str = "Press any key to continue";
 pub const HINT_FORM: &str = "Tab:switch  Enter:save  Esc:cancel";
 pub const HINT_FORM_EXTRA: &str = "Tab:switch  Del:delete  Enter:save  Esc:cancel";
@@ -106,7 +106,7 @@ pub const TREE_HELP_KEY_BINDINGS: &[&str] = &[
     " h/←      Collapse, or jump to parent",
     " l/→      Expand (parent) or detail (leaf)",
     " Enter    Toggle expand (parent) or detail",
-    " i        Detail overlay for any node",
+    " i/Tab    Detail overlay for any node",
     " d d      Cut selected node",
     " p        Paste: p after, P before, l/→ child",
     " a        Add: a after, A before, l/→ child",
