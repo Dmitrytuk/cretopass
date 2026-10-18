@@ -503,7 +503,7 @@ fn handle_select_field_type(key: event::KeyEvent, state: &mut TreeState) {
 /// Items offered by the field-type picker for the given form.
 fn picker_items(form: &FormState) -> Vec<PickerItem> {
     let mut items = vec![PickerItem::Login, PickerItem::Password, PickerItem::Custom];
-    if form.is_adding() && !form.show_desc {
+    if !form.show_desc {
         items.push(PickerItem::Desc);
     }
     items
@@ -1647,13 +1647,19 @@ mod tests {
     }
 
     #[test]
-    fn form_nav_j_moves_row_without_inserting() {
-        let mut state = editing_state();
+    fn form_nav_j_moves_row_to_extra_or_add_button() {
+        let mut node = Node::new("Root", "d");
+        node.extra_fields.push(ExtraField {
+            field_type: FieldType::Login,
+            value: "x".to_string(),
+        });
+        let mut state = TreeState::new(node.clone());
+        state.mode = InputMode::Form(FormState::new_edit(&node));
         handle_form(key(KeyCode::Char('j')), &mut state);
         let form = form_of(&state);
         assert_eq!(form.name, "Root");
-        assert_eq!(form.selected_row, 1); // moved to Desc
-        assert_eq!(form.current_row(), FormRow::Desc);
+        assert_eq!(form.selected_row, 1); // moved to Extra(0) (desc hidden)
+        assert_eq!(form.current_row(), FormRow::Extra(0));
     }
 
     #[test]
@@ -1696,21 +1702,18 @@ mod tests {
     }
 
     #[test]
-    fn edit_form_shows_desc_and_rows_follow_data() {
+    fn edit_form_hides_desc_until_added() {
         let mut node = Node::new("n", "d");
         node.extra_fields.push(ExtraField {
             field_type: FieldType::Login,
             value: String::new(),
         });
         let form = FormState::new_edit(&node);
+        // desc is hidden until explicitly added via the field-type picker.
+        assert!(!form.show_desc);
         assert_eq!(
             form.rows(),
-            vec![
-                FormRow::Name,
-                FormRow::Desc,
-                FormRow::Extra(0),
-                FormRow::AddButton
-            ]
+            vec![FormRow::Name, FormRow::Extra(0), FormRow::AddButton]
         );
     }
 
@@ -1782,8 +1785,9 @@ mod tests {
     }
 
     fn select_extra(form: &mut FormState, extra_index: usize) {
-        // rows: Name, Desc, Extra(0..), AddButton
-        form.select_row(2 + extra_index);
+        // rows: Name, [Desc,] Extra(0..), AddButton
+        let desc_offset = usize::from(form.show_desc);
+        form.select_row(1 + desc_offset + extra_index);
     }
 
     #[test]

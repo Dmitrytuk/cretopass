@@ -197,7 +197,7 @@ impl FormState {
             node_id: Some(node.id),
             name: node.name.clone(),
             desc: node.description.clone(),
-            show_desc: true,
+            show_desc: false,
             extra_fields: node.extra_fields.clone(),
             selected_row: 0,
             cursor: node.name.len(),

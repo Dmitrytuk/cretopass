@@ -147,7 +147,7 @@ impl Action {
     }
 
     /// Dispatch for the form's input level. Printable keys edit the active
-    /// field; `Esc` returns to the navigation level; `Enter` saves.
+    /// field; `Esc` returns to the navigation level; `Enter` exits to Nav.
     pub fn from_form_input(key: &KeyEvent) -> Self {
         match key.code {
             KeyCode::Left => Self::CursorLeft,
@@ -156,7 +156,7 @@ impl Action {
             KeyCode::End => Self::CursorEnd,
             KeyCode::Backspace => Self::Backspace,
             KeyCode::Delete => Self::DeleteChar,
-            KeyCode::Enter => Self::Confirm,
+            KeyCode::Enter => Self::ExitInput,
             KeyCode::Esc => Self::ExitInput,
             KeyCode::Char(c) => Self::InsertChar(c),
             _ => Self::None,
@@ -393,7 +393,7 @@ mod tests {
     }
 
     #[test]
-    fn from_form_input_inserts_and_esc_exits() {
+    fn from_form_input_inserts_and_enter_esc_exit() {
         assert_eq!(
             Action::from_form_input(&key(KeyCode::Char('x'))),
             Action::InsertChar('x')
@@ -408,7 +408,7 @@ mod tests {
         );
         assert_eq!(
             Action::from_form_input(&key(KeyCode::Enter)),
-            Action::Confirm
+            Action::ExitInput
         );
         assert_eq!(
             Action::from_form_input(&key(KeyCode::Left)),

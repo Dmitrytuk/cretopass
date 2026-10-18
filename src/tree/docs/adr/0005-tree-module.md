@@ -66,17 +66,21 @@ parent row (`collapse_or_select_parent`).
   `selected_row` indexes that list, and `clamp_selection()` keeps it valid
   after the list changes.
 - A new node starts with **only the Name row**. The Description row is added
-  through `+ Add Field` → `Description` (a picker item shown only while the Add
-  form has no description yet). `Node.description` is unchanged on disk.
+  through `+ Add Field` → `Description` (a picker item shown while `show_desc`
+  is `false`). Likewise, editing an existing node initially hides the `Desc`
+  row; it is added the same way and preserves the original description on save.
+  `Node.description` is unchanged on disk.
 - The form is two-level, tracked by `FormState::focus` (`FormFocus::Nav` /
-  `FormFocus::Input`). It opens in `Nav`; `i` enters `Input`, `Esc` returns to
-  `Nav`. Popups (field-type picker, custom name, delete/discard confirms) are
-  only reachable from `Nav` and return to `Nav`.
+  `FormFocus::Input`). It opens in `Nav`; `i` enters `Input`, `Esc` and `Enter`
+  return to `Nav`. Popups (field-type picker, custom name, delete/discard
+  confirms) are only reachable from `Nav` and return to `Nav`. Save only happens
+  via `Enter` in `Nav`.
 - `Nav`: `j`/`k`/arrows/`Tab`/`Shift+Tab` move between rows, `Enter` saves (or
   opens the field-type picker on the `+ Add Field` row), `Delete` on an extra
   field row opens the confirm-delete popup.
 - `Input`: printable keys edit the focused row's text; the cursor is shown only
-  at this level. In `Nav` the focused row uses the same highlight as Detail
+  at this level. `Enter` and `Esc` both exit to `Nav` without saving. In `Nav`
+  the focused row uses the same highlight as Detail
   (`▸ ` + `FormRowFocused`).
 - Empty name defaults to `"Untitled"` on save.
 - Password values render as `*****` at every level except an actively edited

@@ -88,7 +88,7 @@ pub const HINT_FORM: &str = "j/k:field  i:edit  Enter:save  Esc:cancel";
 pub const HINT_FORM_EXTRA: &str =
     "j/k:field  i:edit  dd:cut  p:paste  Del:delete  Enter:save  Esc:cancel";
 pub const HINT_FORM_ADD: &str = "Enter:add field  Esc:cancel";
-pub const HINT_FORM_INPUT: &str = "Type to edit  Enter:save  Esc:back";
+pub const HINT_FORM_INPUT: &str = "Type to edit  Enter/Esc:back";
 pub const HINT_FIELD_CUT: &str = "d:cut field  Esc:cancel";
 pub const HINT_FIELD_PASTE: &str = "p:after  P:before  Esc:cancel";
 pub const HINT_SELECT_FIELD_TYPE: &str = "j/k:nav  1-9:select  Enter:choose  Esc:cancel";

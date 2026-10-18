@@ -87,8 +87,7 @@ returns to Nav.
 | Input | Printable chars | Edit the focused field's text |
 | Input | `Left` / `Right` / `Home` / `End` | Cursor movement |
 | Input | `Backspace` / `Delete` | Delete character |
-| Input | `Enter` | Save |
-| Input | `Esc` | Return to Nav level |
+| Input | `Enter` / `Esc` | Return to Nav level |
 
 ### Home screen
 
