@@ -40,6 +40,9 @@ _Avoid_: Adding mode
 
 **Form**: The shared Add/Edit state (`FormState`). Holds the node data being edited, the ordered row list (`FormRow`), the focused row, the Nav/Input level, and the field cut buffer.
 
+**Field cut buffer**: The form-local slot (`FormState::field_cut_buffer`) holding an ExtraField removed with `dd`, ready to be pasted with `p`/`P`. Reorders fields without touching the node until the form is saved; discarded with the form.
+_Avoid_: Clipboard, Yank buffer
+
 **Expand**: Revealing a Branch Node's children in the Tree view. Collapse hides them again.
 _Avoid_: Open
 

@@ -260,12 +260,45 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
     form.clamp_selection();
     let row = form.current_row();
 
-    let action = match form.focus {
-        FormFocus::Nav => Action::from_form_nav(&key),
-        FormFocus::Input => Action::from_form_input(&key),
+    let action = match form.pending {
+        FormPending::Cut => Action::from_form_pending(&key, false),
+        FormPending::Paste => Action::from_form_pending(&key, true),
+        FormPending::None => match form.focus {
+            FormFocus::Nav => Action::from_form_nav(&key),
+            FormFocus::Input => Action::from_form_input(&key),
+        },
     };
 
+    // Any unmapped key while a field prefix is pending cancels just the prefix.
+    if form.pending != FormPending::None && action == Action::Cancel {
+        form.pending = FormPending::None;
+        state.mode = InputMode::Form(form);
+        return;
+    }
+
     match action {
+        Action::Cut if form.pending == FormPending::None => {
+            if matches!(row, FormRow::Extra(_)) {
+                form.pending = FormPending::Cut;
+            }
+        }
+        Action::Cut => {
+            form.cut_focused_field();
+            form.pending = FormPending::None;
+        }
+        Action::PasteStart => {
+            if form.field_cut_buffer.is_some() && matches!(row, FormRow::Extra(_)) {
+                form.pending = FormPending::Paste;
+            }
+        }
+        Action::PasteSibling => {
+            form.paste_field_after();
+            form.pending = FormPending::None;
+        }
+        Action::PasteBefore => {
+            form.paste_field_before();
+            form.pending = FormPending::None;
+        }
         Action::BeginInput => {
             if row != FormRow::AddButton {
                 form.focus = FormFocus::Input;
@@ -938,10 +971,17 @@ fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
             ElementStyle::ModePendingAdd.style(),
         ),
         InputMode::Detail { .. } => (texts::MODE_DETAIL, ElementStyle::ModeDetail.style()),
-        InputMode::Form(form) if form.is_adding() => {
-            (texts::MODE_ADD, ElementStyle::ModeAdd.style())
-        }
-        InputMode::Form(_) => (texts::MODE_EDIT, ElementStyle::ModeEdit.style()),
+        InputMode::Form(form) => match form.pending {
+            FormPending::Cut => (
+                texts::MODE_PENDING_CUT,
+                ElementStyle::ModePendingCut.style(),
+            ),
+            FormPending::Paste => (texts::MODE_PASTE, ElementStyle::ModePendingPaste.style()),
+            FormPending::None if form.is_adding() => {
+                (texts::MODE_ADD, ElementStyle::ModeAdd.style())
+            }
+            FormPending::None => (texts::MODE_EDIT, ElementStyle::ModeEdit.style()),
+        },
         InputMode::SelectFieldType { .. } => {
             (texts::MODE_FIELD_TYPE, ElementStyle::ModeFieldType.style())
         }
@@ -1591,7 +1631,7 @@ mod tests {
         state
     }
 
-    fn form(state: &TreeState) -> &FormState {
+    fn form_of(state: &TreeState) -> &FormState {
         match &state.mode {
             InputMode::Form(form) => form,
             other => panic!("expected Form mode, got {other:?}"),
@@ -1601,16 +1641,16 @@ mod tests {
     #[test]
     fn form_opens_in_nav_and_i_enters_input() {
         let mut state = editing_state();
-        assert_eq!(form(&state).focus, FormFocus::Nav);
+        assert_eq!(form_of(&state).focus, FormFocus::Nav);
         handle_form(key(KeyCode::Char('i')), &mut state);
-        assert_eq!(form(&state).focus, FormFocus::Input);
+        assert_eq!(form_of(&state).focus, FormFocus::Input);
     }
 
     #[test]
     fn form_nav_j_moves_row_without_inserting() {
         let mut state = editing_state();
         handle_form(key(KeyCode::Char('j')), &mut state);
-        let form = form(&state);
+        let form = form_of(&state);
         assert_eq!(form.name, "Root");
         assert_eq!(form.selected_row, 1); // moved to Desc
         assert_eq!(form.current_row(), FormRow::Desc);
@@ -1623,7 +1663,7 @@ mod tests {
             form.focus = FormFocus::Input;
         }
         handle_form(key(KeyCode::Esc), &mut state);
-        assert_eq!(form(&state).focus, FormFocus::Nav);
+        assert_eq!(form_of(&state).focus, FormFocus::Nav);
         assert!(matches!(state.mode, InputMode::Form(_)));
     }
 
@@ -1645,7 +1685,7 @@ mod tests {
             form.cursor = form.name.len();
         }
         handle_form(key(KeyCode::Char('j')), &mut state);
-        assert_eq!(form(&state).name, "Rootj");
+        assert_eq!(form_of(&state).name, "Rootj");
     }
 
     #[test]
@@ -1703,7 +1743,7 @@ mod tests {
             *selected = desc_index;
         }
         handle_select_field_type(key(KeyCode::Enter), &mut state2);
-        let form = form(&state2);
+        let form = form_of(&state2);
         assert!(form.show_desc);
         assert_eq!(form.current_row(), FormRow::Desc);
     }
@@ -1726,6 +1766,125 @@ mod tests {
         assert!(text.contains("secret"));
     }
 
+    fn form_with_fields() -> FormState {
+        let mut node = Node::new("n", "");
+        for value in ["a", "b", "c"] {
+            node.extra_fields.push(ExtraField {
+                field_type: FieldType::Login,
+                value: value.to_string(),
+            });
+        }
+        FormState::new_edit(&node)
+    }
+
+    fn values(form: &FormState) -> Vec<&str> {
+        form.extra_fields.iter().map(|f| f.value.as_str()).collect()
+    }
+
+    fn select_extra(form: &mut FormState, extra_index: usize) {
+        // rows: Name, Desc, Extra(0..), AddButton
+        form.select_row(2 + extra_index);
+    }
+
+    #[test]
+    fn field_cut_requires_two_d_presses() {
+        let mut state = TreeState::new(Node::new("Root", ""));
+        let mut form = form_with_fields();
+        select_extra(&mut form, 1);
+        state.mode = InputMode::Form(form);
+
+        handle_form(key(KeyCode::Char('d')), &mut state);
+        assert_eq!(form_of(&state).pending, FormPending::Cut);
+        assert_eq!(form_of(&state).extra_fields.len(), 3);
+
+        handle_form(key(KeyCode::Char('d')), &mut state);
+        let form = form_of(&state);
+        assert_eq!(form.pending, FormPending::None);
+        assert_eq!(values(form), vec!["a", "c"]);
+        assert_eq!(form.field_cut_buffer.as_ref().unwrap().value, "b");
+    }
+
+    #[test]
+    fn field_cut_is_cancelled_by_other_keys() {
+        let mut state = TreeState::new(Node::new("Root", ""));
+        let mut form = form_with_fields();
+        select_extra(&mut form, 0);
+        state.mode = InputMode::Form(form);
+
+        handle_form(key(KeyCode::Char('d')), &mut state);
+        handle_form(key(KeyCode::Esc), &mut state);
+        let form = form_of(&state);
+        assert_eq!(form.pending, FormPending::None);
+        assert_eq!(form.extra_fields.len(), 3);
+        assert!(matches!(state.mode, InputMode::Form(_)));
+    }
+
+    #[test]
+    fn field_cut_is_noop_on_name_row() {
+        let mut state = TreeState::new(Node::new("Root", ""));
+        let mut form = form_with_fields();
+        form.select_row(0);
+        state.mode = InputMode::Form(form);
+
+        handle_form(key(KeyCode::Char('d')), &mut state);
+        assert_eq!(form_of(&state).pending, FormPending::None);
+    }
+
+    #[test]
+    fn field_paste_after_moves_field_down() {
+        let mut state = TreeState::new(Node::new("Root", ""));
+        let mut form = form_with_fields();
+        select_extra(&mut form, 0); // "a"
+        state.mode = InputMode::Form(form);
+
+        // Cut "a", then select "c" and paste after it.
+        handle_form(key(KeyCode::Char('d')), &mut state);
+        handle_form(key(KeyCode::Char('d')), &mut state);
+        if let InputMode::Form(ref mut form) = state.mode {
+            select_extra(form, 1); // "c" now at index 1
+        }
+        handle_form(key(KeyCode::Char('p')), &mut state);
+        assert_eq!(form_of(&state).pending, FormPending::Paste);
+        handle_form(key(KeyCode::Char('p')), &mut state);
+
+        let form = form_of(&state);
+        assert_eq!(values(form), vec!["b", "c", "a"]);
+        assert!(form.field_cut_buffer.is_none());
+        assert_eq!(form.current_row(), FormRow::Extra(2));
+    }
+
+    #[test]
+    fn field_paste_before_moves_field_up() {
+        let mut state = TreeState::new(Node::new("Root", ""));
+        let mut form = form_with_fields();
+        select_extra(&mut form, 2); // "c"
+        state.mode = InputMode::Form(form);
+
+        handle_form(key(KeyCode::Char('d')), &mut state);
+        handle_form(key(KeyCode::Char('d')), &mut state);
+        if let InputMode::Form(ref mut form) = state.mode {
+            select_extra(form, 0); // "a"
+        }
+        handle_form(key(KeyCode::Char('p')), &mut state);
+        handle_form(key(KeyCode::Char('P')), &mut state);
+
+        let form = form_of(&state);
+        assert_eq!(values(form), vec!["c", "a", "b"]);
+        assert_eq!(form.current_row(), FormRow::Extra(0));
+    }
+
+    #[test]
+    fn paste_without_buffer_does_nothing() {
+        let mut state = TreeState::new(Node::new("Root", ""));
+        let mut form = form_with_fields();
+        select_extra(&mut form, 0);
+        state.mode = InputMode::Form(form);
+
+        handle_form(key(KeyCode::Char('p')), &mut state);
+        assert_eq!(form_of(&state).pending, FormPending::None);
+        assert_eq!(form_of(&state).extra_fields.len(), 3);
+    }
+
     #[test]
     fn confirm_delete_removes_the_field_and_clamps_selection() {
         let mut node = Node::new("n", "");
@@ -1745,7 +1904,7 @@ mod tests {
             target_index: 1,
         };
         handle_confirm_delete(key(KeyCode::Char('y')), &mut state);
-        let updated = form(&state);
+        let updated = form_of(&state);
         assert_eq!(updated.extra_fields.len(), 1);
         assert!(updated.selected_row < updated.rows().len());
     }

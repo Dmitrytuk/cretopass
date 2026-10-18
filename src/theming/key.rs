@@ -128,8 +128,21 @@ impl Action {
             KeyCode::Char('i') => Self::BeginInput,
             KeyCode::Enter => Self::Confirm,
             KeyCode::Delete => Self::DeleteChar,
+            KeyCode::Char('d') => Self::Cut,
+            KeyCode::Char('p') => Self::PasteStart,
             KeyCode::Esc => Self::Cancel,
             _ => Self::None,
+        }
+    }
+
+    /// Dispatch while the form holds a pending field cut (`Cut`) or paste
+    /// (`Paste`) prefix. Mirrors the tree's `PendingCut` / `PendingPaste`.
+    pub fn from_form_pending(key: &KeyEvent, paste: bool) -> Self {
+        match (paste, key.code) {
+            (false, KeyCode::Char('d')) => Self::Cut,
+            (true, KeyCode::Char('p')) => Self::PasteSibling,
+            (true, KeyCode::Char('P')) => Self::PasteBefore,
+            _ => Self::Cancel,
         }
     }
 
@@ -404,6 +417,47 @@ mod tests {
         assert_eq!(
             Action::from_form_input(&key(KeyCode::Backspace)),
             Action::Backspace
+        );
+    }
+
+    #[test]
+    fn from_form_nav_binds_field_cut_and_paste() {
+        assert_eq!(Action::from_form_nav(&key(KeyCode::Char('d'))), Action::Cut);
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('p'))),
+            Action::PasteStart
+        );
+    }
+
+    #[test]
+    fn from_form_pending_cut_requires_second_d() {
+        assert_eq!(
+            Action::from_form_pending(&key(KeyCode::Char('d')), false),
+            Action::Cut
+        );
+        assert_eq!(
+            Action::from_form_pending(&key(KeyCode::Char('p')), false),
+            Action::Cancel
+        );
+        assert_eq!(
+            Action::from_form_pending(&key(KeyCode::Esc), false),
+            Action::Cancel
+        );
+    }
+
+    #[test]
+    fn from_form_pending_paste_chooses_direction() {
+        assert_eq!(
+            Action::from_form_pending(&key(KeyCode::Char('p')), true),
+            Action::PasteSibling
+        );
+        assert_eq!(
+            Action::from_form_pending(&key(KeyCode::Char('P')), true),
+            Action::PasteBefore
+        );
+        assert_eq!(
+            Action::from_form_pending(&key(KeyCode::Char('d')), true),
+            Action::Cancel
         );
     }
 

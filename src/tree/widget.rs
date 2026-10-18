@@ -267,6 +267,63 @@ impl FormState {
     pub fn active_len(&self) -> usize {
         self.active_text().map_or(0, str::len)
     }
+
+    /// Cuts the focused extra field into `field_cut_buffer`.
+    ///
+    /// No-op unless the focused row is an extra field.
+    pub fn cut_focused_field(&mut self) {
+        let FormRow::Extra(index) = self.current_row() else {
+            return;
+        };
+        if index >= self.extra_fields.len() {
+            return;
+        }
+        self.field_cut_buffer = Some(self.extra_fields.remove(index));
+        self.focus = FormFocus::Nav;
+        self.clamp_selection();
+        self.cursor = self.active_len();
+    }
+
+    /// Pastes the cut field after the focused extra field.
+    ///
+    /// No-op unless the focused row is an extra field and a field is buffered.
+    pub fn paste_field_after(&mut self) {
+        let FormRow::Extra(index) = self.current_row() else {
+            return;
+        };
+        let Some(field) = self.field_cut_buffer.take() else {
+            return;
+        };
+        let at = (index + 1).min(self.extra_fields.len());
+        self.extra_fields.insert(at, field);
+        self.focus = FormFocus::Nav;
+        self.selected_row = self.row_index_of_extra(at);
+        self.clamp_selection();
+        self.cursor = self.active_len();
+    }
+
+    /// Pastes the cut field before the focused extra field.
+    ///
+    /// No-op unless the focused row is an extra field and a field is buffered.
+    pub fn paste_field_before(&mut self) {
+        let FormRow::Extra(index) = self.current_row() else {
+            return;
+        };
+        let Some(field) = self.field_cut_buffer.take() else {
+            return;
+        };
+        self.extra_fields.insert(index, field);
+        self.focus = FormFocus::Nav;
+        self.selected_row = self.row_index_of_extra(index);
+        self.clamp_selection();
+        self.cursor = self.active_len();
+    }
+
+    /// Index in [`FormState::rows`] of the `Extra(extra_index)` row.
+    fn row_index_of_extra(&self, extra_index: usize) -> usize {
+        let offset = usize::from(self.show_desc);
+        1 + offset + extra_index
+    }
 }
 
 /// Central application state.

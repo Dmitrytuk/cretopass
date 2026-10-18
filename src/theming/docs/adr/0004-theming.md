@@ -81,6 +81,8 @@ returns to Nav.
 | Nav | `i` | Enter Input level (edit focused field) |
 | Nav | `Enter` | Save (or open field-type picker on the "+ Add Field" row) |
 | Nav | `Delete` (on extra field row) | Confirm-delete popup |
+| Nav | `d` then `d` | Cut the focused extra field (mode `CUT`) |
+| Nav | `p` then `p` / `P` | Paste the cut field after / before the focused field (mode `PASTE`) |
 | Nav | `Esc` | Cancel (confirmation if data changed) |
 | Input | Printable chars | Edit the focused field's text |
 | Input | `Left` / `Right` / `Home` / `End` | Cursor movement |

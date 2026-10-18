@@ -83,6 +83,13 @@ parent row (`collapse_or_select_parent`).
   (`Input`) row.
 - Delete on extra field: `Delete` key → `ConfirmDeleteField` popup → `y`
   confirms, any other key cancels.
+- Field reordering: `dd` moves the focused extra field into
+  `FormState::field_cut_buffer`; `p` / `P` paste it after / before the focused
+  field. The prefix state is `FormState::pending` (`FormPending`), so no new
+  `InputMode` is introduced; any other key cancels the prefix. `Name`, `Desc`
+  and `AddButton` are never movable, and paste is only allowed with an
+  `Extra(i)` row focused. The buffer lives and dies with the form, so `Esc`
+  discards all unsaved reordering.
 
 ## Search
 

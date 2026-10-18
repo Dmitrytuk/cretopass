@@ -85,7 +85,8 @@ pub const HINT_PENDING_ADD: &str = "a:after  A:before  l/→:child  Esc:cancel";
 pub const HINT_DETAIL: &str = "j/k:navigate  Enter:copy  o:edit  Esc:close";
 pub const HINT_DETAIL_ALERT: &str = "Press any key to continue";
 pub const HINT_FORM: &str = "j/k:field  i:edit  Enter:save  Esc:cancel";
-pub const HINT_FORM_EXTRA: &str = "j/k:field  i:edit  Del:delete  Enter:save  Esc:cancel";
+pub const HINT_FORM_EXTRA: &str =
+    "j/k:field  i:edit  dd:cut  p:paste  Del:delete  Enter:save  Esc:cancel";
 pub const HINT_FORM_ADD: &str = "Enter:add field  Esc:cancel";
 pub const HINT_FORM_INPUT: &str = "Type to edit  Enter:save  Esc:back";
 pub const HINT_FIELD_CUT: &str = "d:cut field  Esc:cancel";
