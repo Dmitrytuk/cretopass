@@ -1,6 +1,7 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::file_handling::FileEntry;
+use crate::file_handling::{self, FileEntry, FileHandlingError};
+use crate::theming::texts;
 
 /// Whether the file browser is used to open an existing file or create a new one.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -23,6 +24,8 @@ pub enum FocusTarget {
     List,
     Input,
     Rename,
+    /// The Locations overlay (mounted disks + Home) is open.
+    Locations,
 }
 
 /// Transient prefix state for the `n` key in `CreateFile` mode.
@@ -50,6 +53,31 @@ pub enum FileBrowserAction {
     Renamed { from: String, to: String },
 }
 
+/// Session-scoped memory shared by successive file browser openings.
+///
+/// Lives for the duration of the program run only; it is never written to
+/// disk.  The same slot is used by all [`FileBrowserMode`]s.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FileBrowserSession {
+    /// Last directory the browser successfully displayed.
+    pub last_dir: Option<PathBuf>,
+    /// Whether hidden (dot-prefixed) entries are shown.
+    pub show_hidden: bool,
+}
+
+/// A selectable row in the Locations overlay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Location {
+    /// Primary label shown in the row (`Home` or the mount point).
+    pub label: String,
+    /// Directory the location points at.
+    pub path: PathBuf,
+    /// Secondary information shown after the label.
+    pub detail: String,
+    /// Whether this is the pinned Home shortcut.
+    pub is_home: bool,
+}
+
 /// Full state of the file browser modal.
 #[derive(Debug, Clone)]
 pub struct FileBrowserState {
@@ -73,16 +101,26 @@ pub struct FileBrowserState {
     pub active_vault_path: Option<PathBuf>,
     /// Prefix state for the `n` key (new file / new folder) in `CreateFile` mode.
     pub pending: NewFilePrefix,
+    /// Whether hidden (dot-prefixed) entries are currently listed.
+    pub show_hidden: bool,
+    /// Rows of the Locations overlay; empty until it is opened.
+    pub locations: Vec<Location>,
+    /// Selected row in the Locations overlay.
+    pub location_selected: usize,
 }
 
 impl FileBrowserState {
-    /// Creates a new file browser starting at the user's home directory.
-    pub fn new(mode: FileBrowserMode) -> Self {
-        let home = dirs_home();
+    /// Creates a new file browser.
+    ///
+    /// Starts at the session's last directory when it is still listable and
+    /// falls back to the user's home directory otherwise.  Hidden entries are
+    /// shown when the session says so.
+    pub fn new(mode: FileBrowserMode, session: &FileBrowserSession) -> Self {
+        let (current_dir, entries) = initial_location(session);
         Self {
             mode,
-            current_dir: home.clone(),
-            entries: crate::file_handling::list_dir(&home).unwrap_or_default(),
+            current_dir,
+            entries,
             selected: 0,
             filter: FileFilter::All,
             search_query: String::new(),
@@ -97,12 +135,23 @@ impl FileBrowserState {
             confirm_delete: None,
             active_vault_path: None,
             pending: NewFilePrefix::default(),
+            show_hidden: session.show_hidden,
+            locations: Vec::new(),
+            location_selected: 0,
         }
     }
 
     /// Sets the active file path that the browser should protect.
     pub fn set_active_vault_path(&mut self, path: Option<PathBuf>) {
         self.active_vault_path = path;
+    }
+
+    /// Captures the session memory for the next browser opening.
+    pub fn session(&self) -> FileBrowserSession {
+        FileBrowserSession {
+            last_dir: Some(self.current_dir.clone()),
+            show_hidden: self.show_hidden,
+        }
     }
 
     /// Number of entries after applying the current filter and search query.
@@ -131,7 +180,8 @@ impl FileBrowserState {
     /// Reloads entries from the current directory, preserving selection if possible.
     pub fn refresh_entries(&mut self) {
         let selected_name = self.entries.get(self.selected).map(|e| e.name.clone());
-        match crate::file_handling::list_dir(&self.current_dir) {
+        let dir = self.current_dir.clone();
+        match list_entries(&dir, self.show_hidden) {
             Ok(new_entries) => {
                 self.entries = new_entries;
                 self.selected = selected_name
@@ -161,6 +211,105 @@ impl FileBrowserState {
     }
 }
 
+/// Lists `path` honouring the hidden-entry setting.
+pub(super) fn list_entries(
+    path: &Path,
+    show_hidden: bool,
+) -> Result<Vec<FileEntry>, FileHandlingError> {
+    if show_hidden {
+        file_handling::list_dir_including_hidden(path)
+    } else {
+        file_handling::list_dir(path)
+    }
+}
+
+/// Picks the initial directory and its listing for a new browser.
+fn initial_location(session: &FileBrowserSession) -> (PathBuf, Vec<FileEntry>) {
+    if let Some(dir) = session.last_dir.as_deref()
+        && let Ok(entries) = list_entries(dir, session.show_hidden)
+    {
+        return (dir.to_path_buf(), entries);
+    }
+
+    let home = dirs_home();
+    let entries = list_entries(&home, session.show_hidden).unwrap_or_default();
+    (home, entries)
+}
+
+/// Builds the Locations overlay rows: Home first, then mounted disks.
+pub(super) fn build_locations() -> Vec<Location> {
+    let home = dirs_home();
+    let mut locations = Vec::new();
+    locations.push(Location {
+        label: texts::LOCATION_HOME.to_string(),
+        detail: home.to_string_lossy().to_string(),
+        path: home,
+        is_home: true,
+    });
+
+    for disk in file_handling::list_disks() {
+        locations.push(Location {
+            label: disk.mount_point.to_string_lossy().to_string(),
+            detail: format_disk_detail(&disk),
+            path: disk.mount_point,
+            is_home: false,
+        });
+    }
+
+    locations
+}
+
+/// Selects the most specific location containing `current_dir` (Home wins
+/// when the directory is inside the home tree).  Falls back to the first row.
+pub(super) fn preselect_location(locations: &[Location], current_dir: &Path) -> usize {
+    locations
+        .iter()
+        .enumerate()
+        .filter(|(_, location)| current_dir.starts_with(&location.path))
+        .max_by_key(|(_, location)| location.path.components().count())
+        .map(|(index, _)| index)
+        .unwrap_or(0)
+}
+
+/// Formats the secondary information for a disk row.
+fn format_disk_detail(disk: &file_handling::DiskInfo) -> String {
+    let mut detail = disk.file_system.clone();
+    if disk.total_space > 0 {
+        detail.push_str(&format!(
+            " · {} free / {}",
+            format_size(disk.available_space),
+            format_size(disk.total_space)
+        ));
+    }
+    if disk.is_removable {
+        detail.push(' ');
+        detail.push_str(texts::LOCATION_USB);
+    }
+    if disk.is_read_only {
+        detail.push(' ');
+        detail.push_str(texts::LOCATION_READ_ONLY);
+    }
+    detail
+}
+
+/// Formats a byte count using binary units and one decimal place.
+fn format_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
 /// Returns the user's home directory, or the current directory as fallback.
 fn dirs_home() -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
@@ -173,5 +322,152 @@ fn dirs_home() -> PathBuf {
         }
     } else {
         PathBuf::from(".")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn disk(mount_point: &str, file_system: &str) -> file_handling::DiskInfo {
+        file_handling::DiskInfo {
+            mount_point: PathBuf::from(mount_point),
+            file_system: file_system.to_string(),
+            total_space: 500 * 1024 * 1024 * 1024,
+            available_space: 120 * 1024 * 1024 * 1024,
+            is_removable: false,
+            is_read_only: false,
+        }
+    }
+
+    #[test]
+    fn new_uses_session_last_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = FileBrowserSession {
+            last_dir: Some(dir.path().to_path_buf()),
+            show_hidden: false,
+        };
+
+        let state = FileBrowserState::new(FileBrowserMode::OpenFile, &session);
+
+        assert_eq!(state.current_dir, dir.path());
+    }
+
+    #[test]
+    fn new_falls_back_to_home_for_invalid_last_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = FileBrowserSession {
+            last_dir: Some(dir.path().join("missing")),
+            show_hidden: false,
+        };
+
+        let state = FileBrowserState::new(FileBrowserMode::OpenFile, &session);
+
+        assert_eq!(state.current_dir, dirs_home());
+    }
+
+    #[test]
+    fn new_lists_hidden_entries_when_session_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".hidden.txt"), b"hidden").unwrap();
+        std::fs::write(dir.path().join("visible.txt"), b"visible").unwrap();
+        let session = FileBrowserSession {
+            last_dir: Some(dir.path().to_path_buf()),
+            show_hidden: true,
+        };
+
+        let state = FileBrowserState::new(FileBrowserMode::OpenFile, &session);
+
+        assert!(state.entries.iter().any(|e| e.name == ".hidden.txt"));
+    }
+
+    #[test]
+    fn session_round_trips_directory_and_hidden() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state =
+            FileBrowserState::new(FileBrowserMode::OpenFile, &FileBrowserSession::default());
+        state.current_dir = dir.path().to_path_buf();
+        state.show_hidden = true;
+
+        let session = state.session();
+
+        assert_eq!(session.last_dir, Some(dir.path().to_path_buf()));
+        assert!(session.show_hidden);
+    }
+
+    #[test]
+    fn preselect_prefers_most_specific_location() {
+        let locations = vec![
+            Location {
+                label: "/".to_string(),
+                path: PathBuf::from("/"),
+                detail: String::new(),
+                is_home: false,
+            },
+            Location {
+                label: "Home".to_string(),
+                path: PathBuf::from("/home/user"),
+                detail: String::new(),
+                is_home: true,
+            },
+        ];
+
+        let selected = preselect_location(&locations, Path::new("/home/user/docs"));
+
+        assert_eq!(selected, 1);
+    }
+
+    #[test]
+    fn preselect_falls_back_to_first_location() {
+        let locations = vec![Location {
+            label: "Home".to_string(),
+            path: PathBuf::from("/home/user"),
+            detail: String::new(),
+            is_home: true,
+        }];
+
+        let selected = preselect_location(&locations, Path::new("/mnt/other"));
+
+        assert_eq!(selected, 0);
+    }
+
+    #[test]
+    fn build_locations_pins_home_first() {
+        let locations = build_locations();
+
+        assert!(locations[0].is_home);
+        assert_eq!(locations[0].label, texts::LOCATION_HOME);
+    }
+
+    #[test]
+    fn format_size_uses_binary_units() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(512), "512 B");
+        assert_eq!(format_size(1024), "1.0 KiB");
+        assert_eq!(format_size(1024 * 1024), "1.0 MiB");
+    }
+
+    #[test]
+    fn format_disk_detail_includes_tags() {
+        let mut entry = disk("/mnt/usb", "vfat");
+        entry.is_removable = true;
+        entry.is_read_only = true;
+
+        let detail = format_disk_detail(&entry);
+
+        assert!(detail.contains("vfat"));
+        assert!(detail.contains(texts::LOCATION_USB));
+        assert!(detail.contains(texts::LOCATION_READ_ONLY));
+    }
+
+    #[test]
+    fn format_disk_detail_omits_unknown_size() {
+        let mut entry = disk("/mnt/net", "nfs");
+        entry.total_space = 0;
+        entry.available_space = 0;
+
+        let detail = format_disk_detail(&entry);
+
+        assert_eq!(detail, "nfs");
     }
 }

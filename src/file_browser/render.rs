@@ -65,6 +65,8 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
         );
     } else if state.confirm_delete.is_some() {
         render_delete_popup(frame, overlay_area, state);
+    } else if state.focus == FocusTarget::Locations {
+        render_locations_popup(frame, area, state);
     }
 
     if state.error.is_some() {
@@ -184,22 +186,41 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     let hint_style = ElementStyle::FbHintText.style();
     let search_style = ElementStyle::FbActiveSearch.style();
 
-    let mut spans = vec![
+    // Row 1: filter / search / hidden indicator.
+    let mut first = vec![
         Span::styled(format!(" Filter: {} ", filter_text), hint_style),
         Span::styled(texts::FB_HINT_FILTER, hint_style),
     ];
 
     if state.search_active {
-        spans.push(Span::styled(
+        first.push(Span::styled(
             format!(" Search: {}█", state.search_query),
             search_style,
         ));
     } else {
-        spans.push(Span::styled(texts::FB_HINT_SEARCH, hint_style));
+        first.push(Span::styled(texts::FB_HINT_SEARCH, hint_style));
     }
 
+    first.push(Span::styled(
+        format!(
+            " {} ",
+            if state.show_hidden {
+                texts::FB_HIDDEN_ON
+            } else {
+                texts::FB_HIDDEN_OFF
+            }
+        ),
+        hint_style,
+    ));
+
+    // Row 2: contextual actions, replaced by the n-prefix prompt.
+    let mut second = vec![
+        Span::styled(texts::FB_HINT_DISKS, hint_style),
+        Span::styled(texts::FB_HINT_HIDDEN, hint_style),
+    ];
+
     if state.mode == FileBrowserMode::CreateFile {
-        spans.push(Span::styled(texts::FB_HINT_NEW, hint_style));
+        second.push(Span::styled(texts::FB_HINT_NEW, hint_style));
     }
 
     // Show rename/delete hints when a PWD-marked file is selected
@@ -208,23 +229,106 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
         && !entry.is_dir
         && state.mode != FileBrowserMode::ImportFile
     {
-        spans.push(Span::styled(texts::FB_HINT_RENAME, hint_style));
-        spans.push(Span::styled(texts::FB_HINT_DELETE, hint_style));
+        second.push(Span::styled(texts::FB_HINT_RENAME, hint_style));
+        second.push(Span::styled(texts::FB_HINT_DELETE, hint_style));
     }
 
     if state.mode == FileBrowserMode::CreateFile && state.focus == FocusTarget::Input {
-        spans.push(Span::styled(texts::FB_HINT_LIST, hint_style));
+        second.push(Span::styled(texts::FB_HINT_LIST, hint_style));
     }
 
-    let mut lines = vec![Line::from(spans)];
+    let mut lines = vec![Line::from(first)];
     if state.pending == NewFilePrefix::Pending {
         lines.push(Line::from(Span::styled(
             texts::FB_PROMPT_NEW,
             ElementStyle::FbActiveSearch.style(),
         )));
+    } else {
+        lines.push(Line::from(second));
     }
 
     frame.render_widget(Paragraph::new(Text::from(lines)), area);
+}
+
+fn render_locations_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
+    let row_count = state.locations.len().max(1) as u16;
+    let height = row_count.saturating_add(3); // borders + rows + hint
+    let popup_area = centered_popup_sized(area, height, 3, 4, 40);
+
+    let block = Block::default()
+        .title(texts::OVERLAY_LOCATIONS)
+        .borders(Borders::ALL)
+        .style(ElementStyle::FieldTypeBlock.style());
+
+    let inner = block.inner(popup_area);
+    let layout = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+    let list_height = layout[0].height as usize;
+
+    let scroll = if state.location_selected >= list_height {
+        state.location_selected + 1 - list_height
+    } else {
+        0
+    };
+
+    let label_width = state
+        .locations
+        .iter()
+        .map(|location| location.label.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(28);
+
+    let mut rows: Vec<Line> = state
+        .locations
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(list_height)
+        .map(|(index, location)| {
+            let is_selected = index == state.location_selected;
+            let prefix = if is_selected {
+                Icon::SelectionArrow.as_str()
+            } else {
+                Icon::SelectionPad.as_str()
+            };
+            let label_style = if is_selected {
+                ElementStyle::FbSelectionOverlay.style()
+            } else {
+                ElementStyle::FbDirName.style()
+            };
+            let detail_style = if is_selected {
+                ElementStyle::FbSelectionOverlay.style()
+            } else {
+                ElementStyle::FbHintText.style()
+            };
+
+            Line::from(vec![
+                Span::styled(prefix, ElementStyle::FbPrefix.style()),
+                Span::styled(
+                    format!("{:<width$}", location.label, width = label_width),
+                    label_style,
+                ),
+                Span::styled(format!("  {}", location.detail), detail_style),
+            ])
+        })
+        .collect();
+
+    if rows.is_empty() {
+        rows.push(Line::from(Span::styled(
+            texts::EMPTY_DIR,
+            ElementStyle::FbEmptyText.style(),
+        )));
+    }
+
+    let hint = Line::from(Span::styled(
+        texts::FB_HINT_LOCATIONS,
+        ElementStyle::FbHintText.style(),
+    ));
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(block, popup_area);
+    frame.render_widget(Paragraph::new(Text::from(rows)), layout[0]);
+    frame.render_widget(Paragraph::new(hint), layout[1]);
 }
 
 fn render_input_popup(
@@ -321,9 +425,20 @@ fn render_error_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
 
 /// Builds a small dialog rect centered on `area`, clamped to fit.
 fn centered_popup(area: Rect, height: u16) -> Rect {
+    centered_popup_sized(area, height, 2, 3, 30)
+}
+
+/// Builds a centered dialog with a configurable width ratio and minimum width.
+fn centered_popup_sized(
+    area: Rect,
+    height: u16,
+    numerator: u16,
+    denominator: u16,
+    min_width: u16,
+) -> Rect {
     let height = height.min(area.height.saturating_sub(2));
-    let width = (area.width * 2 / 3)
-        .max(30)
+    let width = (area.width.saturating_mul(numerator) / denominator)
+        .max(min_width)
         .min(area.width.saturating_sub(2));
     Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
@@ -339,11 +454,16 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
+    use crate::file_browser::{FileBrowserSession, Location};
     use crate::file_handling;
 
     /// Helper to create a terminal for testing.
     fn make_terminal() -> Terminal<TestBackend> {
         Terminal::new(TestBackend::new(80, 24)).unwrap()
+    }
+
+    fn new_state(mode: FileBrowserMode) -> FileBrowserState {
+        FileBrowserState::new(mode, &FileBrowserSession::default())
     }
 
     /// Helper to populate state with entries from /tmp (known to exist).
@@ -372,7 +492,7 @@ mod tests {
 
     #[test]
     fn test_render_open_file_shows_path_bar() {
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         let text = render_to_text(&state);
         assert!(
@@ -383,7 +503,7 @@ mod tests {
 
     #[test]
     fn test_render_open_file_shows_entries() {
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         let text = render_to_text(&state);
         // At least one entry name should appear in the output
@@ -393,7 +513,7 @@ mod tests {
 
     #[test]
     fn test_render_open_file_shows_filter_hint() {
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         let text = render_to_text(&state);
         assert!(
@@ -408,7 +528,7 @@ mod tests {
 
     #[test]
     fn test_render_open_file_shows_search_hint() {
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         let text = render_to_text(&state);
         assert!(
@@ -420,7 +540,7 @@ mod tests {
     #[test]
     fn test_render_create_file_no_name_input_when_focus_is_list() {
         // In CreateFile mode but focus is on list → no name input area
-        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
         state.focus = FocusTarget::List;
         let text = render_to_text(&state);
@@ -438,7 +558,7 @@ mod tests {
 
     #[test]
     fn test_render_create_file_shows_name_input_when_focused() {
-        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
         state.focus = FocusTarget::Input;
         let text = render_to_text(&state);
@@ -454,7 +574,7 @@ mod tests {
 
     #[test]
     fn test_render_create_file_name_input_is_popup() {
-        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
         state.focus = FocusTarget::Input;
         let text = render_to_text(&state);
@@ -466,7 +586,7 @@ mod tests {
 
     #[test]
     fn test_render_rename_input_is_popup() {
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         state.focus = FocusTarget::Rename;
         state.rename_name = "renamed.age".to_string();
@@ -484,7 +604,7 @@ mod tests {
 
     #[test]
     fn test_render_delete_confirm_is_popup() {
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         state.confirm_delete = Some("/tmp/secret.age".to_string());
         let text = render_to_text(&state);
@@ -500,7 +620,7 @@ mod tests {
 
     #[test]
     fn test_render_error_is_popup() {
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         state.error = Some("Permission denied".to_string());
         let text = render_to_text(&state);
@@ -512,7 +632,7 @@ mod tests {
 
     #[test]
     fn test_render_create_file_with_partial_name() {
-        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
         state.focus = FocusTarget::Input;
         state.creating_name = "myvault.age".to_string();
@@ -526,7 +646,7 @@ mod tests {
 
     #[test]
     fn test_render_search_active_shows_query() {
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         state.search_active = true;
         state.search_query = "test".to_string();
@@ -539,7 +659,7 @@ mod tests {
 
     #[test]
     fn test_render_error_bar_shows_message() {
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         state.error = Some("Permission denied".to_string());
         let text = render_to_text(&state);
@@ -551,7 +671,7 @@ mod tests {
 
     #[test]
     fn test_render_empty_filtered_list_shows_hint() {
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        let mut state = new_state(FileBrowserMode::OpenFile);
         // Use an empty directory if possible, or filter with PwdKeeperOnly
         // and search for something that won't match
         state.current_dir = std::path::PathBuf::from("/tmp");
@@ -571,7 +691,7 @@ mod tests {
 
     #[test]
     fn test_render_new_hint_shown_in_create_mode() {
-        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
         let text = render_to_text(&state);
         assert!(
@@ -582,7 +702,7 @@ mod tests {
 
     #[test]
     fn test_render_new_hint_hidden_in_open_mode() {
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         let text = render_to_text(&state);
         assert!(
@@ -593,7 +713,7 @@ mod tests {
 
     #[test]
     fn test_render_n_prefix_prompt_when_pending() {
-        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
         state.pending = NewFilePrefix::Pending;
         let text = render_to_text(&state);
@@ -605,7 +725,7 @@ mod tests {
 
     #[test]
     fn test_render_dirs_marked_with_arrow_icon() {
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         let text = render_to_text(&state);
         // The selected entry should show ▸ prefix
@@ -628,7 +748,7 @@ mod tests {
         let txt_path = dir.join("notes.txt");
         std::fs::write(&txt_path, b"hello").unwrap();
 
-        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        let mut state = new_state(FileBrowserMode::OpenFile);
         state.current_dir = dir.to_path_buf();
         state.entries = file_handling::list_dir(dir).unwrap();
         state.selected = state
@@ -653,5 +773,92 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // ── Options bar: hidden + disks hints ──
+
+    #[test]
+    fn test_render_footer_shows_hidden_state_and_hints() {
+        let mut state = new_state(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("Hidden: off"),
+            "hidden indicator should start off:\n{text}"
+        );
+        assert!(
+            text.contains("[D]disks"),
+            "should advertise the locations overlay:\n{text}"
+        );
+        assert!(
+            text.contains("[Ctrl+h]hidden"),
+            "should advertise the hidden toggle:\n{text}"
+        );
+
+        state.show_hidden = true;
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("Hidden: on"),
+            "hidden indicator should reflect the toggle:\n{text}"
+        );
+    }
+
+    // ── Locations overlay ──
+
+    #[test]
+    fn test_render_locations_overlay_lists_home_and_disks() {
+        let mut state = new_state(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        state.locations = vec![
+            Location {
+                label: "Home".to_string(),
+                path: std::path::PathBuf::from("/home/user"),
+                detail: "/home/user".to_string(),
+                is_home: true,
+            },
+            Location {
+                label: "/mnt/usb".to_string(),
+                path: std::path::PathBuf::from("/mnt/usb"),
+                detail: "vfat · 1.0 GiB free / 2.0 GiB [USB]".to_string(),
+                is_home: false,
+            },
+        ];
+        state.location_selected = 1;
+        state.focus = FocusTarget::Locations;
+
+        let text = render_to_text(&state);
+
+        assert!(
+            text.contains("Locations"),
+            "overlay should have a title:\n{text}"
+        );
+        assert!(
+            text.contains("Home") && text.contains("/mnt/usb"),
+            "overlay should list Home and the disk:\n{text}"
+        );
+        assert!(
+            text.contains("vfat") && text.contains("[USB]"),
+            "overlay should show disk details:\n{text}"
+        );
+        assert!(
+            text.contains("Enter:open"),
+            "overlay should show its key hints:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_locations_overlay_without_rows_shows_empty_state() {
+        let mut state = new_state(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        state.locations.clear();
+        state.focus = FocusTarget::Locations;
+
+        let text = render_to_text(&state);
+
+        assert!(
+            text.contains("Locations"),
+            "overlay should still render:\n{text}"
+        );
     }
 }

@@ -9,7 +9,9 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{Frame, Terminal, backend::Backend};
 
 use crate::cursor::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
-use crate::file_browser::{self, FileBrowserAction, FileBrowserMode, FileBrowserState};
+use crate::file_browser::{
+    self, FileBrowserAction, FileBrowserMode, FileBrowserSession, FileBrowserState,
+};
 use crate::file_handling;
 use crate::theming::Action;
 use crate::theming::{ElementStyle, Icon, texts};
@@ -75,6 +77,8 @@ pub struct HomeState {
     pub active_vault: Option<ActiveVaultState>,
     modal: Option<HomeModal>,
     pub status: Option<&'static str>,
+    /// In-memory memory shared by successive file browser openings.
+    browser_session: FileBrowserSession,
 }
 
 impl Default for HomeState {
@@ -109,6 +113,7 @@ impl HomeState {
             active_vault: None,
             modal,
             status: None,
+            browser_session: FileBrowserSession::default(),
         }
     }
 
@@ -195,7 +200,8 @@ fn handle_home_key<B: Backend>(
         Action::Confirm => {
             let idx = state.selected;
             if idx == 0 {
-                let mut fb = FileBrowserState::new(FileBrowserMode::OpenFile);
+                let mut fb =
+                    FileBrowserState::new(FileBrowserMode::OpenFile, &state.browser_session);
                 fb.set_active_vault_path(
                     state
                         .active_vault
@@ -204,7 +210,8 @@ fn handle_home_key<B: Backend>(
                 );
                 state.modal = Some(HomeModal::FileBrowser(fb));
             } else if idx == 1 {
-                let mut fb = FileBrowserState::new(FileBrowserMode::CreateFile);
+                let mut fb =
+                    FileBrowserState::new(FileBrowserMode::CreateFile, &state.browser_session);
                 fb.set_active_vault_path(
                     state
                         .active_vault
@@ -231,7 +238,8 @@ fn handle_home_key<B: Backend>(
                     });
                 }
             } else if idx == 5 {
-                let mut fb = FileBrowserState::new(FileBrowserMode::ImportFile);
+                let mut fb =
+                    FileBrowserState::new(FileBrowserMode::ImportFile, &state.browser_session);
                 fb.set_active_vault_path(
                     state
                         .active_vault
@@ -334,6 +342,7 @@ fn handle_file_browser_key<B: Backend>(
     };
 
     let action = file_browser::handle_key(key, &mut modal);
+    state.browser_session = modal.session();
 
     match action {
         None => {

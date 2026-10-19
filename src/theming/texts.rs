@@ -26,6 +26,10 @@ pub const BROWSER_CREATE: &str = " Create New Secret File ";
 pub const BROWSER_IMPORT: &str = " Import File ";
 pub const OVERLAY_NEW_FILE: &str = " New File ";
 pub const OVERLAY_RENAME: &str = " Rename ";
+pub const OVERLAY_LOCATIONS: &str = " Locations ";
+pub const LOCATION_HOME: &str = "Home";
+pub const LOCATION_USB: &str = "[USB]";
+pub const LOCATION_READ_ONLY: &str = "[RO]";
 
 pub const MENU_ITEMS: &[&str] = &[
     "Open secret file",
@@ -183,4 +187,9 @@ pub const FB_PROMPT_NEW: &str = " n:new file  N:new folder  Esc:cancel ";
 pub const FB_HINT_CONFIRM: &str = "Enter:confirm";
 pub const FB_HINT_CANCEL: &str = "Esc:cancel";
 pub const FB_DELETE_CONFIRM_SUFFIX: &str = " (y/N) ";
+pub const FB_HINT_DISKS: &str = " [D]disks ";
+pub const FB_HINT_HIDDEN: &str = " [Ctrl+h]hidden ";
+pub const FB_HIDDEN_ON: &str = "Hidden: on";
+pub const FB_HIDDEN_OFF: &str = "Hidden: off";
+pub const FB_HINT_LOCATIONS: &str = " j/k:move  Enter:open  Esc:close ";
 pub const MSG_CANNOT_DELETE_FILE: &str = "Cannot delete the currently open file";

@@ -150,9 +150,23 @@ pub fn create_secret_file(path: &str, passphrase: &str) -> Result<Node, FileHand
 
 // ── Filesystem operations ──
 
-/// Lists all entries in `path`, sorted directories-first then alphabetically.
+/// Lists all visible entries in `path`, sorted directories-first then
+/// alphabetically.  Hidden (dot-prefixed) entries are skipped.
+///
 /// Each regular file is scanned for the age-encryption magic header.
 pub fn list_dir(path: &Path) -> Result<Vec<FileEntry>, FileHandlingError> {
+    list_dir_impl(path, false)
+}
+
+/// Lists all entries in `path`, including hidden (dot-prefixed) entries,
+/// sorted directories-first then alphabetically.
+///
+/// Each regular file is scanned for the age-encryption magic header.
+pub fn list_dir_including_hidden(path: &Path) -> Result<Vec<FileEntry>, FileHandlingError> {
+    list_dir_impl(path, true)
+}
+
+fn list_dir_impl(path: &Path, include_hidden: bool) -> Result<Vec<FileEntry>, FileHandlingError> {
     let mut entries: Vec<FileEntry> = Vec::new();
 
     let read_dir = fs::read_dir(path)?;
@@ -160,7 +174,7 @@ pub fn list_dir(path: &Path) -> Result<Vec<FileEntry>, FileHandlingError> {
     for entry in read_dir {
         let entry = entry?;
         let name = entry.file_name().into_string().unwrap_or_default();
-        if name.starts_with('.') {
+        if !include_hidden && name.starts_with('.') {
             continue;
         }
 
@@ -566,6 +580,48 @@ mod tests {
                 panic!("directory found after file — sort order broken");
             }
         }
+    }
+
+    #[test]
+    fn test_list_dir_skips_hidden_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(".hidden.txt"), b"hidden").unwrap();
+        fs::write(dir.path().join("visible.txt"), b"visible").unwrap();
+        fs::create_dir(dir.path().join(".hidden_dir")).unwrap();
+
+        let entries = list_dir(dir.path()).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(!names.contains(&".hidden.txt"));
+        assert!(!names.contains(&".hidden_dir"));
+        assert!(names.contains(&"visible.txt"));
+    }
+
+    #[test]
+    fn test_list_dir_including_hidden_shows_dot_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(".hidden.txt"), b"hidden").unwrap();
+        fs::write(dir.path().join("visible.txt"), b"visible").unwrap();
+        fs::create_dir(dir.path().join(".hidden_dir")).unwrap();
+
+        let entries = list_dir_including_hidden(dir.path()).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&".hidden.txt"));
+        assert!(names.contains(&".hidden_dir"));
+        assert!(names.contains(&"visible.txt"));
+        // Directories still sort before files.
+        let first_file = entries.iter().position(|e| !e.is_dir).unwrap();
+        assert!(entries[..first_file].iter().all(|e| e.is_dir));
+    }
+
+    #[test]
+    fn test_list_dir_including_hidden_marks_dot_age_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = [AGE_MAGIC.as_slice(), &[0u8, 1, 2, 3]].concat();
+        fs::write(dir.path().join(".secret.age"), &data).unwrap();
+
+        let entries = list_dir_including_hidden(dir.path()).unwrap();
+        let entry = entries.iter().find(|e| e.name == ".secret.age").unwrap();
+        assert!(entry.is_age_file);
     }
 
     #[test]

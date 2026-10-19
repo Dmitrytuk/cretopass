@@ -1,7 +1,8 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::state::{
     FileBrowserAction, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget, NewFilePrefix,
+    build_locations, list_entries, preselect_location,
 };
 use crate::file_handling;
 use crate::theming::texts;
@@ -52,6 +53,27 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
                 None
             }
         };
+    }
+
+    // ── Locations overlay ──
+    if state.focus == FocusTarget::Locations {
+        return handle_locations_key(key, state);
+    }
+
+    // ── Browser-wide keys ──
+    if is_toggle_hidden_key(&key) {
+        // Never let Ctrl+h / Ctrl+Backspace become search or field text.
+        if state.search_active || state.focus != FocusTarget::List {
+            return None;
+        }
+        state.show_hidden = !state.show_hidden;
+        state.refresh_entries();
+        return None;
+    }
+
+    if state.focus == FocusTarget::List && !state.search_active && is_locations_key(&key) {
+        open_locations(state);
+        return None;
     }
 
     // ── Search-mode keys ──
@@ -108,7 +130,81 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
         FocusTarget::List => handle_list_key(key, state),
         FocusTarget::Input => handle_input_key(key, state),
         FocusTarget::Rename => handle_rename_key(key, state),
+        // Handled above; the overlay never reaches the focus dispatch.
+        FocusTarget::Locations => None,
     }
+}
+
+/// `D` opens the Locations overlay from the list.
+fn is_locations_key(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('D')
+        && !key.modifiers.contains(KeyModifiers::CONTROL)
+        && !key.modifiers.contains(KeyModifiers::ALT)
+}
+
+/// Ctrl+h toggles hidden entries.  Crossterm reports byte `0x08` (Ctrl+H on
+/// Unix) as `Char('h')` + CONTROL; Windows terminals may deliver it as
+/// `Backspace` + CONTROL instead, so both are accepted.
+fn is_toggle_hidden_key(key: &KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(
+            key.code,
+            KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Backspace
+        )
+}
+
+/// Builds the Locations rows and opens the overlay.
+fn open_locations(state: &mut FileBrowserState) {
+    state.locations = build_locations();
+    state.location_selected = preselect_location(&state.locations, &state.current_dir);
+    state.focus = FocusTarget::Locations;
+}
+
+fn handle_locations_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBrowserAction> {
+    let closes = matches!(key.code, KeyCode::Esc | KeyCode::Left)
+        || (key.code == KeyCode::Char('h') && !key.modifiers.contains(KeyModifiers::CONTROL));
+    if closes || is_locations_key(&key) {
+        state.focus = FocusTarget::List;
+        return None;
+    }
+
+    let len = state.locations.len();
+    if len == 0 {
+        return None;
+    }
+
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => {
+            state.location_selected = (state.location_selected + 1) % len;
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            state.location_selected = if state.location_selected == 0 {
+                len - 1
+            } else {
+                state.location_selected - 1
+            };
+        }
+        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+            let Some(location) = state.locations.get(state.location_selected).cloned() else {
+                state.focus = FocusTarget::List;
+                return None;
+            };
+            match list_entries(&location.path, state.show_hidden) {
+                Ok(entries) => {
+                    state.current_dir = location.path;
+                    state.entries = entries;
+                    state.selected = 0;
+                    state.search_active = false;
+                    state.search_query.clear();
+                    state.focus = FocusTarget::List;
+                }
+                Err(e) => state.error = Some(format!("{e}")),
+            }
+        }
+        _ => {}
+    }
+
+    None
 }
 
 fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBrowserAction> {
@@ -159,9 +255,10 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
             let idx = state.selected;
             if let Some(entry) = state.entries.get(idx) {
                 if entry.is_dir {
-                    match file_handling::list_dir(&entry.path) {
+                    let path = entry.path.clone();
+                    match list_entries(&path, state.show_hidden) {
                         Ok(new_entries) => {
-                            state.current_dir = entry.path.clone();
+                            state.current_dir = path;
                             state.entries = new_entries;
                             state.selected = 0;
                             state.search_active = false;
@@ -350,7 +447,7 @@ fn go_to_parent(state: &mut FileBrowserState) {
     }
 
     let prev_dir = state.current_dir.clone();
-    match file_handling::list_dir(&parent) {
+    match list_entries(&parent, state.show_hidden) {
         Ok(new_entries) => {
             let prev_name = prev_dir
                 .file_name()
@@ -381,7 +478,8 @@ fn create_new_folder(state: &mut FileBrowserState) {
     let new_path = state.current_dir.join(&name);
     match file_handling::create_dir(&new_path) {
         Ok(()) => {
-            if let Ok(new_entries) = file_handling::list_dir(&state.current_dir) {
+            let dir = state.current_dir.clone();
+            if let Ok(new_entries) = list_entries(&dir, state.show_hidden) {
                 state.entries = new_entries;
                 state.selected = state
                     .entries
@@ -400,7 +498,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
     use super::*;
-    use crate::file_browser::FileBrowserMode;
+    use crate::file_browser::{FileBrowserMode, FileBrowserSession, Location};
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent {
@@ -412,12 +510,21 @@ mod tests {
     }
 
     fn make_state(mode: FileBrowserMode) -> FileBrowserState {
-        let mut state = FileBrowserState::new(mode);
+        let mut state = FileBrowserState::new(mode, &FileBrowserSession::default());
         // Point to /tmp so list_dir works and entries are populated
         state.current_dir = std::path::PathBuf::from("/tmp");
         state.entries = file_handling::list_dir(std::path::Path::new("/tmp")).unwrap_or_default();
         state.selected = 0;
         state
+    }
+
+    fn ctrl(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
     }
 
     // ── `n` prefix in CreateFile mode ──
@@ -469,7 +576,8 @@ mod tests {
 
     #[test]
     fn test_n_prefix_switches_to_input_on_empty_list() {
-        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        let mut state =
+            FileBrowserState::new(FileBrowserMode::CreateFile, &FileBrowserSession::default());
         state.current_dir = std::path::PathBuf::from("/tmp/__empty_test_dir__");
         let _ = std::fs::create_dir_all(&state.current_dir);
         state.entries = file_handling::list_dir(&state.current_dir).unwrap();
@@ -587,7 +695,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
-        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        let mut state =
+            FileBrowserState::new(FileBrowserMode::CreateFile, &FileBrowserSession::default());
         state.current_dir = dir.clone();
         state.entries = file_handling::list_dir(&dir).unwrap_or_default();
 
@@ -718,5 +827,195 @@ mod tests {
 
         handle_key(key(KeyCode::End), &mut state);
         assert_eq!(state.creating_cursor, 4);
+    }
+
+    // ── Hidden entries (Ctrl+h) ──
+
+    #[test]
+    fn test_ctrl_h_toggles_hidden_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".hidden.txt"), b"hidden").unwrap();
+        std::fs::write(dir.path().join("visible.txt"), b"visible").unwrap();
+
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.current_dir = dir.path().to_path_buf();
+        state.entries = file_handling::list_dir(dir.path()).unwrap();
+        state.selected = state
+            .entries
+            .iter()
+            .position(|e| e.name == "visible.txt")
+            .unwrap();
+        assert!(!state.show_hidden);
+
+        assert_eq!(handle_key(ctrl(KeyCode::Char('h')), &mut state), None);
+
+        assert!(state.show_hidden);
+        assert!(state.entries.iter().any(|e| e.name == ".hidden.txt"));
+        assert_eq!(
+            state.entries[state.selected].name, "visible.txt",
+            "selection should be preserved by name"
+        );
+    }
+
+    #[test]
+    fn test_ctrl_backspace_toggles_hidden_entries() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        assert!(!state.show_hidden);
+
+        handle_key(ctrl(KeyCode::Backspace), &mut state);
+
+        assert!(state.show_hidden);
+    }
+
+    #[test]
+    fn test_ctrl_h_ignored_while_typing() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.focus = FocusTarget::Input;
+        state.creating_name = "draft".to_string();
+        state.creating_cursor = state.creating_name.len();
+
+        handle_key(ctrl(KeyCode::Char('h')), &mut state);
+
+        assert!(!state.show_hidden);
+        assert_eq!(state.creating_name, "draft");
+    }
+
+    #[test]
+    fn test_ctrl_h_ignored_in_search() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.search_active = true;
+        state.search_query = "abc".to_string();
+
+        handle_key(ctrl(KeyCode::Char('h')), &mut state);
+
+        assert!(!state.show_hidden);
+        assert_eq!(state.search_query, "abc");
+    }
+
+    // ── Locations overlay (D) ──
+
+    fn location(label: &str, path: &str) -> Location {
+        Location {
+            label: label.to_string(),
+            path: std::path::PathBuf::from(path),
+            detail: String::new(),
+            is_home: false,
+        }
+    }
+
+    #[test]
+    fn test_d_opens_locations_overlay() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+
+        handle_key(key(KeyCode::Char('D')), &mut state);
+
+        assert_eq!(state.focus, FocusTarget::Locations);
+        assert!(state.locations.first().is_some_and(|l| l.is_home));
+    }
+
+    #[test]
+    fn test_d_closes_locations_overlay() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        handle_key(key(KeyCode::Char('D')), &mut state);
+        assert_eq!(state.focus, FocusTarget::Locations);
+
+        handle_key(key(KeyCode::Char('D')), &mut state);
+
+        assert_eq!(state.focus, FocusTarget::List);
+    }
+
+    #[test]
+    fn test_esc_closes_locations_overlay_without_cancelling() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        handle_key(key(KeyCode::Char('D')), &mut state);
+
+        let result = handle_key(key(KeyCode::Esc), &mut state);
+
+        assert_eq!(result, None, "Esc closes the overlay, not the browser");
+        assert_eq!(state.focus, FocusTarget::List);
+    }
+
+    #[test]
+    fn test_locations_navigation_wraps() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.locations = vec![location("a", "/a"), location("b", "/b")];
+        state.location_selected = 0;
+        state.focus = FocusTarget::Locations;
+
+        handle_key(key(KeyCode::Char('k')), &mut state);
+        assert_eq!(state.location_selected, 1);
+
+        handle_key(key(KeyCode::Char('j')), &mut state);
+        assert_eq!(state.location_selected, 0);
+    }
+
+    #[test]
+    fn test_locations_enter_jumps_to_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("inside.txt"), b"x").unwrap();
+
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.locations = vec![Location {
+            label: dir.path().to_string_lossy().to_string(),
+            path: dir.path().to_path_buf(),
+            detail: String::new(),
+            is_home: false,
+        }];
+        state.location_selected = 0;
+        state.focus = FocusTarget::Locations;
+        state.search_query = "stale".to_string();
+        state.search_active = true;
+
+        let result = handle_key(key(KeyCode::Enter), &mut state);
+
+        assert_eq!(result, None);
+        assert_eq!(state.focus, FocusTarget::List);
+        assert_eq!(state.current_dir, dir.path());
+        assert!(state.entries.iter().any(|e| e.name == "inside.txt"));
+        assert!(state.search_query.is_empty());
+        assert!(!state.search_active);
+    }
+
+    #[test]
+    fn test_locations_enter_unreadable_keeps_overlay_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing");
+
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.locations = vec![Location {
+            label: "missing".to_string(),
+            path: missing.clone(),
+            detail: String::new(),
+            is_home: false,
+        }];
+        state.location_selected = 0;
+        state.focus = FocusTarget::Locations;
+
+        handle_key(key(KeyCode::Enter), &mut state);
+
+        assert_eq!(state.focus, FocusTarget::Locations);
+        assert!(state.error.is_some());
+        assert_ne!(state.current_dir, missing);
+    }
+
+    #[test]
+    fn test_locations_respects_hidden_setting() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".hidden.txt"), b"hidden").unwrap();
+
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.show_hidden = true;
+        state.locations = vec![Location {
+            label: dir.path().to_string_lossy().to_string(),
+            path: dir.path().to_path_buf(),
+            detail: String::new(),
+            is_home: false,
+        }];
+        state.location_selected = 0;
+        state.focus = FocusTarget::Locations;
+
+        handle_key(key(KeyCode::Enter), &mut state);
+
+        assert!(state.entries.iter().any(|e| e.name == ".hidden.txt"));
     }
 }
