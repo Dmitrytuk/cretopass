@@ -49,7 +49,8 @@ pub enum Action {
     /// Toggles the focused item in the password-generator modal or its
     /// symbol checklist.
     Toggle,
-    /// Opens the password generator for the focused password field.
+    /// Opens the password generator for the focused password field while
+    /// editing it at the form's input level.
     GeneratePassword,
     SaveConfig,
     /// Toggles plaintext display of a password field.
@@ -133,13 +134,13 @@ impl Action {
     /// Dispatch for the form's navigation level. Text is not editable here;
     /// `i`/`Enter` enter the input level, `j`/`k`/arrows/Tab move between
     /// fields, `u`/`r` undo/redo, `Esc` closes the form.
+    ///
+    /// The password generator is opened from the input level instead (see
+    /// [`Action::from_form_input`]); `Ctrl+G` here is unbound.
     pub fn from_form_nav(key: &KeyEvent) -> Self {
-        // Ctrl+G is the only Ctrl chord bound at the Nav level. It must be
-        // checked *before* the plain-char matches, which deliberately ignore
-        // modifiers (Ctrl+u/r/d/p/i/j keep their existing meanings).
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('g') {
-            return Self::GeneratePassword;
-        }
+        // No Ctrl chord is bound at the Nav level. The plain-char matches below
+        // deliberately ignore modifiers (Ctrl+u/r/d/p/i/j keep their existing
+        // meanings), so `Ctrl+G` falls through to the unbound `g`.
         match key.code {
             KeyCode::Char('j') | KeyCode::Down | KeyCode::Tab => Self::NextField,
             KeyCode::Char('k') | KeyCode::Up | KeyCode::BackTab => Self::PrevField,
@@ -210,7 +211,14 @@ impl Action {
     /// Dispatch for the form's input level. Printable keys edit the active
     /// field; both `Enter` and `Esc` return to the navigation level, committing
     /// the field's text.
+    ///
+    /// `Ctrl+G` opens the password generator for the focused field when it has
+    /// one (today: a `Password` field); elsewhere it is a no-op. It must be
+    /// checked *before* the plain-char match, which ignores modifiers.
     pub fn from_form_input(key: &KeyEvent) -> Self {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('g') {
+            return Self::GeneratePassword;
+        }
         match key.code {
             KeyCode::Left => Self::CursorLeft,
             KeyCode::Right => Self::CursorRight,
@@ -695,10 +703,10 @@ mod tests {
     }
 
     #[test]
-    fn from_form_nav_ctrl_g_opens_generator_and_plain_g_is_unbound() {
+    fn from_form_nav_ctrl_g_is_unbound_and_plain_g_is_unbound() {
         assert_eq!(
             Action::from_form_nav(&ctrl(KeyCode::Char('g'))),
-            Action::GeneratePassword
+            Action::None
         );
         assert_eq!(
             Action::from_form_nav(&key(KeyCode::Char('g'))),
@@ -735,10 +743,15 @@ mod tests {
     }
 
     #[test]
-    fn from_form_input_ctrl_g_inserts_a_literal_g() {
-        // The generator is Nav-only; at the Input level Ctrl+G is just text.
+    fn from_form_input_ctrl_g_opens_generator_and_plain_g_inserts() {
+        // The generator is opened from the input level; on a field without one
+        // the handler treats the action as a no-op.
         assert_eq!(
             Action::from_form_input(&ctrl(KeyCode::Char('g'))),
+            Action::GeneratePassword
+        );
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Char('g'))),
             Action::InsertChar('g')
         );
     }

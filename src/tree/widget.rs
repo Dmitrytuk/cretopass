@@ -54,7 +54,8 @@ pub enum InputMode {
     },
     /// Popup for entering a custom field name.
     CustomFieldName { form: FormState, input: String },
-    /// Password-generator parameter modal opened with `Ctrl+G`.
+    /// Password-generator parameter modal opened with `Ctrl+G` from the form's
+    /// input level.
     GeneratePassword(GeneratorModal),
     /// Per-symbol checklist overlay opened from the generator modal.
     SymbolChecklist(GeneratorModal),

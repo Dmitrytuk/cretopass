@@ -80,13 +80,14 @@ symbol, and checking budgets per class is harder to explain).
 
 ## UI contract
 
-- **Trigger:** `Ctrl+G` at the form's **Nav** level only, when the focused row is
-  an `ExtraField` whose type has a generator. On `Login`, `Custom`, `Name`, or
-  the add button it is a no-op, and the binding is not advertised. At the Input
-  level `Ctrl+G` remains a literal `g` (the form's Input dispatcher ignores
-  modifiers, unchanged by this feature).
-- `from_form_nav` checks **only** `Ctrl+G` before the plain-char matches, so
-  `Ctrl+u/r/d/p/i/j` keep their existing meanings.
+- **Trigger:** `Ctrl+G` at the form's **Input** level only, when the focused row
+  is an `ExtraField` whose type has a generator. On `Login`, `Custom`, `Name`, or
+  the add button it is a no-op, and the binding is not advertised. At the Nav
+  level `Ctrl+G` is unbound.
+- `from_form_input` checks **only** `Ctrl+G` before the plain-char match, so the
+  printable keys (including a literal `g`) keep their existing meanings. The
+  form's Input dispatcher ignores modifiers for every other key, unchanged by
+  this feature.
 - **Modal:** three flat rows — Length, Special characters, Generate. `j`/`k`,
   arrows and `Tab`/`Shift+Tab` move between rows; `Space` toggles all symbols on
   the summary row; `Enter` on the length row advances to the summary row, on the
@@ -109,7 +110,10 @@ symbol, and checking budgets per class is harder to explain).
   flag survive the round trip because both modes carry the same `GeneratorModal`.
 - **Result:** generating writes the value into the focused field, pushes a form
   undo entry, marks the tree modified (autosave persists it), remembers the
-  params, and returns to the form at Nav. `u` reverts the generated value.
+  params, and returns to the form still editing the field at Input. The scratch
+  buffer is synced to the generated value, so the revealed field shows it
+  immediately and leaving Input does not restore the old password. Because the
+  form stays at Input, `u` reverts the generated value only after leaving Input.
   Overwriting a non-empty password has no confirmation.
 - The value is masked in the form/Detail as usual; it is revealed only while
   editing with `i`.
@@ -140,9 +144,9 @@ filling.
 - `src/generator/password.rs` unit tests: exact lengths at the reference's
   overflow points, alphabet membership, digit/symbol guarantees, budget sums,
   length parsing, and `SymbolSet` operations.
-- `theming::key` tests: `Ctrl+G` at Nav, unchanged other Ctrl chords, literal
-  `g` at Input, and both new dispatchers.
-- `tree::app_tree` tests: the modal opens only on a `Password` row, generation
-  writes/commits/undoes, `Esc` leaves the value alone, invalid length errors,
-  length replacement and caret editing, toggle-all, checklist navigation, and
-  the password-specific hint.
+- `theming::key` tests: `Ctrl+G` at Input, unbinding at Nav, printable keys
+  (including `g`) unchanged at Input, and both new dispatchers.
+- `tree::app_tree` tests: the modal opens only on a `Password` row at Input,
+  generation writes/commits/undoes, `Esc` leaves the value alone, invalid length
+  errors, length replacement and caret editing, toggle-all, checklist
+  navigation, and the password-specific hint.

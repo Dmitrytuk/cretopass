@@ -702,8 +702,9 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
 
     match action {
         Action::GeneratePassword => {
-            // `from_form_nav` only yields this at the Nav level, and only when
-            // the focused row carries a generator (today: a Password field).
+            // `Ctrl+G` is bound at the Input level and only when the focused
+            // row carries a generator (today: a Password field). Other rows
+            // fall through and the form is restored untouched.
             if FieldGenerator::for_field(form.focused_field_type(&state.root)).is_some() {
                 let length_input = state.generator.length.value().to_string();
                 let length_cursor = length_input.len();
@@ -974,11 +975,12 @@ fn handle_custom_field_name(key: event::KeyEvent, state: &mut TreeState) {
 
 /// Keys for the password-generator parameter modal.
 ///
-/// `Ctrl+G` opened this from the Add/Edit form. On the length row, the first
-/// digit replaces the seeded value and the caret can then be moved with
+/// `Ctrl+G` opened this from the Add/Edit form's Input level. On the length row,
+/// the first digit replaces the seeded value and the caret can then be moved with
 /// `Left`/`Right`/`Home`/`End`, inserting/removing at most three digits.
-/// Generating writes the value into the focused field, commits it (undo entry +
-/// autosave) and returns to the form. `Esc` returns without touching the field.
+/// Generating writes the value into the focused field (and its scratch buffer),
+/// commits it (undo entry + autosave) and returns to the form still editing the
+/// field. `Esc` returns without touching the field.
 fn handle_generate_password(key: event::KeyEvent, state: &mut TreeState) {
     let mut modal = match std::mem::replace(&mut state.mode, InputMode::Normal) {
         InputMode::GeneratePassword(modal) => modal,
@@ -1084,7 +1086,18 @@ fn handle_generate_password(key: event::KeyEvent, state: &mut TreeState) {
                         return;
                     };
                     let value = field_generator.generate(&params);
-                    if modal.form.set_focused_value(&mut state.root, value) {
+                    if modal.form.set_focused_value(&mut state.root, value.clone()) {
+                        // The generator is opened from the Input level, so the
+                        // focused text lives in the scratch buffer. Keep it in
+                        // step with the generated value: the revealed field
+                        // shows it immediately and the later `commit_input` is
+                        // a no-op instead of restoring the old password.
+                        if modal.form.focus == FormFocus::Input
+                            && let Some(scratch) = modal.form.scratch.as_mut()
+                        {
+                            scratch.text = value;
+                            scratch.cursor = scratch.text.len();
+                        }
                         modal.form.cursor = modal.form.active_len(&state.root);
                         commit_form_change(state, &mut modal.form);
                     }
@@ -2026,14 +2039,14 @@ fn form_hint(form: &FormState, root: &Node) -> &'static str {
         FormPending::None => {}
     }
     if form.focus == FormFocus::Input {
-        return texts::HINT_FORM_INPUT;
+        return match form.focused_field_type(root) {
+            Some(FieldType::Password) => texts::HINT_FORM_PASSWORD_INPUT,
+            _ => texts::HINT_FORM_INPUT,
+        };
     }
     match form.current_row(root) {
         FormRow::AddButton => texts::HINT_FORM_ADD,
-        FormRow::Extra(_) => match form.focused_field_type(root) {
-            Some(FieldType::Password) => texts::HINT_FORM_PASSWORD_EXTRA,
-            _ => texts::HINT_FORM_EXTRA,
-        },
+        FormRow::Extra(_) => texts::HINT_FORM_EXTRA,
         FormRow::Name => texts::HINT_FORM,
     }
 }
@@ -2441,6 +2454,9 @@ mod tests {
 
     fn open_generator(state: &mut TreeState) {
         select_row(state, 1);
+        if form_of(state).focus == FormFocus::Nav {
+            handle_form(key(KeyCode::Char('i')), state);
+        }
         handle_form(ctrl(KeyCode::Char('g')), state);
         assert!(matches!(state.mode, InputMode::GeneratePassword(_)));
     }
@@ -3014,14 +3030,24 @@ mod tests {
     }
 
     #[test]
-    fn generator_opens_only_for_password_fields_at_nav() {
+    fn generator_ctrl_g_is_bound_only_while_editing_a_password_field() {
+        // `Ctrl+G` is unbound at the Nav level, even on a password row.
+        let mut nav = editing_state_with_password("old");
+        select_row(&mut nav, 1);
+        handle_form(ctrl(KeyCode::Char('g')), &mut nav);
+        assert!(matches!(nav.mode, InputMode::Form(_)));
+
+        // At the Input level it opens only when the focused field carries a
+        // generator: Login and Name rows are no-ops.
         let mut login = editing_state_with_fields();
         select_row(&mut login, 1);
+        handle_form(key(KeyCode::Char('i')), &mut login);
         handle_form(ctrl(KeyCode::Char('g')), &mut login);
         assert!(matches!(login.mode, InputMode::Form(_)));
 
         let mut name = editing_state();
         select_row(&mut name, 0);
+        handle_form(key(KeyCode::Char('i')), &mut name);
         handle_form(ctrl(KeyCode::Char('g')), &mut name);
         assert!(matches!(name.mode, InputMode::Form(_)));
 
@@ -3030,20 +3056,31 @@ mod tests {
     }
 
     #[test]
-    fn generator_generate_writes_commits_and_returns_to_nav_form() {
+    fn generator_generate_writes_commits_and_returns_to_input_form() {
         let mut state = editing_state_with_password("old");
         open_generator(&mut state);
         set_generator_length(&mut state, "12");
         press_generate(&mut state);
 
         assert!(matches!(state.mode, InputMode::Form(_)));
-        assert_eq!(form_of(&state).focus, FormFocus::Nav);
+        assert_eq!(form_of(&state).focus, FormFocus::Input);
         let value = password_value(&state);
         assert_eq!(value.chars().count(), 12);
         assert!(value.chars().all(|c| c.is_ascii_graphic()));
         assert!(state.modified);
         assert_eq!(form_of(&state).history.len(), 2);
         assert_eq!(state.generator.length.value(), 12);
+
+        // The scratch buffer mirrors the generated value, so leaving the input
+        // level keeps the password instead of restoring the old one.
+        let generated = value.to_string();
+        assert_eq!(
+            form_of(&state).scratch.as_ref().map(|s| s.text.as_str()),
+            Some(generated.as_str())
+        );
+        handle_form(key(KeyCode::Esc), &mut state);
+        assert_eq!(form_of(&state).focus, FormFocus::Nav);
+        assert_eq!(password_value(&state), generated);
     }
 
     #[test]
@@ -3053,6 +3090,9 @@ mod tests {
         press_generate(&mut state);
         assert_ne!(password_value(&state), "old");
 
+        // Generation leaves the form at the Input level, where `u` is plain
+        // text; leave it first so `u` reaches the Nav-level undo.
+        handle_form(key(KeyCode::Esc), &mut state);
         handle_form(key(KeyCode::Char('u')), &mut state);
         assert_eq!(password_value(&state), "old");
     }
@@ -3220,12 +3260,17 @@ mod tests {
     }
 
     #[test]
-    fn form_hint_selects_the_password_variant_only_for_password_rows() {
-        let mut state = editing_state_with_password("old");
-        select_row(&mut state, 1);
+    fn form_hint_selects_the_password_variant_only_while_editing_a_password() {
+        let mut password = editing_state_with_password("old");
+        select_row(&mut password, 1);
         assert_eq!(
-            form_hint(form_of(&state), &state.root),
-            texts::HINT_FORM_PASSWORD_EXTRA
+            form_hint(form_of(&password), &password.root),
+            texts::HINT_FORM_EXTRA
+        );
+        handle_form(key(KeyCode::Char('i')), &mut password);
+        assert_eq!(
+            form_hint(form_of(&password), &password.root),
+            texts::HINT_FORM_PASSWORD_INPUT
         );
 
         let mut login = editing_state_with_fields();
@@ -3234,15 +3279,14 @@ mod tests {
             form_hint(form_of(&login), &login.root),
             texts::HINT_FORM_EXTRA
         );
-        select_row(&mut login, 0);
-        assert_eq!(form_hint(form_of(&login), &login.root), texts::HINT_FORM);
-
-        let mut input = editing_state_with_password("old");
-        select_row(&mut input, 1);
-        handle_form(key(KeyCode::Char('i')), &mut input);
+        handle_form(key(KeyCode::Char('i')), &mut login);
         assert_eq!(
-            form_hint(form_of(&input), &input.root),
+            form_hint(form_of(&login), &login.root),
             texts::HINT_FORM_INPUT
         );
+
+        let mut name = editing_state();
+        select_row(&mut name, 0);
+        assert_eq!(form_hint(form_of(&name), &name.root), texts::HINT_FORM);
     }
 }
