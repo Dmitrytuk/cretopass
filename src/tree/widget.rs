@@ -209,6 +209,12 @@ pub struct FormState {
     pub history: Vec<Snapshot>,
     /// Index of the current state within [`FormState::history`].
     pub history_cursor: usize,
+    /// `true` when the top history entry was produced by a field generator.
+    ///
+    /// The next generation then replaces that entry instead of stacking a new
+    /// one, so rerolling collapses into a single undo step. Every other commit
+    /// and any undo/redo clears it.
+    pub history_coalesce: bool,
 }
 
 impl FormState {
@@ -225,6 +231,7 @@ impl FormState {
             scratch: None,
             history: Vec::new(),
             history_cursor: 0,
+            history_coalesce: false,
         }
     }
 
@@ -241,6 +248,7 @@ impl FormState {
             scratch: None,
             history: vec![Snapshot::capture(node)],
             history_cursor: 0,
+            history_coalesce: false,
         }
     }
 
@@ -500,6 +508,7 @@ impl FormState {
         let snapshot = Snapshot::capture(self.node(root));
         self.history = vec![snapshot];
         self.history_cursor = 0;
+        self.history_coalesce = false;
     }
 
     /// Records the form's node as a new history entry, discarding any redo tail.
@@ -508,6 +517,24 @@ impl FormState {
         self.history.truncate(self.history_cursor + 1);
         self.history.push(snapshot);
         self.history_cursor = self.history.len() - 1;
+        self.history_coalesce = false;
+    }
+
+    /// Records a generated value, coalescing with the previous generation.
+    ///
+    /// When the top history entry was itself produced by a generation, it is
+    /// replaced instead of pushed, so rerolling a value stays a single undo
+    /// step. Any other commit, and any undo/redo, clears the flag and the next
+    /// generation stacks normally.
+    pub fn push_history_coalescing(&mut self, root: &Node) {
+        if self.history_coalesce && !self.history.is_empty() {
+            let snapshot = Snapshot::capture(self.node(root));
+            self.history.truncate(self.history_cursor + 1);
+            self.history[self.history_cursor] = snapshot;
+        } else {
+            self.push_history(root);
+        }
+        self.history_coalesce = true;
     }
 
     /// Returns `true` when an undo step is available.
@@ -554,6 +581,7 @@ impl FormState {
     /// state no longer has), and the selection is clamped to the new row list.
     fn after_history(&mut self, root: &Node) {
         self.field_cut_buffer = None;
+        self.history_coalesce = false;
         self.clamp_selection(root);
         self.cursor = self.active_len(root);
     }

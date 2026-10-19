@@ -18,7 +18,7 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 |------|---------------|
 | `node.rs` | `Node` struct (id, name, children, extra_fields), `ExtraField`, `FieldType` enum, legacy-`description` migration, recursive `find`/`find_mut`/`contains`, wire-label helpers for import/export |
 | `widget.rs` | `TreeState` (root, expanded set, selected index, visible list, mode, vault path, modified flag, `SaveState`, `SaveExit`, cut buffer, search state), `VisibleNode`, `InputMode` enum, `FormState` + undo/redo history, `TreeWidget::render()` DFS flat-list, all tree mutation operations |
-| `app_tree.rs` | `run_app()` async event loop (`EventStream` + `tokio::select!`), key handlers per `InputMode`, autosave submission, bounded exit flush with the force-quit escape hatch, overlay rendering (search bar, detail, edit/add forms, password generator + symbol checklist, help, export, confirm dialogs, save errors, status bar), clipboard integration |
+| `app_tree.rs` | `run_app()` async event loop (`EventStream` + `tokio::select!`), key handlers per `InputMode`, autosave submission, bounded exit flush with the force-quit escape hatch, overlay rendering (search bar, detail, edit/add forms, generator modal + symbol checklist, help, export, confirm dialogs, save errors, status bar), clipboard integration |
 
 ## Data model
 
@@ -63,11 +63,14 @@ current variant, transform state, and return the next mode.
 
 All Add/Edit form state lives in a single `FormState` (`node_id`, `draft`,
 `selected_row`, `cursor`, `focus`, `pending`, `field_cut_buffer`, `scratch`,
-`history`, `history_cursor`). The picker, custom-name and delete-confirm popups
-carry it as `form`; the two generator variants carry it inside
-`GeneratorModal`, alongside the raw length buffer and the last valid
-`PasswordParams`. `Ctrl+G` at the form's Nav level opens the generator only when
-the focused row is a `Password` field (see [0012](../../../../docs/adr/0012-password-generator.md)).
+`history`, `history_cursor`, `history_coalesce`). The picker, custom-name and
+delete-confirm popups carry it as `form`; the two generator variants carry it
+inside `GeneratorModal`, alongside the raw length buffer and the last valid
+`PasswordParams`. `Ctrl+G` at the form's Input level dispatches on the focused
+row's field type: a `Password` field opens the generator modal (see
+[0012](../../../../docs/adr/0012-password-generator.md)), while a `Login` field
+generates a word immediately (see
+[0013](../../../../docs/adr/0013-login-word-generator.md)).
 
 ## Prefix modes
 

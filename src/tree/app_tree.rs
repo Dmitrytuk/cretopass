@@ -621,6 +621,44 @@ fn commit_form_change(state: &mut TreeState, form: &mut FormState) {
     state.modified = true;
 }
 
+/// Records a generation as a committed change.
+///
+/// Like [`commit_form_change`] it marks the tree modified (triggering autosave);
+/// unlike it, consecutive generations coalesce into a single undo step. An Add
+/// form's first commit still creates its node and seeds the baseline.
+fn commit_generation(state: &mut TreeState, form: &mut FormState) {
+    if form.is_adding() {
+        commit_form_change(state, form);
+        return;
+    }
+    form.push_history_coalescing(&state.root);
+    state.modified = true;
+}
+
+/// Writes a generated `value` into the form's focused field.
+///
+/// Sets the field, keeps the Input-level scratch buffer in step (so a revealed
+/// field shows the value immediately and leaving Input does not restore the old
+/// value), places the cursor at the end, and records a coalescing commit. Leaves
+/// the value untouched and returns `false` when the focused row is not an extra
+/// field.
+fn write_generated_value(state: &mut TreeState, form: &mut FormState, value: String) -> bool {
+    if !form.set_focused_value(&mut state.root, value.clone()) {
+        return false;
+    }
+    // The generator is invoked from the Input level, so the focused text lives
+    // in the scratch buffer.
+    if form.focus == FormFocus::Input
+        && let Some(scratch) = form.scratch.as_mut()
+    {
+        scratch.text = value;
+        scratch.cursor = scratch.text.len();
+    }
+    form.cursor = form.active_len(&state.root);
+    commit_generation(state, form);
+    true
+}
+
 /// Returns the mode to enter when the Edit/Add form is closed.
 ///
 /// An Edit session (including an Add session whose first commit created its
@@ -637,12 +675,15 @@ fn close_form(form: &FormState) -> InputMode {
     }
 }
 
-/// Which generator to build a value for, selected by the focused field's type.
+/// Which generator a field type has, if any.
 ///
-/// An enum rather than a trait: today only `Password` has a generator, and a
-/// new variant forces every `match` to be revisited.
+/// An enum rather than a trait: a new variant forces every `match` to be
+/// revisited. It is the single source of truth for both the key handler and the
+/// form hint. It carries no parameters — those differ per field type (a login
+/// word has none, a password has [`PasswordParams`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FieldGenerator {
+    Login,
     Password,
 }
 
@@ -650,15 +691,9 @@ impl FieldGenerator {
     /// The generator for `field_type`, or `None` when it has none.
     fn for_field(field_type: Option<&FieldType>) -> Option<Self> {
         match field_type {
+            Some(FieldType::Login) => Some(Self::Login),
             Some(FieldType::Password) => Some(Self::Password),
             _ => None,
-        }
-    }
-
-    /// Produces a value from `params`.
-    fn generate(self, params: &PasswordParams) -> String {
-        match self {
-            Self::Password => generator::generate_password(params),
         }
     }
 }
@@ -701,23 +736,34 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
     }
 
     match action {
-        Action::GeneratePassword => {
+        Action::Generate => {
             // `Ctrl+G` is bound at the Input level and only when the focused
-            // row carries a generator (today: a Password field). Other rows
+            // row carries a generator (a Login or Password field). Other rows
             // fall through and the form is restored untouched.
-            if FieldGenerator::for_field(form.focused_field_type(&state.root)).is_some() {
-                let length_input = state.generator.length.value().to_string();
-                let length_cursor = length_input.len();
-                state.mode = InputMode::GeneratePassword(GeneratorModal {
-                    params: state.generator,
-                    length_input,
-                    length_cursor,
-                    length_fresh: true,
-                    error: None,
-                    selected: GENERATOR_ROW_LENGTH,
-                    form,
-                });
-                return;
+            match FieldGenerator::for_field(form.focused_field_type(&state.root)) {
+                Some(FieldGenerator::Password) => {
+                    let length_input = state.generator.length.value().to_string();
+                    let length_cursor = length_input.len();
+                    state.mode = InputMode::GeneratePassword(GeneratorModal {
+                        params: state.generator,
+                        length_input,
+                        length_cursor,
+                        length_fresh: true,
+                        error: None,
+                        selected: GENERATOR_ROW_LENGTH,
+                        form,
+                    });
+                    return;
+                }
+                Some(FieldGenerator::Login) => {
+                    // A login word has no parameters, so it is generated on the
+                    // spot: no modal, and `Ctrl+G` again rerolls.
+                    let value = generator::generate_login();
+                    write_generated_value(state, &mut form, value);
+                    state.mode = InputMode::Form(form);
+                    return;
+                }
+                None => {}
             }
         }
         Action::Cut if form.pending == FormPending::None => {
@@ -1077,7 +1123,7 @@ fn handle_generate_password(key: event::KeyEvent, state: &mut TreeState) {
                         length,
                         symbols: modal.params.symbols,
                     };
-                    let Some(field_generator) =
+                    let Some(FieldGenerator::Password) =
                         FieldGenerator::for_field(modal.form.focused_field_type(&state.root))
                     else {
                         // The row lost its generator (defensive); leave the
@@ -1085,22 +1131,8 @@ fn handle_generate_password(key: event::KeyEvent, state: &mut TreeState) {
                         state.mode = InputMode::Form(modal.form);
                         return;
                     };
-                    let value = field_generator.generate(&params);
-                    if modal.form.set_focused_value(&mut state.root, value.clone()) {
-                        // The generator is opened from the Input level, so the
-                        // focused text lives in the scratch buffer. Keep it in
-                        // step with the generated value: the revealed field
-                        // shows it immediately and the later `commit_input` is
-                        // a no-op instead of restoring the old password.
-                        if modal.form.focus == FormFocus::Input
-                            && let Some(scratch) = modal.form.scratch.as_mut()
-                        {
-                            scratch.text = value;
-                            scratch.cursor = scratch.text.len();
-                        }
-                        modal.form.cursor = modal.form.active_len(&state.root);
-                        commit_form_change(state, &mut modal.form);
-                    }
+                    let value = generator::generate_password(&params);
+                    write_generated_value(state, &mut modal.form, value);
                     state.generator = params;
                     state.mode = InputMode::Form(modal.form);
                 }
@@ -2039,9 +2071,10 @@ fn form_hint(form: &FormState, root: &Node) -> &'static str {
         FormPending::None => {}
     }
     if form.focus == FormFocus::Input {
-        return match form.focused_field_type(root) {
-            Some(FieldType::Password) => texts::HINT_FORM_PASSWORD_INPUT,
-            _ => texts::HINT_FORM_INPUT,
+        return if FieldGenerator::for_field(form.focused_field_type(root)).is_some() {
+            texts::HINT_FORM_GENERATOR_INPUT
+        } else {
+            texts::HINT_FORM_INPUT
         };
     }
     match form.current_row(root) {
@@ -3260,7 +3293,7 @@ mod tests {
     }
 
     #[test]
-    fn form_hint_selects_the_password_variant_only_while_editing_a_password() {
+    fn form_hint_offers_the_generator_only_while_editing_a_generated_field() {
         let mut password = editing_state_with_password("old");
         select_row(&mut password, 1);
         assert_eq!(
@@ -3270,7 +3303,7 @@ mod tests {
         handle_form(key(KeyCode::Char('i')), &mut password);
         assert_eq!(
             form_hint(form_of(&password), &password.root),
-            texts::HINT_FORM_PASSWORD_INPUT
+            texts::HINT_FORM_GENERATOR_INPUT
         );
 
         let mut login = editing_state_with_fields();
@@ -3282,11 +3315,117 @@ mod tests {
         handle_form(key(KeyCode::Char('i')), &mut login);
         assert_eq!(
             form_hint(form_of(&login), &login.root),
+            texts::HINT_FORM_GENERATOR_INPUT
+        );
+
+        // A Custom field has no generator, so its hint stays the plain input
+        // one at the Input level.
+        let mut custom = editing_state();
+        custom.root.extra_fields.push(ExtraField {
+            field_type: FieldType::Custom("URL".to_string()),
+            value: String::new(),
+        });
+        let node = custom.root.clone();
+        custom.mode = InputMode::Form(FormState::new_edit(&node));
+        select_row(&mut custom, 1);
+        handle_form(key(KeyCode::Char('i')), &mut custom);
+        assert_eq!(
+            form_hint(form_of(&custom), &custom.root),
             texts::HINT_FORM_INPUT
         );
 
         let mut name = editing_state();
         select_row(&mut name, 0);
         assert_eq!(form_hint(form_of(&name), &name.root), texts::HINT_FORM);
+    }
+
+    fn open_login_row(state: &mut TreeState) {
+        select_row(state, 1);
+        if form_of(state).focus == FormFocus::Nav {
+            handle_form(key(KeyCode::Char('i')), state);
+        }
+    }
+
+    fn generate_login_word(state: &mut TreeState) {
+        assert_eq!(form_of(state).focus, FormFocus::Input);
+        handle_form(ctrl(KeyCode::Char('g')), state);
+    }
+
+    #[test]
+    fn ctrl_g_on_a_login_row_writes_a_word_without_opening_a_modal() {
+        let mut state = editing_state_with_fields();
+        open_login_row(&mut state);
+        generate_login_word(&mut state);
+
+        // No modal: the form is still active at the Input level.
+        assert!(matches!(state.mode, InputMode::Form(_)));
+        assert_eq!(form_of(&state).focus, FormFocus::Input);
+
+        let value = values(&state)[0];
+        assert_ne!(value, "a");
+        assert!(value.chars().all(|c| c.is_ascii_lowercase()));
+        assert!((4..=13).contains(&value.chars().count()));
+        assert!(state.modified);
+        // The scratch buffer mirrors the value, so leaving Input keeps it.
+        assert_eq!(
+            form_of(&state).scratch.as_ref().map(|s| s.text.as_str()),
+            Some(value)
+        );
+        let generated = value.to_string();
+        handle_form(key(KeyCode::Esc), &mut state);
+        assert_eq!(values(&state)[0], generated);
+    }
+
+    #[test]
+    fn login_reroll_coalesces_into_one_undo_step() {
+        let mut state = editing_state_with_fields();
+        open_login_row(&mut state);
+        generate_login_word(&mut state);
+        assert_eq!(form_of(&state).history.len(), 2);
+
+        generate_login_word(&mut state);
+        // The reroll replaced the previous generation instead of stacking.
+        assert_eq!(form_of(&state).history.len(), 2);
+        assert!(values(&state)[0].chars().all(|c| c.is_ascii_lowercase()));
+
+        // One undo restores the pre-generation value.
+        handle_form(key(KeyCode::Esc), &mut state);
+        handle_form(key(KeyCode::Char('u')), &mut state);
+        assert_eq!(values(&state)[0], "a");
+    }
+
+    #[test]
+    fn ctrl_g_outside_a_generated_field_is_a_noop() {
+        // Name row at the Input level.
+        let mut state = editing_state();
+        select_row(&mut state, 0);
+        handle_form(key(KeyCode::Char('i')), &mut state);
+        handle_form(ctrl(KeyCode::Char('g')), &mut state);
+        assert!(!state.modified);
+        assert_eq!(form_of(&state).history.len(), 1);
+
+        // A Login row at the Nav level: `Ctrl+G` is unbound there.
+        let mut state = editing_state_with_fields();
+        select_row(&mut state, 1);
+        handle_form(ctrl(KeyCode::Char('g')), &mut state);
+        assert_eq!(form_of(&state).focus, FormFocus::Nav);
+        assert!(!state.modified);
+        assert_eq!(values(&state)[0], "a");
+    }
+
+    #[test]
+    fn password_reroll_also_coalesces_into_one_undo_step() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        press_generate(&mut state);
+        assert_eq!(form_of(&state).history.len(), 2);
+
+        open_generator(&mut state);
+        press_generate(&mut state);
+        assert_eq!(form_of(&state).history.len(), 2);
+
+        handle_form(key(KeyCode::Esc), &mut state);
+        handle_form(key(KeyCode::Char('u')), &mut state);
+        assert_eq!(password_value(&state), "old");
     }
 }
