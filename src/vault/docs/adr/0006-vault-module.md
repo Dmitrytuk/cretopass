@@ -41,7 +41,7 @@ to reason about.
 `ChangePwInput{current, new_pass, confirm, focused, show, error}`,
 `ExportSelectType{path}`, `ExportConfirm{path, format}`, `ExportDone{message}`.
 
-Password fields (`PassphraseInput`, `ChangePwInput`, `CreateSecretFile`) mask input by default; `Ctrl+S` toggles plaintext via the `show` flag. `CreateSecretFile` validates that passphrase and confirmation match (`MSG_PW_MISMATCH`) before writing.
+Password fields (`PassphraseInput`, `ChangePwInput`, `CreateSecretFile`) mask input by default; `Ctrl+S` toggles plaintext via the `show` flag. `CreateSecretFile` validates that passphrase and confirmation match (`MSG_PW_MISMATCH`) before writing. A successful create (`CreateSecretFile` or `ConfirmNoPassphrase`) clears the modal before launching the tree, so returning to home does not re-show the dialog.
 
 ## Configuration
 

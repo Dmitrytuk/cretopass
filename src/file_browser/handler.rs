@@ -93,7 +93,9 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
             state.focus = FocusTarget::List;
             return None;
         }
-        KeyCode::Esc => return Some(FileBrowserAction::Cancelled),
+        KeyCode::Esc if state.focus != FocusTarget::Rename => {
+            return Some(FileBrowserAction::Cancelled);
+        }
         KeyCode::Char('/') if !state.search_active && state.focus == FocusTarget::List => {
             state.search_active = true;
             return None;
@@ -632,6 +634,27 @@ mod tests {
         assert_eq!(state.focus, FocusTarget::List);
         // The draft is kept so the user can resume.
         assert_eq!(state.creating_name, "draft");
+    }
+
+    // ── Esc in Rename mode cancels the rename, not the browser ──
+
+    #[test]
+    fn test_esc_in_rename_cancels_rename_not_browser() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.focus = FocusTarget::Rename;
+        state.rename_name = "renamed.age".to_string();
+        state.rename_cursor = state.rename_name.len();
+        state.rename_target = "/tmp/original.age".to_string();
+
+        let result = handle_key(key(KeyCode::Esc), &mut state);
+
+        // The browser stays open; only the rename dialog is dismissed.
+        assert_eq!(result, None);
+        assert_eq!(state.focus, FocusTarget::List);
+        // Edits are discarded.
+        assert!(state.rename_name.is_empty());
+        assert_eq!(state.rename_cursor, 0);
+        assert!(state.rename_target.is_empty());
     }
 
     // ── Typing in Input mode ──

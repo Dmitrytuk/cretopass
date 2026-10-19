@@ -849,6 +849,7 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
                 }
                 Ok(node) => {
                     state.status = None;
+                    state.modal = None;
                     let pp_bytes = zeroize::Zeroizing::new(Vec::new());
                     let active_vault = ActiveVaultState {
                         path: Some(file_path.clone()),
@@ -1395,6 +1396,7 @@ fn handle_create_secret_file_key<B: Backend>(
                 }
                 Ok(node) => {
                     state.status = None;
+                    state.modal = None;
                     let pp_bytes = zeroize::Zeroizing::new(passphrase.into_bytes());
                     let active_vault = ActiveVaultState {
                         path: Some(file_path.clone()),

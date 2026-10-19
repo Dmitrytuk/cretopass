@@ -43,7 +43,7 @@ file listing UX to vault-specific modal logic, preventing reuse.
 | `n` | Prefix: `nn` → focus name input, `nN` → new folder (CreateFile mode) |
 | `N` | (CreateFile mode) second key of the `n` prefix → new folder |
 | `f` | Toggle filter: all files / `.pwd` only |
-| `Esc` | Cancel/close browser (in the name input: return to the list, keeping the draft) |
+| `Esc` | Cancel/close browser (in the name input: return to the list, keeping the draft; in the rename input: cancel the rename and discard edits, keeping the browser open) |
 
 ## Dependencies
 
