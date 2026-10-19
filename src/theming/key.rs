@@ -46,6 +46,11 @@ pub enum Action {
     SelectIndex(usize),
     ConfigDelete,
     ToggleSetting,
+    /// Toggles the focused item in the password-generator modal or its
+    /// symbol checklist.
+    Toggle,
+    /// Opens the password generator for the focused password field.
+    GeneratePassword,
     SaveConfig,
     /// Toggles plaintext display of a password field.
     ToggleShowPassword,
@@ -129,6 +134,12 @@ impl Action {
     /// `i`/`Enter` enter the input level, `j`/`k`/arrows/Tab move between
     /// fields, `u`/`r` undo/redo, `Esc` closes the form.
     pub fn from_form_nav(key: &KeyEvent) -> Self {
+        // Ctrl+G is the only Ctrl chord bound at the Nav level. It must be
+        // checked *before* the plain-char matches, which deliberately ignore
+        // modifiers (Ctrl+u/r/d/p/i/j keep their existing meanings).
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('g') {
+            return Self::GeneratePassword;
+        }
         match key.code {
             KeyCode::Char('j') | KeyCode::Down | KeyCode::Tab => Self::NextField,
             KeyCode::Char('k') | KeyCode::Up | KeyCode::BackTab => Self::PrevField,
@@ -138,6 +149,42 @@ impl Action {
             KeyCode::Delete => Self::DeleteChar,
             KeyCode::Char('d') => Self::Cut,
             KeyCode::Char('p') => Self::PasteStart,
+            KeyCode::Esc => Self::Cancel,
+            _ => Self::None,
+        }
+    }
+
+    /// Dispatch for the password-generator parameter modal.
+    ///
+    /// Rows are navigated with `j`/`k`/arrows/`Tab`; `Space` toggles all
+    /// symbols; `Enter` acts on the focused row; digits and `Backspace` edit the
+    /// length buffer (the handler ignores them unless the length row is
+    /// focused); `Esc` cancels.
+    pub fn from_generator(key: &KeyEvent) -> Self {
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down | KeyCode::Tab => Self::NavDown,
+            KeyCode::Char('k') | KeyCode::Up | KeyCode::BackTab => Self::NavUp,
+            KeyCode::Char(' ') => Self::Toggle,
+            KeyCode::Enter => Self::Confirm,
+            KeyCode::Esc => Self::Cancel,
+            KeyCode::Backspace => Self::Backspace,
+            KeyCode::Char(c) => Self::InsertChar(c),
+            _ => Self::None,
+        }
+    }
+
+    /// Dispatch for the per-symbol checklist opened from the generator modal.
+    ///
+    /// The checklist is a three-column grid: `h`/`l` (and Left/Right) move by
+    /// one cell, `j`/`k` (and Down/Up) move by one row. `Space`/`Enter` toggle
+    /// the focused symbol; `Esc` returns to the parameter modal.
+    pub fn from_symbol_checklist(key: &KeyEvent) -> Self {
+        match key.code {
+            KeyCode::Char('h') | KeyCode::Left => Self::NavLeft,
+            KeyCode::Char('l') | KeyCode::Right => Self::NavRight,
+            KeyCode::Char('j') | KeyCode::Down => Self::NavDown,
+            KeyCode::Char('k') | KeyCode::Up => Self::NavUp,
+            KeyCode::Char(' ') | KeyCode::Enter => Self::Toggle,
             KeyCode::Esc => Self::Cancel,
             _ => Self::None,
         }
@@ -638,6 +685,133 @@ mod tests {
         assert_eq!(
             Action::from_change_pw_input(&key(KeyCode::BackTab)),
             Action::PrevField
+        );
+    }
+
+    #[test]
+    fn from_form_nav_ctrl_g_opens_generator_and_plain_g_is_unbound() {
+        assert_eq!(
+            Action::from_form_nav(&ctrl(KeyCode::Char('g'))),
+            Action::GeneratePassword
+        );
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('g'))),
+            Action::None
+        );
+    }
+
+    #[test]
+    fn from_form_nav_ctrl_chords_keep_their_existing_meanings() {
+        assert_eq!(
+            Action::from_form_nav(&ctrl(KeyCode::Char('u'))),
+            Action::Undo
+        );
+        assert_eq!(
+            Action::from_form_nav(&ctrl(KeyCode::Char('r'))),
+            Action::Redo
+        );
+        assert_eq!(
+            Action::from_form_nav(&ctrl(KeyCode::Char('d'))),
+            Action::Cut
+        );
+        assert_eq!(
+            Action::from_form_nav(&ctrl(KeyCode::Char('p'))),
+            Action::PasteStart
+        );
+        assert_eq!(
+            Action::from_form_nav(&ctrl(KeyCode::Char('i'))),
+            Action::BeginInput
+        );
+        assert_eq!(
+            Action::from_form_nav(&ctrl(KeyCode::Char('j'))),
+            Action::NextField
+        );
+    }
+
+    #[test]
+    fn from_form_input_ctrl_g_inserts_a_literal_g() {
+        // The generator is Nav-only; at the Input level Ctrl+G is just text.
+        assert_eq!(
+            Action::from_form_input(&ctrl(KeyCode::Char('g'))),
+            Action::InsertChar('g')
+        );
+    }
+
+    #[test]
+    fn from_generator_navigates_toggles_and_edits_length() {
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::Char('j'))),
+            Action::NavDown
+        );
+        assert_eq!(Action::from_generator(&key(KeyCode::Tab)), Action::NavDown);
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::Char('k'))),
+            Action::NavUp
+        );
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::BackTab)),
+            Action::NavUp
+        );
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::Char(' '))),
+            Action::Toggle
+        );
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::Enter)),
+            Action::Confirm
+        );
+        assert_eq!(Action::from_generator(&key(KeyCode::Esc)), Action::Cancel);
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::Char('5'))),
+            Action::InsertChar('5')
+        );
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::Backspace)),
+            Action::Backspace
+        );
+    }
+
+    #[test]
+    fn from_symbol_checklist_is_a_grid_with_toggle_and_escape() {
+        assert_eq!(
+            Action::from_symbol_checklist(&key(KeyCode::Char('h'))),
+            Action::NavLeft
+        );
+        assert_eq!(
+            Action::from_symbol_checklist(&key(KeyCode::Left)),
+            Action::NavLeft
+        );
+        assert_eq!(
+            Action::from_symbol_checklist(&key(KeyCode::Char('l'))),
+            Action::NavRight
+        );
+        assert_eq!(
+            Action::from_symbol_checklist(&key(KeyCode::Right)),
+            Action::NavRight
+        );
+        assert_eq!(
+            Action::from_symbol_checklist(&key(KeyCode::Char('j'))),
+            Action::NavDown
+        );
+        assert_eq!(
+            Action::from_symbol_checklist(&key(KeyCode::Char('k'))),
+            Action::NavUp
+        );
+        assert_eq!(
+            Action::from_symbol_checklist(&key(KeyCode::Char(' '))),
+            Action::Toggle
+        );
+        assert_eq!(
+            Action::from_symbol_checklist(&key(KeyCode::Enter)),
+            Action::Toggle
+        );
+        assert_eq!(
+            Action::from_symbol_checklist(&key(KeyCode::Esc)),
+            Action::Cancel
+        );
+        assert_eq!(
+            Action::from_symbol_checklist(&key(KeyCode::Char('x'))),
+            Action::None
         );
     }
 }

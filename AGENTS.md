@@ -47,3 +47,6 @@ map and cross-module data flow.
 - [0007 — file_browser](./src/file_browser/docs/adr/0007-file-browser.md) — directory browser overlay
 - [0008 — CLI lifecycle commands](./docs/adr/0008-cli-lifecycle-commands.md) — `update`/`remove` architecture, self-managed installs, detached helpers
 - [0009 — CLI module](./src/cli/docs/adr/0009-cli-module.md) — `cli` module facade + sub-module layout (`detect`, `update`, `remove`)
+- [0010 — Asynchronous tree autosave](./docs/adr/0010-async-tree-autosave.md) — background writer, latest-wins snapshots, bounded exit flush
+- [0011 — Animated status spinner](./docs/adr/0011-animated-status-spinner.md) — busy glyph and title-bar status
+- [0012 — Password generator](./docs/adr/0012-password-generator.md) — strict-leaf generator, `Ctrl+G` modal, symbol checklist, session settings

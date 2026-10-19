@@ -13,6 +13,7 @@ use crate::file_browser::{
     self, FileBrowserAction, FileBrowserMode, FileBrowserSession, FileBrowserState,
 };
 use crate::file_handling;
+use crate::generator::PasswordParams;
 use crate::theming::Action;
 use crate::theming::{ElementStyle, Icon, SPINNER_TICK, Spinner, Status, texts};
 use crate::tree::app_tree::SaveTarget;
@@ -83,6 +84,9 @@ pub struct HomeState {
     spinner: Spinner,
     /// In-memory memory shared by successive file browser openings.
     browser_session: FileBrowserSession,
+    /// Password-generator settings for this app run; seeded into each opened
+    /// tree and copied back when it exits. Never persisted to the config file.
+    pub generator: PasswordParams,
 }
 
 impl Default for HomeState {
@@ -119,6 +123,7 @@ impl HomeState {
             status: None,
             spinner: Spinner::default(),
             browser_session: FileBrowserSession::default(),
+            generator: PasswordParams::default(),
         }
     }
 
@@ -313,6 +318,7 @@ fn handle_home_key<B: Backend>(
                         let passphrase = active_vault.passphrase.clone();
                         let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
                         tree_state.display_full_path = state.config.display_full_path;
+                        tree_state.generator = state.generator;
                         run_tree(
                             state,
                             terminal,
@@ -382,6 +388,7 @@ fn reopen_tree<B: Backend>(state: &mut HomeState, terminal: &mut Terminal<B>) ->
             .map(|path| SaveTarget { path, passphrase });
         let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
         tree_state.display_full_path = state.config.display_full_path;
+        tree_state.generator = state.generator;
         run_tree(state, terminal, tree_state, target)?;
     }
     Ok(())
@@ -408,6 +415,9 @@ fn run_tree<B: Backend>(
     }
     let result = crate::tree::app_tree::run_app(terminal, &mut tree_state, target);
 
+    // Generator settings are per app run: copy them back even when the tree
+    // exits with an error or the user discards changes.
+    state.generator = tree_state.generator;
     let return_to_menu = tree_state.return_to_menu;
     match result {
         Ok(ExitStatus::Saved) => {
@@ -939,6 +949,7 @@ fn handle_change_pw_input_key<B: Backend>(
                                 new_pass_bytes.clone();
                             let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
                             tree_state.display_full_path = state.config.display_full_path;
+                            tree_state.generator = state.generator;
                             run_tree(
                                 state,
                                 terminal,
@@ -994,6 +1005,7 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
 
                     let mut tree_state = crate::tree::widget::TreeState::new(node);
                     tree_state.display_full_path = state.config.display_full_path;
+                    tree_state.generator = state.generator;
                     run_tree(
                         state,
                         terminal,
@@ -1302,6 +1314,7 @@ fn handle_passphrase_key<B: Backend>(
 
                         let mut tree_state = crate::tree::widget::TreeState::new(node);
                         tree_state.display_full_path = state.config.display_full_path;
+                        tree_state.generator = state.generator;
                         run_tree(
                             state,
                             terminal,
@@ -1547,6 +1560,7 @@ fn handle_create_secret_file_key<B: Backend>(
 
                     let mut tree_state = crate::tree::widget::TreeState::new(node);
                     tree_state.display_full_path = state.config.display_full_path;
+                    tree_state.generator = state.generator;
                     run_tree(
                         state,
                         terminal,

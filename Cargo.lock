@@ -288,6 +288,7 @@ dependencies = [
  "crossterm",
  "futures-util",
  "lexopt",
+ "rand",
  "ratatui",
  "rkyv",
  "serde",

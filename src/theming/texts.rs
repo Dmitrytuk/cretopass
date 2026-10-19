@@ -8,6 +8,8 @@ pub const OVERLAY_ADD_NODE: &str = "Add Node";
 pub const OVERLAY_EDIT_NODE: &str = "Edit Node";
 pub const OVERLAY_SELECT_FIELD_TYPE: &str = " Select Field Type ";
 pub const OVERLAY_CUSTOM_FIELD_NAME: &str = " Custom Field Name ";
+pub const OVERLAY_GENERATE_PASSWORD: &str = " Generate Password ";
+pub const OVERLAY_SYMBOLS: &str = " Special Characters ";
 pub const OVERLAY_CONFIRM_DELETE: &str = " Confirm Delete ";
 pub const OVERLAY_COPIED: &str = " Copied ";
 pub const OVERLAY_HELP: &str = " Help ";
@@ -66,6 +68,9 @@ pub const LABEL_CONFIRM_PW: &str = "Confirm new password";
 pub const LABEL_PASSPHRASE_CONFIRM: &str = "Confirm passphrase";
 pub const LABEL_RENAME: &str = " Rename: ";
 pub const LABEL_NAME_INLINE: &str = " Name: ";
+pub const LABEL_GENERATOR_LENGTH: &str = "Length: ";
+pub const LABEL_GENERATOR_SYMBOLS: &str = "Special characters";
+pub const LABEL_GENERATOR_RUN: &str = "Generate";
 
 pub const MODE_NORMAL: &str = "NORMAL";
 pub const MODE_SEARCH: &str = "SEARCH";
@@ -77,6 +82,8 @@ pub const MODE_EDIT: &str = "EDIT";
 pub const MODE_ADD: &str = "ADD";
 pub const MODE_FIELD_TYPE: &str = "FIELD TYPE";
 pub const MODE_CUSTOM_NAME: &str = "CUSTOM NAME";
+pub const MODE_GENERATOR: &str = "GENERATE";
+pub const MODE_SYMBOLS: &str = "SYMBOLS";
 pub const MODE_CONFIRM: &str = "CONFIRM";
 pub const MODE_HELP: &str = "HELP";
 
@@ -97,6 +104,12 @@ pub const HINT_FORM_EXTRA: &str =
     "j/k:field  i/Enter:edit  dd:cut  p:paste  Del:delete  u/r:undo/redo  Esc:close";
 pub const HINT_FORM_ADD: &str = "Enter:add field  Esc:cancel";
 pub const HINT_FORM_INPUT: &str = "Type to edit  Enter/Esc:done";
+pub const HINT_FORM_PASSWORD_EXTRA: &str =
+    "j/k:field  i/Enter:edit  ^G:generate  dd:cut  p:paste  Del:delete  u/r:undo/redo  Esc:close";
+pub const HINT_GENERATOR: &str =
+    "j/k:row  digits:length  Space:toggle all  Enter:select  Esc:cancel";
+pub const HINT_SYMBOLS: &str = "h/l/j/k:move  Space/Enter:toggle  Esc:done";
+pub const ERROR_GENERATOR_LENGTH: &str = "Length must be 4–128";
 pub const HINT_FIELD_CUT: &str = "d:cut field  Esc:cancel";
 pub const HINT_FIELD_PASTE: &str = "p:after  P:before  Esc:cancel";
 pub const HINT_SELECT_FIELD_TYPE: &str = "j/k:nav  1-9:select  Enter:choose  Esc:cancel";

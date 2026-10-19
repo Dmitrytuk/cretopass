@@ -27,6 +27,12 @@ _Avoid_: Desc, Note
 
 **Password**: A FieldType storing a password value. Masked as `*****` when displayed, shown in plain text only while actively editing.
 
+**Generated password**: A Password value produced by the generator rather than typed. It is an ordinary committed change: undoable with `u`, masked like any other password, and autosaved. Generating over a non-empty value replaces it without confirmation.
+_Avoid_: random password, auto-password
+
+**Generator settings**: The last valid length and special-character selection used by the generator, remembered for the whole app run and never written to the configuration file. A fresh launch starts at 10 characters with all 17 symbols.
+_Avoid_: generator config, password defaults
+
 **Custom(name)**: A FieldType for arbitrary user-defined data (URL, API key, notes, etc.). The `name` is the user-chosen label.
 
 **Tree**: The main workspace where the node tree is navigated, searched, and edited. Entered from Home after opening a secret file.

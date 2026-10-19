@@ -19,6 +19,8 @@ pub enum ElementStyle {
     ModeAdd,
     ModeFieldType,
     ModeCustomName,
+    ModeGenerator,
+    ModeSymbols,
     ModeConfirmDelete,
     ModeHelp,
     StatusBarText,
@@ -27,6 +29,8 @@ pub enum ElementStyle {
     EditBlock,
     FieldTypeBlock,
     CustomNameBlock,
+    GeneratorBlock,
+    SymbolsBlock,
     ConfirmDeleteBlock,
     CopiedBlock,
     DetailBlock,
@@ -36,6 +40,8 @@ pub enum ElementStyle {
     ConfirmMessage,
     DismissHint,
     SearchText,
+    /// Inline error inside the password-generator modal.
+    GeneratorError,
 
     InvertedCursor,
     GrayHint,
@@ -122,6 +128,14 @@ impl ElementStyle {
                 .bg(Color::Blue)
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
+            Self::ModeGenerator => Style::default()
+                .bg(Color::Cyan)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+            Self::ModeSymbols => Style::default()
+                .bg(Color::Cyan)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
             Self::ModeConfirmDelete => Style::default()
                 .bg(Color::Red)
                 .fg(Color::White)
@@ -136,6 +150,8 @@ impl ElementStyle {
             Self::EditBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
             Self::FieldTypeBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
             Self::CustomNameBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
+            Self::GeneratorBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
+            Self::SymbolsBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
             Self::ConfirmDeleteBlock => Style::default().bg(Color::Black).fg(Color::Red),
             Self::CopiedBlock => Style::default().bg(Color::Black).fg(Color::Green),
             Self::DetailBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
@@ -147,6 +163,7 @@ impl ElementStyle {
             Self::ConfirmMessage => Style::default().fg(Color::White),
             Self::DismissHint => Style::default().fg(Color::DarkGray),
             Self::SearchText => Style::default().fg(Color::White),
+            Self::GeneratorError => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
 
             Self::InvertedCursor => Style::default().bg(Color::White).fg(Color::Black),
             Self::GrayHint => Style::default().fg(Color::DarkGray),
