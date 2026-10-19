@@ -8,5 +8,5 @@
 
 ## Relationships
 
-- **Vault → Secrets Tree**: Vault opens a Secret file, decrypts it, and hands the resulting Node tree to the Tree workspace. The Tree auto-saves mutations back through the Vault's master password.
+- **Vault → Secrets Tree**: Vault opens a Secret file, decrypts it, and hands the resulting Node tree to the Tree workspace. The Tree autosaves mutations in the background through the Vault's master password, and returns the final root when the user goes back to Home.
 - **Secrets Tree → Cursor**: Tree uses Cursor fields in Add and Edit forms for name, description, and ExtraField value editing.

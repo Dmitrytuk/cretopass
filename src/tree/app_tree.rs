@@ -5,63 +5,359 @@ use crate::cursor::{
     backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
     selected_span,
 };
-use crate::file_handling::save_tree;
+use crate::file_handling::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree};
 use crate::theming::Action;
 use crate::theming::{ElementStyle, Icon, texts};
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{
-    AddPosition, FormFocus, FormPending, FormRow, FormState, InputMode, TreeState, TreeWidget,
+    AddPosition, FormFocus, FormPending, FormRow, FormState, InputMode, SaveExit, SaveState,
+    TreeState, TreeWidget,
 };
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
+use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::{Terminal, backend::Backend};
+use tokio::sync::mpsc;
+use zeroize::Zeroizing;
 
-pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) -> io::Result<()> {
-    loop {
-        if state.quit {
-            break Ok(());
-        }
+/// The vault location and credential the autosave worker needs to persist a
+/// tree.
+///
+/// `path` and `passphrase` are always supplied together, so "path present,
+/// passphrase absent" cannot be represented. A tree without a save target (the
+/// read-only library demo) runs without autosave.
+pub struct SaveTarget {
+    /// Path of the secret file to write.
+    pub path: String,
+    /// Master password used to encrypt the file.
+    pub passphrase: Zeroizing<Vec<u8>>,
+}
 
+impl std::fmt::Debug for SaveTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SaveTarget")
+            .field("path", &self.path)
+            .field("passphrase", &"<redacted>")
+            .finish()
+    }
+}
+
+/// Outcome of a completed Tree session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitStatus {
+    /// The latest snapshot is on disk (or there was no autosave worker).
+    Saved,
+    /// The user chose to leave without persisting the latest changes.
+    Unsaved,
+}
+
+/// Runs the tree screen until the user quits or returns to the home screen.
+///
+/// Committed changes are handed to a background save worker built from
+/// `target`; `None` means a read-only tree (the library demo) with no autosave.
+/// On exit the function waits for the latest snapshot to be written. A failed
+/// flush parks an exit prompt so the user can retry, quit without saving (after
+/// confirmation), or stay; the returned [`ExitStatus`] reports which happened.
+///
+/// # Errors
+///
+/// Returns an I/O error when the terminal or event stream fails, or when the
+/// save worker cannot be started.
+pub fn run_app<B: Backend>(
+    terminal: &mut Terminal<B>,
+    state: &mut TreeState,
+    target: Option<SaveTarget>,
+) -> io::Result<ExitStatus> {
+    let runtime = save_runtime()?;
+    let (save_tx, mut save_rx) = mpsc::unbounded_channel::<SaveEvent>();
+    let mut autosave = start_autosave(target, save_tx)?;
+    let has_worker = autosave.is_some();
+
+    let mut submitted: u64 = 0;
+    let mut saved: u64 = 0;
+    let mut save_open = has_worker;
+
+    let status = runtime.block_on(async {
+        let mut events = EventStream::new();
         terminal.draw(|f| ui(f, state))?;
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
+        loop {
+            tokio::select! {
+                maybe_event = events.next() => {
+                    match maybe_event {
+                        Some(Ok(Event::Key(key))) => {
+                            if key.kind != KeyEventKind::Press {
+                                continue;
+                            }
+                            if state.save_exit != SaveExit::None
+                                || state.save_state.overlay_message().is_some()
+                            {
+                                match handle_save_overlay(key, state) {
+                                    OverlayAction::Discard => break Ok(ExitStatus::Unsaved),
+                                    // Retry: fall through so the exit branch re-runs.
+                                    OverlayAction::Retry => {}
+                                    OverlayAction::Stay => {
+                                        terminal.draw(|f| ui(f, state))?;
+                                        continue;
+                                    }
+                                }
+                            } else {
+                                dispatch_key(key, state);
 
-            match &state.mode {
-                InputMode::Normal => handle_normal(key, state),
-                InputMode::Search => handle_search(key, state),
-                InputMode::PendingCut => handle_pending_cut(key, state),
-                InputMode::PendingPaste => handle_pending_paste(key, state),
-                InputMode::PendingAdd => handle_pending_add(key, state),
-                InputMode::Form(_) => handle_form(key, state),
-                InputMode::SelectFieldType { .. } => handle_select_field_type(key, state),
-                InputMode::CustomFieldName { .. } => handle_custom_field_name(key, state),
-                InputMode::ConfirmDeleteField { .. } => handle_confirm_delete(key, state),
-                InputMode::Detail { .. } => handle_detail(key, state),
-                InputMode::ExportNodeSelect { .. } => handle_export_node_select(key, state),
-                InputMode::ExportNodeFormat { .. } => handle_export_node_format(key, state),
-                InputMode::Alert { .. } => handle_alert(key, state),
-                InputMode::Help => handle_help(key, state),
-            }
-
-            if state.modified {
-                state.status = Some(texts::STATUS_SAVING);
-                terminal.draw(|f| ui(f, state))?;
-                if let Some(ref p) = state.active_vault_path {
-                    state.modified = false;
-                    if let Err(e) = save_tree(&state.root, p, &state.active_vault_master_password) {
-                        eprintln!("Save failed: {e}");
+                                if state.modified {
+                                    state.modified = false;
+                                    if let Some(ref mut worker) = autosave {
+                                        submitted = worker.submit(state.root.clone());
+                                        state.save_state = SaveState::Saving;
+                                    }
+                                }
+                            }
+                        }
+                        Some(Ok(Event::Resize(_, _))) => {}
+                        Some(Ok(_)) => continue,
+                        Some(Err(e)) => return Err(e),
+                        None => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::UnexpectedEof,
+                                "terminal event stream ended",
+                            ));
+                        }
                     }
                 }
-                state.status = None;
+                event = save_rx.recv(), if save_open => {
+                    match event {
+                        Some(event) => {
+                            if event.result.is_ok() {
+                                saved = saved.max(event.generation);
+                            }
+                            if event.generation == submitted {
+                                state.save_state = match event.result {
+                                    Ok(()) => SaveState::Idle,
+                                    Err(error) => SaveState::Failed {
+                                        error,
+                                        acknowledged: false,
+                                    },
+                                };
+                            }
+                        }
+                        None => {
+                            save_open = false;
+                            if saved < submitted {
+                                state.save_state = SaveState::Failed {
+                                    error: SaveError::WorkerStopped,
+                                    acknowledged: false,
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+
+            if state.save_exit == SaveExit::None && (state.quit || state.return_to_menu) {
+                if let Some(ref mut worker) = autosave {
+                    let target =
+                        match exit_plan(state.modified, &state.save_state, saved, submitted) {
+                            ExitPlan::UpToDate => break Ok(ExitStatus::Saved),
+                            ExitPlan::Wait(generation) => generation,
+                            ExitPlan::ResubmitThenWait => {
+                                state.modified = false;
+                                worker.submit(state.root.clone())
+                            }
+                        };
+
+                    state.save_state = SaveState::Saving;
+                    terminal.draw(|f| ui(f, state))?;
+
+                    let flush = tokio::time::timeout(
+                        SAVE_TIMEOUT,
+                        wait_for_save(&mut save_rx, &mut saved, target),
+                    )
+                    .await;
+                    match flush {
+                        Ok(Ok(())) => break Ok(ExitStatus::Saved),
+                        Ok(Err(error)) => park_blocked(state, error),
+                        // The worker is still stuck; offer retry / force-quit.
+                        Err(_elapsed) => park_blocked(state, SaveError::WorkerStopped),
+                    }
+                } else {
+                    break Ok(ExitStatus::Saved);
+                }
+            }
+
+            terminal.draw(|f| ui(f, state))?;
+        }
+    })?;
+
+    if let Some(worker) = autosave {
+        match status {
+            // A force-quit may leave a save stuck; detach instead of waiting.
+            ExitStatus::Unsaved => worker.detach(),
+            ExitStatus::Saved => {
+                let _ = worker.shutdown(SAVE_TIMEOUT);
             }
         }
+    }
+
+    Ok(status)
+}
+
+/// Builds the current-thread runtime that drives the event loop.
+///
+/// The time driver must be enabled explicitly (it is off by default); the
+/// bounded exit flush relies on [`tokio::time::timeout`].
+///
+/// # Errors
+///
+/// Returns an error when the runtime cannot be built.
+fn save_runtime() -> io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+}
+
+/// What the exit path must do to make the vault durable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExitPlan {
+    /// Everything submitted has already been written.
+    UpToDate,
+    /// Wait for the snapshot with this generation.
+    Wait(u64),
+    /// Re-submit the current root, then wait for it.
+    ResubmitThenWait,
+}
+
+/// Decides how an exit request should make the vault durable.
+fn exit_plan(modified: bool, save_state: &SaveState, saved: u64, submitted: u64) -> ExitPlan {
+    if modified || save_state.has_failed() {
+        ExitPlan::ResubmitThenWait
+    } else if saved < submitted {
+        ExitPlan::Wait(submitted)
+    } else {
+        ExitPlan::UpToDate
+    }
+}
+
+/// What the save-error overlay did with a key press.
+enum OverlayAction {
+    /// The key was consumed; stay in the Tree.
+    Stay,
+    /// Re-attempt the exit flush on the next loop iteration.
+    Retry,
+    /// Leave the Tree without persisting the latest changes.
+    Discard,
+}
+
+/// Routes a key press while the save-error overlay is showing.
+fn handle_save_overlay(key: event::KeyEvent, state: &mut TreeState) -> OverlayAction {
+    match state.save_exit {
+        SaveExit::Blocked => {
+            let quit_requested = key.code == KeyCode::Char('q')
+                || (key.modifiers.contains(KeyModifiers::CONTROL)
+                    && key.code == KeyCode::Char('c'));
+            if key.code == KeyCode::Char('r') || key.code == KeyCode::Enter {
+                state.save_exit = SaveExit::None;
+                OverlayAction::Retry
+            } else if quit_requested {
+                state.save_exit = SaveExit::ConfirmDiscard;
+                OverlayAction::Stay
+            } else {
+                cancel_exit(state);
+                OverlayAction::Stay
+            }
+        }
+        SaveExit::ConfirmDiscard => {
+            if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')) {
+                OverlayAction::Discard
+            } else {
+                cancel_exit(state);
+                OverlayAction::Stay
+            }
+        }
+        SaveExit::None => {
+            state.save_state.acknowledge();
+            OverlayAction::Stay
+        }
+    }
+}
+
+/// Cancels a parked exit: stay in the Tree and dismiss the overlay.
+fn cancel_exit(state: &mut TreeState) {
+    state.quit = false;
+    state.return_to_menu = false;
+    state.save_exit = SaveExit::None;
+    state.save_state.acknowledge();
+}
+
+/// Parks a failed exit flush behind the retry / quit / stay overlay.
+fn park_blocked(state: &mut TreeState, error: SaveError) {
+    state.save_exit = SaveExit::Blocked;
+    state.save_state = SaveState::Failed {
+        error,
+        acknowledged: false,
+    };
+}
+
+/// Builds the background writer when the tree has a save target.
+fn start_autosave(
+    target: Option<SaveTarget>,
+    events: mpsc::UnboundedSender<SaveEvent>,
+) -> io::Result<Option<Autosave<Node>>> {
+    let Some(SaveTarget { path, passphrase }) = target else {
+        return Ok(None);
+    };
+
+    let save = move |root: &Node| save_tree(root, &path, &passphrase).map_err(SaveError::Failed);
+    let on_event = move |event| {
+        // The receiver is dropped when the tree screen closes; a late save
+        // notification is then expected and intentionally ignored.
+        let _ = events.send(event);
+    };
+
+    Autosave::spawn(save, on_event).map(Some)
+}
+
+/// Waits until the snapshot with `target` generation has been attempted.
+///
+/// Returns the result of that attempt. The caller owns the `SaveState`
+/// transition: on success the exit path is finished, so there is nothing left to
+/// update.
+async fn wait_for_save(
+    save_rx: &mut mpsc::UnboundedReceiver<SaveEvent>,
+    saved: &mut u64,
+    target: u64,
+) -> Result<(), SaveError> {
+    while let Some(event) = save_rx.recv().await {
+        if event.result.is_ok() {
+            *saved = (*saved).max(event.generation);
+        }
+        if event.generation == target {
+            return event.result;
+        }
+    }
+    Err(SaveError::WorkerStopped)
+}
+
+/// Dispatches a key event to the handler for the current input mode.
+fn dispatch_key(key: event::KeyEvent, state: &mut TreeState) {
+    match &state.mode {
+        InputMode::Normal => handle_normal(key, state),
+        InputMode::Search => handle_search(key, state),
+        InputMode::PendingCut => handle_pending_cut(key, state),
+        InputMode::PendingPaste => handle_pending_paste(key, state),
+        InputMode::PendingAdd => handle_pending_add(key, state),
+        InputMode::Form(_) => handle_form(key, state),
+        InputMode::SelectFieldType { .. } => handle_select_field_type(key, state),
+        InputMode::CustomFieldName { .. } => handle_custom_field_name(key, state),
+        InputMode::ConfirmDeleteField { .. } => handle_confirm_delete(key, state),
+        InputMode::Detail { .. } => handle_detail(key, state),
+        InputMode::ExportNodeSelect { .. } => handle_export_node_select(key, state),
+        InputMode::ExportNodeFormat { .. } => handle_export_node_format(key, state),
+        InputMode::Alert { .. } => handle_alert(key, state),
+        InputMode::Help => handle_help(key, state),
     }
 }
 
@@ -921,6 +1217,20 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
         }
         _ => {}
     }
+
+    match state.save_exit {
+        SaveExit::ConfirmDiscard => render_discard_confirm_overlay(frame, area),
+        _ => {
+            if let Some(message) = state.save_state.overlay_message() {
+                render_save_error_overlay(
+                    frame,
+                    area,
+                    &message,
+                    state.save_exit == SaveExit::Blocked,
+                );
+            }
+        }
+    }
 }
 
 fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
@@ -1188,6 +1498,94 @@ fn render_alert_overlay(frame: &mut Frame, area: Rect, message: &str) {
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(&block, overlay_area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+/// Renders the save-error overlay.
+///
+/// `blocked` selects the hint: an exit flush that failed offers retry /
+/// quit-without-saving actions; a background failure is dismissed by any key.
+fn render_save_error_overlay(frame: &mut Frame, area: Rect, message: &str, blocked: bool) {
+    let width = (area.width.saturating_mul(2) / 3).max(1);
+    let inner_width = width.saturating_sub(2).max(1) as usize;
+    // Approximate display width: non-ASCII characters are counted as two
+    // cells, covering CJK and most emoji. Include the leading space.
+    let display_width = message
+        .chars()
+        .map(|c| if c.is_ascii() { 1 } else { 2 })
+        .sum::<usize>()
+        .saturating_add(1);
+    let message_rows = display_width.div_ceil(inner_width).max(1) as u16;
+    let height = message_rows.saturating_add(4).min(area.height).max(1);
+
+    let overlay_area = Rect {
+        x: area.width.saturating_sub(width) / 2,
+        y: area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+
+    let block = Block::default()
+        .title(texts::OVERLAY_SAVE_ERROR)
+        .borders(Borders::ALL)
+        .style(ElementStyle::ConfirmDeleteBlock.style());
+
+    let hint = if blocked {
+        texts::HINT_SAVE_ERROR_BLOCKED
+    } else {
+        texts::HINT_DETAIL_ALERT
+    };
+
+    let lines = vec![
+        Line::from(Span::styled(
+            format!(" {}", message),
+            ElementStyle::ConfirmMessage.style(),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(hint, ElementStyle::DismissHint.style())),
+    ];
+
+    let inner = block.inner(overlay_area);
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(&block, overlay_area);
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
+/// Renders the "quit without saving?" confirmation overlay.
+fn render_discard_confirm_overlay(frame: &mut Frame, area: Rect) {
+    let overlay_area = Rect {
+        x: area.width / 6,
+        y: area.height / 2 - 2,
+        width: area.width * 2 / 3,
+        height: 5,
+    };
+
+    let block = Block::default()
+        .title(texts::OVERLAY_SAVE_ERROR)
+        .borders(Borders::ALL)
+        .style(ElementStyle::ConfirmDeleteBlock.style());
+
+    let lines = vec![
+        Line::from(Span::styled(
+            format!(" {}", texts::MSG_DISCARD_CONFIRM),
+            ElementStyle::ConfirmMessage.style(),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            texts::HINT_DISCARD_CONFIRM,
+            ElementStyle::DismissHint.style(),
+        )),
+    ];
+
+    let inner = block.inner(overlay_area);
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(&block, overlay_area);
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        inner,
+    );
 }
 
 fn make_overlay_area(area: Rect, extra_fields_len: usize, base_content: u16) -> Rect {
@@ -1554,6 +1952,13 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// A synthetic file error for tests that need a `SaveError::Failed`.
+    fn failed(message: &str) -> SaveError {
+        SaveError::Failed(crate::file_handling::FileHandlingError::Io(
+            io::Error::other(message),
+        ))
     }
 
     fn editing_state() -> TreeState {
@@ -2004,5 +2409,154 @@ mod tests {
             }
             other => panic!("expected Detail mode, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn start_autosave_without_a_target_returns_none() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        assert!(start_autosave(None, tx).unwrap().is_none());
+    }
+
+    #[test]
+    fn runtime_supports_bounded_timeouts() {
+        let runtime = save_runtime().unwrap();
+        let timed_out = runtime.block_on(async {
+            tokio::time::timeout(
+                std::time::Duration::from_millis(1),
+                std::future::pending::<()>(),
+            )
+            .await
+        });
+
+        assert!(timed_out.is_err());
+    }
+
+    #[test]
+    fn exit_plan_resubmits_after_a_failed_save() {
+        let save_state = SaveState::Failed {
+            error: failed("disk full"),
+            acknowledged: false,
+        };
+        assert_eq!(
+            exit_plan(false, &save_state, 1, 2),
+            ExitPlan::ResubmitThenWait
+        );
+    }
+
+    #[test]
+    fn exit_plan_waits_for_an_in_flight_snapshot() {
+        assert_eq!(
+            exit_plan(false, &SaveState::Saving, 1, 2),
+            ExitPlan::Wait(2)
+        );
+    }
+
+    #[test]
+    fn exit_plan_is_up_to_date_when_everything_is_written() {
+        assert_eq!(exit_plan(false, &SaveState::Idle, 2, 2), ExitPlan::UpToDate);
+    }
+
+    #[test]
+    fn exit_plan_resubmits_when_a_commit_is_unsubmitted() {
+        assert_eq!(
+            exit_plan(true, &SaveState::Idle, 2, 2),
+            ExitPlan::ResubmitThenWait
+        );
+    }
+
+    #[test]
+    fn blocked_overlay_retries_and_keeps_the_exit_request() {
+        let mut state = TreeState::new(Node::new("Root"));
+        state.save_exit = SaveExit::Blocked;
+        state.quit = true;
+
+        let action = handle_save_overlay(key(KeyCode::Char('r')), &mut state);
+
+        assert!(matches!(action, OverlayAction::Retry));
+        assert_eq!(state.save_exit, SaveExit::None);
+        assert!(state.quit);
+    }
+
+    #[test]
+    fn blocked_overlay_confirms_then_discards() {
+        let mut state = TreeState::new(Node::new("Root"));
+        state.save_exit = SaveExit::Blocked;
+        state.return_to_menu = true;
+
+        let action = handle_save_overlay(key(KeyCode::Char('q')), &mut state);
+        assert!(matches!(action, OverlayAction::Stay));
+        assert_eq!(state.save_exit, SaveExit::ConfirmDiscard);
+
+        let action = handle_save_overlay(key(KeyCode::Char('y')), &mut state);
+        assert!(matches!(action, OverlayAction::Discard));
+        assert!(state.return_to_menu);
+    }
+
+    #[test]
+    fn blocked_overlay_other_key_cancels_the_exit() {
+        let mut state = TreeState::new(Node::new("Root"));
+        state.save_exit = SaveExit::Blocked;
+        state.quit = true;
+
+        let action = handle_save_overlay(key(KeyCode::Char('x')), &mut state);
+
+        assert!(matches!(action, OverlayAction::Stay));
+        assert_eq!(state.save_exit, SaveExit::None);
+        assert!(!state.quit);
+    }
+
+    #[tokio::test]
+    async fn wait_for_save_reports_the_target_generation() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut saved = 0;
+
+        tx.send(SaveEvent {
+            generation: 1,
+            result: Ok(()),
+        })
+        .unwrap();
+        tx.send(SaveEvent {
+            generation: 3,
+            result: Ok(()),
+        })
+        .unwrap();
+
+        let result = wait_for_save(&mut rx, &mut saved, 3).await;
+
+        assert!(result.is_ok());
+        assert_eq!(saved, 3);
+    }
+
+    #[tokio::test]
+    async fn wait_for_save_keeps_the_last_successful_generation_on_error() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut saved = 0;
+
+        tx.send(SaveEvent {
+            generation: 1,
+            result: Ok(()),
+        })
+        .unwrap();
+        tx.send(SaveEvent {
+            generation: 2,
+            result: Err(failed("disk full")),
+        })
+        .unwrap();
+
+        let result = wait_for_save(&mut rx, &mut saved, 2).await;
+
+        assert!(matches!(result, Err(SaveError::Failed(_))));
+        assert_eq!(saved, 1);
+    }
+
+    #[tokio::test]
+    async fn wait_for_save_detects_a_stopped_worker() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        drop(tx);
+        let mut saved = 0;
+
+        let result = wait_for_save(&mut rx, &mut saved, 1).await;
+
+        assert!(matches!(result, Err(SaveError::WorkerStopped)));
     }
 }

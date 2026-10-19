@@ -17,14 +17,14 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 | File | Responsibility |
 |------|---------------|
 | `node.rs` | `Node` struct (id, name, children, extra_fields), `ExtraField`, `FieldType` enum, legacy-`description` migration, recursive `find`/`find_mut`/`contains`, wire-label helpers for import/export |
-| `widget.rs` | `TreeState` (root, expanded set, selected index, visible list, mode, vault path/passphrase, modified flag, cut buffer, search state), `VisibleNode`, `InputMode` enum, `FormState` + undo/redo history, `TreeWidget::render()` DFS flat-list, all tree mutation operations |
-| `app_tree.rs` | `run_app()` event loop, key handlers per `InputMode`, overlay rendering (search bar, detail, edit/add forms, help, export, confirm dialogs, alerts, status bar), clipboard integration |
+| `widget.rs` | `TreeState` (root, expanded set, selected index, visible list, mode, vault path, modified flag, `SaveState`, `SaveExit`, cut buffer, search state), `VisibleNode`, `InputMode` enum, `FormState` + undo/redo history, `TreeWidget::render()` DFS flat-list, all tree mutation operations |
+| `app_tree.rs` | `run_app()` async event loop (`EventStream` + `tokio::select!`), key handlers per `InputMode`, autosave submission, bounded exit flush with the force-quit escape hatch, overlay rendering (search bar, detail, edit/add forms, help, export, confirm dialogs, save errors, status bar), clipboard integration |
 
 ## Data model
 
 - **Node**: `{id: Uuid, name, extra_fields: Vec<ExtraField>, children: Vec<Node>}`
 - **ExtraField**: `{field_type: Login | Password | Custom(String), value: String}`
-- **TreeState**: owns root `Node`, `expanded: HashSet<Uuid>`, `selected: usize` (flat-list index), `cut_buffer: Option<Node>`, `mode: InputMode`, `active_vault_path`, `active_vault_master_password` (Zeroizing), `modified: bool`
+- **TreeState**: owns root `Node`, `expanded: HashSet<Uuid>`, `selected: usize` (flat-list index), `cut_buffer: Option<Node>`, `mode: InputMode`, `active_vault_path`, `modified: bool`, `save_state: SaveState`, `save_exit: SaveExit`
 
 ### Description as an ordinary ExtraField
 
@@ -161,10 +161,34 @@ parent row (`collapse_or_select_parent`).
 
 ## Autosave flow
 
-1. Mutation (add/edit/cut/paste) sets `TreeState.modified = true`.
-2. Next event-loop tick: if `active_vault_path.is_some()`, call `file_handling::save_tree()`.
-3. Status bar shows "Saving..." during the save.
-4. Quit (`q`) or return-to-home (`H`) does explicit save before transitioning.
+1. A mutation (add/edit/cut/paste/undo/redo) commits directly into the root and
+   sets `TreeState.modified = true`.
+2. Before the next draw, the event loop clones the root and submits it to the
+   `file_handling::Autosave` worker, receiving a generation number. `modified`
+   is then cleared: it means "not yet submitted", not "not yet written".
+3. The worker serializes saves on one thread. A submission made while a save is
+   running replaces any still-waiting snapshot; the newest root therefore wins
+   and a burst of edits costs at most one extra save.
+4. The title bar shows "Saving..." (amber) from submission until the event for
+   the latest generation arrives. On failure it shows "Save failed" (red), driven
+   by `TreeState.save_state: SaveState`; an unacknowledged failure also draws an
+   overlay with the full error. Any key dismisses the overlay.
+5. On quit (`q`) or return-to-home (`H`) the loop decides via the pure
+   `exit_plan` helper, retrying the final snapshot if the last attempt failed or
+   `modified` is set, then waiting for the latest generation. The wait is bounded
+   by `SAVE_TIMEOUT`; on failure or timeout the exit is parked in
+   `SaveExit::Blocked` and the user is offered retry (`r`/`Enter`) or an explicit
+   confirmed quit-without-saving (`q` → `[y/N]`), so a persistently failing save
+   can never trap them in the Tree. A force-quit returns `ExitStatus::Unsaved`,
+   which makes Home drop the active vault rather than overwrite the on-disk copy.
+   See [ADR 0010 — Asynchronous tree autosave](../../../../docs/adr/0010-async-tree-autosave.md#event-loop-contract)
+   for the full overlay state machine.
+
+The master passphrase and the vault path travel together in a
+`tree::app_tree::SaveTarget`; `run_app()` accepts it as an `Option<SaveTarget>`.
+`None` means a read-only tree (the library demo) and therefore no worker. See
+[ADR 0010 — Asynchronous tree autosave](../../../../docs/adr/0010-async-tree-autosave.md)
+for the worker contract and the latest-wins rationale.
 
 ## Edge cases
 
@@ -177,7 +201,8 @@ parent row (`collapse_or_select_parent`).
 
 - `uuid` 1.0 — node identity
 - `serde` 1 + `serde_json` 1 — serialization
-- `zeroize` — master passphrase in TreeState
-- `file_handling` — autosave, export
+- `zeroize` — passphrase ownership at the vault/tree boundary
+- `tokio` 1 (`rt`, `sync`, `macros`, `time`) + `futures-util` 0.3 — async input stream, save-event channel, bounded exit flush
+- `file_handling` — autosave worker, export
 - `cursor` — text editing helpers
 - `theming` — Action dispatch, strings, styles
