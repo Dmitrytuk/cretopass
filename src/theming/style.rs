@@ -4,11 +4,14 @@ use ratatui::style::{Color, Modifier, Style};
 pub enum ElementStyle {
     TreeBorder,
     TreeRow,
-    TreeRowSelected,
+    /// Selected row inside a list-style popup (Detail, field-type picker, …).
+    ListRowSelected,
     TreeRowMatched,
+    /// Focused row inside the Add/Edit form at the Nav level.
+    FormRowFocused,
     ModeNormal,
     ModeSearch,
-    ModeAwaitingDd,
+    ModePendingCut,
     ModePendingPaste,
     ModePendingAdd,
     ModeDetail,
@@ -17,7 +20,6 @@ pub enum ElementStyle {
     ModeFieldType,
     ModeCustomName,
     ModeConfirmDelete,
-    ModeDiscard,
     ModeHelp,
     StatusBarText,
     HelpBar,
@@ -27,7 +29,6 @@ pub enum ElementStyle {
     CustomNameBlock,
     ConfirmDeleteBlock,
     CopiedBlock,
-    DiscardBlock,
     DetailBlock,
     HelpBlock,
     HelpText,
@@ -35,8 +36,7 @@ pub enum ElementStyle {
     ConfirmMessage,
     DismissHint,
     SearchText,
-    AddButton,
-    AddButtonActive,
+
     InvertedCursor,
     GrayHint,
     StatusLoading,
@@ -53,9 +53,6 @@ pub enum ElementStyle {
     FbEmptyText,
     FbHintText,
     FbActiveSearch,
-    FbDeleteConfirm,
-    FbDeleteHint,
-    FbErrorBar,
     HomeSelected,
     HomeNormal,
     HomeBlockBorder,
@@ -81,8 +78,9 @@ impl ElementStyle {
         match self {
             Self::TreeBorder => Style::default().fg(Color::Cyan),
             Self::TreeRow => Style::default().fg(Color::White),
-            Self::TreeRowSelected => Style::default().bg(Color::DarkGray).fg(Color::White),
+            Self::ListRowSelected => Style::default().bg(Color::DarkGray).fg(Color::White),
             Self::TreeRowMatched => Style::default().bg(Color::DarkGray).fg(Color::White),
+            Self::FormRowFocused => Style::default().bg(Color::DarkGray).fg(Color::White),
             Self::ModeNormal => Style::default()
                 .bg(Color::DarkGray)
                 .fg(Color::White)
@@ -91,7 +89,7 @@ impl ElementStyle {
                 .bg(Color::Blue)
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
-            Self::ModeAwaitingDd => Style::default()
+            Self::ModePendingCut => Style::default()
                 .bg(Color::Red)
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
@@ -127,10 +125,6 @@ impl ElementStyle {
                 .bg(Color::Red)
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
-            Self::ModeDiscard => Style::default()
-                .bg(Color::Yellow)
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD),
             Self::ModeHelp => Style::default()
                 .bg(Color::Magenta)
                 .fg(Color::White)
@@ -143,7 +137,6 @@ impl ElementStyle {
             Self::CustomNameBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
             Self::ConfirmDeleteBlock => Style::default().bg(Color::Black).fg(Color::Red),
             Self::CopiedBlock => Style::default().bg(Color::Black).fg(Color::Green),
-            Self::DiscardBlock => Style::default().bg(Color::Black).fg(Color::Yellow),
             Self::DetailBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
             Self::HelpBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
             Self::HelpText => Style::default().fg(Color::White),
@@ -153,8 +146,7 @@ impl ElementStyle {
             Self::ConfirmMessage => Style::default().fg(Color::White),
             Self::DismissHint => Style::default().fg(Color::DarkGray),
             Self::SearchText => Style::default().fg(Color::White),
-            Self::AddButton => Style::default().fg(Color::White),
-            Self::AddButtonActive => Style::default().bg(Color::DarkGray).fg(Color::White),
+
             Self::InvertedCursor => Style::default().bg(Color::White).fg(Color::Black),
             Self::GrayHint => Style::default().fg(Color::DarkGray),
             Self::StatusLoading => Style::default().fg(Color::Green),
@@ -174,12 +166,6 @@ impl ElementStyle {
             Self::FbEmptyText => Style::default().fg(Color::DarkGray),
             Self::FbHintText => Style::default().fg(Color::DarkGray),
             Self::FbActiveSearch => Style::default().fg(Color::Yellow),
-            Self::FbDeleteConfirm => Style::default()
-                .bg(Color::Red)
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-            Self::FbDeleteHint => Style::default().bg(Color::Red).fg(Color::DarkGray),
-            Self::FbErrorBar => Style::default().bg(Color::Red).fg(Color::White),
             Self::HomeSelected => Style::default().bg(Color::DarkGray).fg(Color::White),
             Self::HomeNormal => Style::default().fg(Color::White),
             Self::HomeBlockBorder => Style::default().fg(Color::Cyan),

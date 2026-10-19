@@ -53,11 +53,8 @@ fn node_to_xml(node: &Node) -> String {
 fn write_xml_node(buf: &mut String, node: &Node, depth: usize) {
     let indent = "  ".repeat(depth);
     let name_esc = escape_xml(&node.name);
-    let desc_esc = escape_xml(&node.description);
 
-    buf.push_str(&format!(
-        "{indent}<node name=\"{name_esc}\" description=\"{desc_esc}\">\n"
-    ));
+    buf.push_str(&format!("{indent}<node name=\"{name_esc}\">\n"));
 
     buf.push_str(&format!("{}  <extra_fields>\n", indent));
     for ef in &node.extra_fields {
@@ -90,7 +87,7 @@ fn escape_xml(s: &str) -> String {
 }
 
 fn node_to_csv(node: &Node) -> String {
-    let mut buf = String::from("path,name,description,field_type,field_value\n");
+    let mut buf = String::from("path,name,field_type,field_value\n");
     write_csv_rows(&mut buf, node, String::new());
     buf
 }
@@ -104,23 +101,19 @@ fn write_csv_rows(buf: &mut String, node: &Node, parent_path: String) {
     };
 
     if node.extra_fields.is_empty() {
-        let desc = csv_escape(&node.description);
         buf.push_str(&format!(
-            "{},{},{},\n",
+            "{},{},,\n",
             csv_escape(&current_path),
             current_name,
-            desc,
         ));
     } else {
         for ef in &node.extra_fields {
-            let desc = csv_escape(&node.description);
             let ft = csv_escape(&ef.field_type.wire_label());
             let val = csv_escape(&ef.value);
             buf.push_str(&format!(
-                "{},{},{},{},{}\n",
+                "{},{},{},{}\n",
                 csv_escape(&current_path),
                 current_name,
-                desc,
                 ft,
                 val,
             ));
@@ -146,8 +139,9 @@ mod tests {
     use crate::tree::node::{ExtraField, FieldType};
 
     fn sample_node() -> Node {
-        let mut child = Node::new("Login", "My email login");
+        let mut child = Node::new("Login");
         child.extra_fields = vec![
+            ExtraField::description("My email login"),
             ExtraField {
                 field_type: FieldType::Login,
                 value: "user@example.com".to_string(),
@@ -157,11 +151,14 @@ mod tests {
                 value: "s3cret".to_string(),
             },
         ];
-        let mut root = Node::with_children("Secrets", "My vault", vec![child]);
-        root.extra_fields = vec![ExtraField {
-            field_type: FieldType::Custom("Note".to_string()),
-            value: "top level note".to_string(),
-        }];
+        let mut root = Node::with_children("Secrets", vec![child]);
+        root.extra_fields = vec![
+            ExtraField::description("My vault"),
+            ExtraField {
+                field_type: FieldType::Custom("Note".to_string()),
+                value: "top level note".to_string(),
+            },
+        ];
         root
     }
 
@@ -200,7 +197,8 @@ mod tests {
 
     #[test]
     fn test_export_json_content() {
-        let node = Node::new("Root", "desc");
+        let mut node = Node::new("Root");
+        node.extra_fields.push(ExtraField::description("desc"));
         let result = export_tree(&node, "/tmp/test_content.age", ExportFormat::Json);
         assert!(result.is_ok());
         let path = result.unwrap();
@@ -212,7 +210,8 @@ mod tests {
 
     #[test]
     fn test_export_xml_content() {
-        let node = Node::new("Root", "desc");
+        let mut node = Node::new("Root");
+        node.extra_fields.push(ExtraField::description("desc"));
         let result = export_tree(&node, "/tmp/test_content.age", ExportFormat::Xml);
         assert!(result.is_ok());
         let path = result.unwrap();
@@ -225,7 +224,8 @@ mod tests {
 
     #[test]
     fn test_export_csv_content() {
-        let node = Node::new("Root", "desc");
+        let mut node = Node::new("Root");
+        node.extra_fields.push(ExtraField::description("desc"));
         let result = export_tree(&node, "/tmp/test_content.age", ExportFormat::Csv);
         assert!(result.is_ok());
         let path = result.unwrap();
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_export_extension_stripped() {
-        let node = Node::new("X", "");
+        let node = Node::new("X");
         let result = export_tree(&node, "/tmp/my_vault.age", ExportFormat::Json);
         assert!(result.is_ok());
         let path = result.unwrap();
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn test_export_no_extension() {
-        let node = Node::new("X", "");
+        let node = Node::new("X");
         let result = export_tree(&node, "/tmp/my_vault", ExportFormat::Json);
         assert!(result.is_ok());
         let path = result.unwrap();
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn test_export_error_on_bad_path() {
-        let node = Node::new("X", "");
+        let node = Node::new("X");
         let result = export_tree(
             &node,
             "/nonexistent_dir_xyz123/test.age",

@@ -58,7 +58,7 @@ pub fn insert_char_at(text: &mut String, cursor: &mut usize, c: char) {
 
 pub fn selected_style(is_selected: bool) -> Style {
     if is_selected {
-        ElementStyle::TreeRowSelected.style()
+        ElementStyle::ListRowSelected.style()
     } else {
         ElementStyle::TreeRow.style()
     }

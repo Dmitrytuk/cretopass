@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- File browser can switch to mounted disks through a `Locations` overlay
+  (`D`), toggle hidden dot-entries with `Ctrl+h` (or `Ctrl+Backspace`), and
+  remember the last browsed directory and hidden setting for the rest of the
+  session.
+
+### Changed
+
+- The file browser list and `Locations` overlay keep a 3-row margin around the
+  cursor (`scrolloff`-style). The cursor moves within that margin before the
+  viewport scrolls in either direction, instead of staying pinned to the bottom
+  edge.
+- Node descriptions are now ordinary extra fields (a `Custom` field labelled
+  "Description") instead of a dedicated `description` slot. Descriptions can be
+  added, reordered, duplicated and deleted like any other field, and a node has
+  no description until one is added via `+ Add Field`. Existing vaults and
+  exported XML/CSV/JSON files are migrated automatically on load: a non-empty
+  legacy description becomes a leading Description field. The serialized format
+  no longer contains a `description` key.
+
+### Fixed
+
+- A cut node is now removed from the cut buffer after a successful paste, so it
+  can no longer be pasted repeatedly. Previously each paste inserted a clone
+  that kept the original node id, letting multiple nodes share one id.
+- `p` in the tree no longer enters the paste prefix mode when the cut buffer is
+  empty; the key is a no-op until something is cut.
+
 ## [0.1.0] - 2026-10-13
 
 ### Added

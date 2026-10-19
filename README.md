@@ -37,10 +37,11 @@ cretopass remove   # delete the app and all its artifacts
 ## Core functionality
 
 - **Secret tree** — organize secrets as a tree of nodes. Every node has a
-  name, a description, and optional extra fields:
+  name and optional extra fields:
   - `Login`
   - `Password` (masked as `*****` unless actively edited)
-  - `Custom` fields with arbitrary names
+  - `Custom` fields with arbitrary names, including the conventional
+    `Description` field
 - **Vim-style navigation** — `j`/`k` to move, `h`/`l` to collapse/expand,
   `Enter` to toggle, `/` to search.
 - **Search & filter** — live search with highlights; ancestors of matches

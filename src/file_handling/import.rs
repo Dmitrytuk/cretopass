@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::file_handling::FileHandlingError;
-use crate::tree::node::{ExtraField, FieldType, Node};
+use crate::tree::node::{ExtraField, FieldType, Node, migrate_legacy_description};
 use uuid::Uuid;
 
 /// Maximum size (in bytes) of a file accepted for import.
@@ -98,8 +98,7 @@ fn parse_xml_node(input: &str, depth: usize) -> Result<(Node, &str), FileHandlin
     let description = attrs
         .iter()
         .find(|(k, _)| k == "description")
-        .map(|(_, v)| unescape_xml(v))
-        .ok_or_else(|| FileHandlingError::ImportError("missing description attribute".into()))?;
+        .map(|(_, v)| unescape_xml(v));
 
     let mut remaining = input[tag_end + 1..].trim_start();
 
@@ -119,7 +118,8 @@ fn parse_xml_node(input: &str, depth: usize) -> Result<(Node, &str), FileHandlin
     let ef_content = &remaining[..ef_end];
     remaining = &remaining[ef_end + ef_close.len()..];
 
-    let extra_fields = parse_xml_fields(ef_content)?;
+    let mut extra_fields = parse_xml_fields(ef_content)?;
+    migrate_legacy_description(description.as_deref(), &mut extra_fields);
 
     remaining = remaining.trim_start();
 
@@ -149,7 +149,6 @@ fn parse_xml_node(input: &str, depth: usize) -> Result<(Node, &str), FileHandlin
     let node = Node {
         id: Uuid::new_v4(),
         name,
-        description,
         extra_fields,
         children,
     };
@@ -230,8 +229,47 @@ fn unescape_xml(s: &str) -> String {
 #[derive(Default)]
 struct PathData {
     name: String,
-    description: String,
+    description: Option<String>,
     extra_fields: Vec<ExtraField>,
+}
+
+/// Maps a CSV header to the column indices of the fields we understand.
+///
+/// Both the legacy layout (`path,name,description,field_type,field_value`) and
+/// the current one (`path,name,field_type,field_value`) are accepted; the
+/// legacy `description` column, when present and non-empty, is migrated into a
+/// Description extra field.
+struct CsvColumns {
+    path: usize,
+    name: usize,
+    description: Option<usize>,
+    field_type: Option<usize>,
+    field_value: Option<usize>,
+}
+
+impl CsvColumns {
+    /// Default positional layout used when the file has no recognisable header.
+    fn positional(header: &[String]) -> Self {
+        if let Some(desc) = header.iter().position(|c| c == "description") {
+            let field_type = header.iter().position(|c| c == "field_type");
+            let field_value = header.iter().position(|c| c == "field_value");
+            Self {
+                path: header.iter().position(|c| c == "path").unwrap_or(0),
+                name: header.iter().position(|c| c == "name").unwrap_or(1),
+                description: Some(desc),
+                field_type,
+                field_value,
+            }
+        } else {
+            Self {
+                path: 0,
+                name: 1,
+                description: None,
+                field_type: Some(2),
+                field_value: Some(3),
+            }
+        }
+    }
 }
 
 fn import_csv(data: &str) -> Result<Node, FileHandlingError> {
@@ -240,10 +278,16 @@ fn import_csv(data: &str) -> Result<Node, FileHandlingError> {
         return Err(FileHandlingError::ImportError("empty CSV file".into()));
     }
 
-    // Skip header (tolerate a trailing CR from CRLF line endings).
-    if lines[0].trim_end_matches('\r').trim().starts_with("path,") {
-        lines.remove(0);
+    // Parse the header to locate columns (tolerate a trailing CR).
+    let header_line = lines[0].trim_end_matches('\r').trim();
+    if !header_line.starts_with("path,") {
+        return Err(FileHandlingError::ImportError(
+            "CSV file is missing its header row".into(),
+        ));
     }
+    let header = parse_csv_line(header_line);
+    let cols = CsvColumns::positional(&header);
+    lines.remove(0);
 
     if lines.is_empty() {
         return Err(FileHandlingError::ImportError(
@@ -251,16 +295,13 @@ fn import_csv(data: &str) -> Result<Node, FileHandlingError> {
         ));
     }
 
-    // Parse all rows
-    struct Row {
-        path: String,
-        name: String,
-        description: String,
-        field_type: Option<String>,
-        field_value: String,
-    }
+    let get = |fields: &[String], idx: Option<usize>| -> Option<String> {
+        idx.and_then(|i| fields.get(i)).cloned()
+    };
 
-    let mut rows: Vec<Row> = Vec::new();
+    // Group by path: collect all extra fields per path
+    // Use a map to track insertion order
+    let mut path_map: Vec<(String, PathData)> = Vec::new();
     for line in &lines {
         // Strip a trailing CR left by CRLF line endings.
         let trimmed = line.trim_end_matches('\r').trim();
@@ -268,58 +309,37 @@ fn import_csv(data: &str) -> Result<Node, FileHandlingError> {
             continue;
         }
         let fields = parse_csv_line(trimmed);
-        if fields.len() < 4 {
+        if fields.len() <= cols.path || fields.len() <= cols.name {
             return Err(FileHandlingError::ImportError(format!(
                 "CSV row has too few fields: {trimmed}"
             )));
         }
-        let field_type = if fields.len() >= 5 && !fields[3].is_empty() {
-            Some(fields[3].clone())
-        } else {
-            None
-        };
-        let field_value = if fields.len() >= 5 {
-            fields[4].clone()
-        } else {
-            String::new()
-        };
+        let path = fields[cols.path].clone();
+        let name = fields[cols.name].clone();
+        let description = get(&fields, cols.description).filter(|d| !d.is_empty());
+        let field_type = get(&fields, cols.field_type).filter(|ft| !ft.is_empty());
+        let field_value = get(&fields, cols.field_value).unwrap_or_default();
 
-        rows.push(Row {
-            path: fields[0].clone(),
-            name: fields[1].clone(),
-            description: fields[2].clone(),
-            field_type,
-            field_value,
-        });
-    }
-
-    // Group by path: collect all extra fields per path
-    // Use a map to track insertion order
-    let mut path_map: Vec<(String, PathData)> = Vec::new();
-    for row in &rows {
-        let path = &row.path;
-        if let Some((_, data)) = path_map.iter_mut().find(|(p, _)| p == path) {
-            if let Some(ref ft) = row.field_type {
-                let field_type = FieldType::from_wire_label(ft);
+        if let Some((_, data)) = path_map.iter_mut().find(|(p, _)| *p == path) {
+            if let Some(ft) = field_type {
                 data.extra_fields.push(ExtraField {
-                    field_type,
-                    value: row.field_value.clone(),
+                    field_type: FieldType::from_wire_label(&ft),
+                    value: field_value,
                 });
             }
         } else {
             let mut extra_fields = Vec::new();
-            if let Some(ref ft) = row.field_type {
-                let field_type = FieldType::from_wire_label(ft);
+            if let Some(ft) = field_type {
                 extra_fields.push(ExtraField {
-                    field_type,
-                    value: row.field_value.clone(),
+                    field_type: FieldType::from_wire_label(&ft),
+                    value: field_value,
                 });
             }
             path_map.push((
-                path.clone(),
+                path,
                 PathData {
-                    name: row.name.clone(),
-                    description: row.description.clone(),
+                    name,
+                    description,
                     extra_fields,
                 },
             ));
@@ -336,17 +356,18 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
     struct TreeNode {
         key: String,
         name: String,
-        description: String,
+        description: Option<String>,
         extra_fields: Vec<ExtraField>,
         children: Vec<TreeNode>,
     }
 
     fn into_node(tree: TreeNode) -> Node {
+        let mut extra_fields = tree.extra_fields;
+        migrate_legacy_description(tree.description.as_deref(), &mut extra_fields);
         Node {
             id: Uuid::new_v4(),
             name: tree.name,
-            description: tree.description,
-            extra_fields: tree.extra_fields,
+            extra_fields,
             children: tree.children.into_iter().map(into_node).collect(),
         }
     }
@@ -391,7 +412,7 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
                     description: if is_last {
                         data.description.clone()
                     } else {
-                        String::new()
+                        None
                     },
                     extra_fields: if is_last {
                         data.extra_fields.clone()
@@ -416,7 +437,6 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
         Ok(Node {
             id: Uuid::new_v4(),
             name: "Imported".to_string(),
-            description: String::new(),
             extra_fields: Vec::new(),
             children,
         })
@@ -500,8 +520,9 @@ mod tests {
     }
 
     fn sample_node() -> Node {
-        let mut child = Node::new("Login", "My email login");
+        let mut child = Node::new("Login");
         child.extra_fields = vec![
+            ExtraField::description("My email login"),
             ExtraField {
                 field_type: FieldType::Login,
                 value: "user@example.com".to_string(),
@@ -511,21 +532,30 @@ mod tests {
                 value: "s3cret".to_string(),
             },
         ];
-        let mut key = Node::new("Key", "private key path");
-        key.extra_fields = vec![ExtraField {
-            field_type: FieldType::Password,
-            value: "encrypted-key".to_string(),
-        }];
-        let mut server = Node::with_children("Server", "SSH config", vec![key]);
-        server.extra_fields = vec![ExtraField {
-            field_type: FieldType::Custom("Custom:Host".to_string()),
-            value: "example.com".to_string(),
-        }];
-        let mut root = Node::with_children("Secrets", "My vault", vec![child, server]);
-        root.extra_fields = vec![ExtraField {
-            field_type: FieldType::Custom("Note".to_string()),
-            value: "top level note".to_string(),
-        }];
+        let mut key = Node::new("Key");
+        key.extra_fields = vec![
+            ExtraField::description("private key path"),
+            ExtraField {
+                field_type: FieldType::Password,
+                value: "encrypted-key".to_string(),
+            },
+        ];
+        let mut server = Node::with_children("Server", vec![key]);
+        server.extra_fields = vec![
+            ExtraField::description("SSH config"),
+            ExtraField {
+                field_type: FieldType::Custom("Custom:Host".to_string()),
+                value: "example.com".to_string(),
+            },
+        ];
+        let mut root = Node::with_children("Secrets", vec![child, server]);
+        root.extra_fields = vec![
+            ExtraField::description("My vault"),
+            ExtraField {
+                field_type: FieldType::Custom("Note".to_string()),
+                value: "top level note".to_string(),
+            },
+        ];
         root
     }
 
@@ -536,36 +566,40 @@ mod tests {
         let imported = import_json(&json).unwrap();
         // IDs are regenerated, so compare structure
         assert_eq!(imported.name, original.name);
-        assert_eq!(imported.description, original.description);
         assert_eq!(imported.extra_fields.len(), original.extra_fields.len());
         assert_eq!(imported.children.len(), original.children.len());
         // Check extra field values
-        assert_eq!(imported.extra_fields[0].value, "top level note");
+        assert_eq!(imported.extra_fields[0].value, "My vault");
+        assert_eq!(imported.extra_fields[1].value, "top level note");
     }
 
     #[test]
     fn test_import_xml() {
         let imported = import_xml(sample_xml()).unwrap();
         assert_eq!(imported.name, "Secrets");
-        assert_eq!(imported.description, "My vault");
-        assert_eq!(imported.extra_fields.len(), 1);
-        assert_eq!(imported.extra_fields[0].value, "top level note");
+        // The legacy description attribute migrates to a leading extra field.
+        assert_eq!(imported.extra_fields.len(), 2);
+        assert_eq!(imported.extra_fields[0].field_type.label(), "Description");
+        assert_eq!(imported.extra_fields[0].value, "My vault");
+        assert_eq!(imported.extra_fields[1].value, "top level note");
         assert_eq!(imported.children.len(), 2);
 
         let login = &imported.children[0];
         assert_eq!(login.name, "Login");
-        assert_eq!(login.extra_fields.len(), 2);
-        assert_eq!(login.extra_fields[0].value, "user@example.com");
-        assert_eq!(login.extra_fields[1].value, "s3cret");
-        assert!(matches!(login.extra_fields[0].field_type, FieldType::Login));
+        assert_eq!(login.extra_fields.len(), 3);
+        assert_eq!(login.extra_fields[0].value, "My email login");
+        assert_eq!(login.extra_fields[1].value, "user@example.com");
+        assert_eq!(login.extra_fields[2].value, "s3cret");
+        assert!(matches!(login.extra_fields[1].field_type, FieldType::Login));
         assert!(matches!(
-            login.extra_fields[1].field_type,
+            login.extra_fields[2].field_type,
             FieldType::Password
         ));
 
         let server = &imported.children[1];
         assert_eq!(server.name, "Server");
-        assert_eq!(server.extra_fields[0].value, "example.com");
+        assert_eq!(server.extra_fields[0].value, "SSH config");
+        assert_eq!(server.extra_fields[1].value, "example.com");
         assert_eq!(server.children.len(), 1);
         assert_eq!(server.children[0].name, "Key");
     }
@@ -574,13 +608,16 @@ mod tests {
     fn test_import_csv() {
         let imported = import_csv(sample_csv()).unwrap();
         assert_eq!(imported.name, "Secrets");
-        assert_eq!(imported.description, "My vault");
+        // The legacy description column migrates to a leading extra field.
+        assert_eq!(imported.extra_fields[0].field_type.label(), "Description");
+        assert_eq!(imported.extra_fields[0].value, "My vault");
         assert_eq!(imported.children.len(), 2);
 
         let login = &imported.children[0];
         assert_eq!(login.name, "Login");
-        assert_eq!(login.extra_fields.len(), 2);
-        assert_eq!(login.extra_fields[0].value, "user@example.com");
+        assert_eq!(login.extra_fields.len(), 3);
+        assert_eq!(login.extra_fields[0].value, "My email login");
+        assert_eq!(login.extra_fields[1].value, "user@example.com");
 
         let server = &imported.children[1];
         assert_eq!(server.name, "Server");
@@ -589,8 +626,21 @@ mod tests {
     }
 
     #[test]
+    fn test_import_csv_current_header_without_description() {
+        let data = "path,name,field_type,field_value\n\
+                    Root,Root,, \n\
+                    Root > Child,Child,Login,user";
+        let node = import_csv(data).unwrap();
+        assert_eq!(node.name, "Root");
+        assert_eq!(node.children.len(), 1);
+        assert_eq!(node.children[0].extra_fields.len(), 1);
+        assert_eq!(node.children[0].extra_fields[0].value, "user");
+        assert_eq!(node.children[0].extra_fields[0].field_type.label(), "Login");
+    }
+
+    #[test]
     fn test_import_csv_invalid_short_row() {
-        let data = "path,name,desc,ft,fv\nfoo,bar";
+        let data = "path,name,field_type,field_value\nonlypath";
         let result = import_csv(data);
         assert!(result.is_err());
     }
@@ -611,8 +661,32 @@ mod tests {
 </node>"#;
         let node = import_xml(xml).unwrap();
         assert_eq!(node.name, "A & B");
-        assert_eq!(node.description, "x < y");
-        assert_eq!(node.extra_fields[0].value, "a\"b");
+        assert_eq!(node.extra_fields[0].value, "x < y");
+        assert_eq!(node.extra_fields[1].value, "a\"b");
+    }
+
+    #[test]
+    fn test_import_xml_without_description_has_no_field() {
+        let xml = r#"<?xml version="1.0"?>
+<node name="NoDesc">
+  <extra_fields>
+    <field type="Login" value="u"/>
+  </extra_fields>
+</node>"#;
+        let node = import_xml(xml).unwrap();
+        assert_eq!(node.extra_fields.len(), 1);
+        assert_eq!(node.extra_fields[0].value, "u");
+    }
+
+    #[test]
+    fn test_import_xml_empty_description_has_no_field() {
+        let xml = r#"<?xml version="1.0"?>
+<node name="EmptyDesc" description="">
+  <extra_fields>
+  </extra_fields>
+</node>"#;
+        let node = import_xml(xml).unwrap();
+        assert!(node.extra_fields.is_empty());
     }
 
     #[test]
@@ -625,7 +699,8 @@ mod tests {
         let node = import_xml(xml).unwrap();
         assert_eq!(node.name, "Leaf");
         assert!(node.children.is_empty());
-        assert!(node.extra_fields.is_empty());
+        assert_eq!(node.extra_fields.len(), 1); // migrated description
+        assert_eq!(node.extra_fields[0].value, "no children");
     }
 
     #[test]
@@ -714,7 +789,8 @@ mod tests {
         let node = import_xml(xml).unwrap();
         assert_eq!(node.name, "Empty");
         assert_eq!(node.children.len(), 1);
-        assert!(node.children[0].extra_fields.is_empty());
+        assert_eq!(node.children[0].extra_fields.len(), 1); // migrated description
+        assert_eq!(node.children[0].extra_fields[0].value, "leaf");
     }
 
     #[test]
@@ -724,8 +800,8 @@ mod tests {
                      Root,Root,desc,,,\n";
         let node = import_csv(data).unwrap();
         assert_eq!(node.name, "Root");
-        assert_eq!(node.description, "desc");
-        assert!(node.extra_fields.is_empty());
+        assert_eq!(node.extra_fields.len(), 1); // migrated description
+        assert_eq!(node.extra_fields[0].value, "desc");
     }
 
     #[test]
@@ -737,6 +813,7 @@ mod tests {
         assert_eq!(node.name, "Imported");
         assert_eq!(node.children.len(), 2);
         assert_eq!(node.children[0].name, "Alpha");
+        assert_eq!(node.children[0].extra_fields[0].value, "A");
         assert_eq!(node.children[1].name, "Beta");
     }
 
@@ -747,9 +824,11 @@ mod tests {
 "Root > Child","Child","desc",Login,"va,lue"""#;
         let node = import_csv(data).unwrap();
         assert_eq!(node.name, "Name with, comma");
-        assert_eq!(node.description, "Desc with \" quote");
+        assert_eq!(node.extra_fields[0].value, "Desc with \" quote");
         assert_eq!(node.children.len(), 1);
-        assert_eq!(node.children[0].extra_fields[0].value, "va,lue\"");
+        assert_eq!(node.children[0].extra_fields.len(), 2);
+        assert_eq!(node.children[0].extra_fields[0].value, "desc");
+        assert_eq!(node.children[0].extra_fields[1].value, "va,lue\"");
     }
 
     // ── End-to-end roundtrip tests ──
@@ -765,8 +844,14 @@ mod tests {
 
     fn assert_nodes_match(original: &Node, imported: &Node) {
         assert_eq!(original.name, imported.name);
-        assert_eq!(original.description, imported.description);
         assert_eq!(original.extra_fields.len(), imported.extra_fields.len());
+        for (a, b) in original
+            .extra_fields
+            .iter()
+            .zip(imported.extra_fields.iter())
+        {
+            assert_eq!(a.value, b.value);
+        }
         assert_eq!(original.children.len(), imported.children.len());
         for (a, b) in original.children.iter().zip(imported.children.iter()) {
             assert_nodes_match(a, b);
@@ -775,15 +860,17 @@ mod tests {
 
     #[test]
     fn test_xml_roundtrip_simple() {
-        let original = Node::new("Test", "simple roundtrip");
+        let mut original = Node::new("Test");
+        original.extra_fields = vec![ExtraField::description("simple roundtrip")];
         let imported = roundtrip_node(&original);
         assert_nodes_match(&original, &imported);
     }
 
     #[test]
     fn test_xml_roundtrip_nested() {
-        let mut child = Node::new("Login", "My login");
+        let mut child = Node::new("Login");
         child.extra_fields = vec![
+            ExtraField::description("My login"),
             ExtraField {
                 field_type: FieldType::Login,
                 value: "user".to_string(),
@@ -793,18 +880,19 @@ mod tests {
                 value: "pass".to_string(),
             },
         ];
-        let original = Node::with_children("Root", "Vault", vec![child]);
+        let original = Node::with_children("Root", vec![child]);
         let imported = roundtrip_node(&original);
         assert_nodes_match(&original, &imported);
-        assert_eq!(imported.children[0].extra_fields.len(), 2);
-        assert_eq!(imported.children[0].extra_fields[0].value, "user");
+        assert_eq!(imported.children[0].extra_fields.len(), 3);
+        assert_eq!(imported.children[0].extra_fields[1].value, "user");
     }
 
     #[test]
     fn test_xml_roundtrip_deeply_nested() {
-        let leaf = Node::new("Leaf", "deep");
-        let mid = Node::with_children("Middle", "mid", vec![leaf]);
-        let original = Node::with_children("Root", "root", vec![mid]);
+        let leaf = Node::new("Leaf");
+        let mid = Node::with_children("Middle", vec![leaf]);
+        let mut original = Node::with_children("Root", vec![mid]);
+        original.extra_fields = vec![ExtraField::description("root")];
         let imported = roundtrip_node(&original);
         assert_nodes_match(&original, &imported);
         assert_eq!(imported.children[0].children[0].name, "Leaf");
@@ -812,19 +900,23 @@ mod tests {
 
     #[test]
     fn test_xml_roundtrip_special_chars() {
-        let mut original = Node::new("A & B <C>", r#"description "with" quotes'apos"#);
-        original.extra_fields = vec![ExtraField {
-            field_type: FieldType::Custom("<tag>".to_string()),
-            value: "a&b".to_string(),
-        }];
+        let mut original = Node::new("A & B <C>");
+        original.extra_fields = vec![
+            ExtraField::description(r#"description "with" quotes'apos"#),
+            ExtraField {
+                field_type: FieldType::Custom("<tag>".to_string()),
+                value: "a&b".to_string(),
+            },
+        ];
         let imported = roundtrip_node(&original);
         assert_nodes_match(&original, &imported);
     }
 
     #[test]
     fn test_csv_roundtrip() {
-        let mut child = Node::new("Login", "My login");
+        let mut child = Node::new("Login");
         child.extra_fields = vec![
+            ExtraField::description("My login"),
             ExtraField {
                 field_type: FieldType::Login,
                 value: "user".to_string(),
@@ -834,7 +926,7 @@ mod tests {
                 value: "pass".to_string(),
             },
         ];
-        let original = Node::with_children("Root", "Vault", vec![child]);
+        let original = Node::with_children("Root", vec![child]);
 
         let csv_path = format!("/tmp/roundtrip_csv_{}.csv", uuid::Uuid::new_v4());
         export_tree(&original, &csv_path, ExportFormat::Csv).unwrap();
@@ -846,8 +938,9 @@ mod tests {
 
     #[test]
     fn test_csv_roundtrip_multiple_extra_fields() {
-        let mut child = Node::new("Entry", "Login creds");
+        let mut child = Node::new("Entry");
         child.extra_fields = vec![
+            ExtraField::description("Login creds"),
             ExtraField {
                 field_type: FieldType::Login,
                 value: "admin".to_string(),
@@ -861,7 +954,7 @@ mod tests {
                 value: "https://example.com".to_string(),
             },
         ];
-        let original = Node::with_children("Secrets", "", vec![child]);
+        let original = Node::with_children("Secrets", vec![child]);
 
         let csv_path = format!("/tmp/roundtrip_csv2_{}.csv", uuid::Uuid::new_v4());
         export_tree(&original, &csv_path, ExportFormat::Csv).unwrap();
@@ -869,17 +962,15 @@ mod tests {
         let _ = std::fs::remove_file(&csv_path);
 
         assert_nodes_match(&original, &imported);
-        assert_eq!(imported.children[0].extra_fields.len(), 3);
-        assert_eq!(imported.children[0].extra_fields[0].value, "admin");
+        assert_eq!(imported.children[0].extra_fields.len(), 4);
+        assert_eq!(imported.children[0].extra_fields[1].value, "admin");
     }
 
     #[test]
     fn test_json_roundtrip_via_import_tree() {
-        let original = Node::with_children(
-            "Root",
-            "desc",
-            vec![Node::new("Child1", "leaf1"), Node::new("Child2", "leaf2")],
-        );
+        let mut original =
+            Node::with_children("Root", vec![Node::new("Child1"), Node::new("Child2")]);
+        original.extra_fields = vec![ExtraField::description("desc")];
         let json_path = format!("/tmp/roundtrip_json_{}.json", uuid::Uuid::new_v4());
         export_tree(&original, &json_path, ExportFormat::Json).unwrap();
         let imported = import_tree(&json_path).unwrap();

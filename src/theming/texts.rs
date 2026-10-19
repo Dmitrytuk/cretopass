@@ -9,12 +9,12 @@ pub const OVERLAY_EDIT_NODE: &str = "Edit Node";
 pub const OVERLAY_SELECT_FIELD_TYPE: &str = " Select Field Type ";
 pub const OVERLAY_CUSTOM_FIELD_NAME: &str = " Custom Field Name ";
 pub const OVERLAY_CONFIRM_DELETE: &str = " Confirm Delete ";
-pub const OVERLAY_UNSAVED_CHANGES: &str = " Unsaved Changes ";
 pub const OVERLAY_COPIED: &str = " Copied ";
 pub const OVERLAY_HELP: &str = " Help ";
 
 pub const CONFIG_TITLE: &str = " Configuration ";
 pub const HOME_CHANGE_PASSWORD: &str = " Change Password ";
+pub const HOME_CREATE_SECRET: &str = " Create Secret File ";
 pub const HOME_NO_PASSPHRASE: &str = " No Passphrase ";
 pub const HOME_ENTER_PASSPHRASE: &str = " Enter Passphrase ";
 pub const HOME_ALERT: &str = " Alert ";
@@ -24,6 +24,12 @@ pub const HOME_DELETE_CONFIRM: &str = " Confirm Delete ";
 pub const BROWSER_OPEN: &str = " Open File ";
 pub const BROWSER_CREATE: &str = " Create New Secret File ";
 pub const BROWSER_IMPORT: &str = " Import File ";
+pub const OVERLAY_NEW_FILE: &str = " New File ";
+pub const OVERLAY_RENAME: &str = " Rename ";
+pub const OVERLAY_LOCATIONS: &str = " Locations ";
+pub const LOCATION_HOME: &str = "Home";
+pub const LOCATION_USB: &str = "[USB]";
+pub const LOCATION_READ_ONLY: &str = "[RO]";
 
 pub const MENU_ITEMS: &[&str] = &[
     "Open secret file",
@@ -37,7 +43,8 @@ pub const MENU_ITEMS: &[&str] = &[
 pub const SETTING_FULL_PATH: &str = "Display full path in title bar";
 pub const SETTING_LAST_FILE: &str = "Start with last file";
 
-pub const FIELD_TYPE_ITEMS: [&str; 3] = ["1. Login", "2. Password", "3. Custom Field"];
+pub const FIELD_ITEM_CUSTOM: &str = "Custom Field";
+pub const FIELD_ITEM_DESC: &str = "Description";
 
 pub const EXPORT_SELECT_TITLE: &str = " Select Export Format ";
 pub const EXPORT_CONFIRM_TITLE: &str = " Confirm Export ";
@@ -49,18 +56,19 @@ pub const PROMPT_EXPORT_CONFIRM_START: &str = "Are you sure you want to export a
 pub const PROMPT_EXPORT_CONFIRM_END: &str = "?";
 
 pub const LABEL_NAME: &str = "Name: ";
-pub const LABEL_DESC: &str = "Desc: ";
 pub const LABEL_PASSPHRASE: &str = "Passphrase: ";
+pub const LABEL_PASSPHRASE_FIELD: &str = "Passphrase";
 pub const LABEL_FILE: &str = "File: ";
 pub const LABEL_CURRENT_PW: &str = "Current password";
 pub const LABEL_NEW_PW: &str = "New password";
 pub const LABEL_CONFIRM_PW: &str = "Confirm new password";
+pub const LABEL_PASSPHRASE_CONFIRM: &str = "Confirm passphrase";
 pub const LABEL_RENAME: &str = " Rename: ";
 pub const LABEL_NAME_INLINE: &str = " Name: ";
 
 pub const MODE_NORMAL: &str = "NORMAL";
 pub const MODE_SEARCH: &str = "SEARCH";
-pub const MODE_AWAIT_DD: &str = "AWAIT DD";
+pub const MODE_PENDING_CUT: &str = "CUT";
 pub const MODE_PASTE: &str = "PASTE";
 pub const MODE_PENDING_ADD: &str = "ADD";
 pub const MODE_DETAIL: &str = "DETAIL";
@@ -69,7 +77,6 @@ pub const MODE_ADD: &str = "ADD";
 pub const MODE_FIELD_TYPE: &str = "FIELD TYPE";
 pub const MODE_CUSTOM_NAME: &str = "CUSTOM NAME";
 pub const MODE_CONFIRM: &str = "CONFIRM";
-pub const MODE_DISCARD: &str = "DISCARD?";
 pub const MODE_HELP: &str = "HELP";
 
 pub const STATUS_LOADING: &str = "Loading...";
@@ -78,25 +85,29 @@ pub const STATUS_HOME_LABEL: &str = " HOME ";
 
 pub const HINT_TREE: &str = "H:home  /:search  ?:help  q:quit";
 pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
-pub const HINT_AWAIT_DD: &str = "Press d again to cut";
+pub const HINT_PENDING_CUT: &str = "d:cut  Esc:cancel";
 pub const HINT_PASTE: &str = "p:after  P:before  l/→:child  Esc:cancel";
 pub const HINT_PENDING_ADD: &str = "a:after  A:before  l/→:child  Esc:cancel";
-pub const HINT_DETAIL: &str = "j/k:navigate  Enter:copy  i:edit  Esc:close";
+pub const HINT_DETAIL: &str = "j/k/Tab:navigate  c/y:copy  i/Enter:edit  Esc:close";
 pub const HINT_DETAIL_ALERT: &str = "Press any key to continue";
-pub const HINT_FORM: &str = "Tab:switch  Enter:save  Esc:cancel";
-pub const HINT_FORM_EXTRA: &str = "Tab:switch  Del:delete  Enter:save  Esc:cancel";
-pub const HINT_FORM_ADD: &str = "Tab:switch  Enter:add field  Esc:cancel";
-pub const HINT_SELECT_FIELD_TYPE: &str = "j/k:nav  1/2/3:select  Enter:choose  Esc:cancel";
+pub const HINT_FORM: &str = "j/k:field  i/Enter:edit  u/r:undo/redo  Esc:close";
+pub const HINT_FORM_EXTRA: &str =
+    "j/k:field  i/Enter:edit  dd:cut  p:paste  Del:delete  u/r:undo/redo  Esc:close";
+pub const HINT_FORM_ADD: &str = "Enter:add field  Esc:cancel";
+pub const HINT_FORM_INPUT: &str = "Type to edit  Enter/Esc:done";
+pub const HINT_FIELD_CUT: &str = "d:cut field  Esc:cancel";
+pub const HINT_FIELD_PASTE: &str = "p:after  P:before  Esc:cancel";
+pub const HINT_SELECT_FIELD_TYPE: &str = "j/k:nav  1-9:select  Enter:choose  Esc:cancel";
 pub const HINT_CUSTOM_FIELD_NAME: &str = "Type name  Enter:done  Esc:cancel";
 pub const HINT_CONFIRM_DELETE: &str = "y:delete  n/Esc:cancel";
-pub const HINT_DISCARD: &str = "Enter/y:discard  n/Esc:continue editing";
-pub const HINT_HOME: &str = "j/k:navigate  Enter:select  d:<delete path> q:quit";
+pub const HINT_HOME: &str = "j/k:navigate  Enter/l:select  d:<delete path>  q:quit";
 pub const HINT_CONFIG: &str = "Space:toggle  Enter:save  Esc:cancel";
 pub const HINT_DELETE_CONFIRM: &str = "y/Enter:confirm  any key:cancel";
 pub const HINT_CHANGE_PW_CONFIRM: &str = "y/Enter:yes  any key:no";
-pub const HINT_CHANGE_PW_INPUT: &str = "Tab/↑/↓:switch  Enter:apply  Esc:cancel";
+pub const HINT_CHANGE_PW_INPUT: &str = "Tab/↑/↓:switch  Ctrl+S:show  Enter:apply  Esc:cancel";
 pub const HINT_NO_PASSPHRASE: &str = "y/Enter:yes  any key:no";
-pub const HINT_PASSPHRASE: &str = "Enter:confirm  Esc:cancel";
+pub const HINT_PASSPHRASE: &str = "Enter:confirm  Ctrl+S:show  Esc:cancel";
+pub const HINT_CREATE_SECRET: &str = "Tab/↑/↓:switch  Ctrl+S:show  Enter:create  Esc:cancel";
 pub const HINT_ALERT: &str = "Press any key to dismiss";
 pub const HINT_HELP: &str = "Press any key to close";
 
@@ -106,7 +117,7 @@ pub const TREE_HELP_KEY_BINDINGS: &[&str] = &[
     " h/←      Collapse, or jump to parent",
     " l/→      Expand (parent) or detail (leaf)",
     " Enter    Toggle expand (parent) or detail",
-    " i        Detail overlay for any node",
+    " i/Tab    Detail overlay for any node",
     " d d      Cut selected node",
     " p        Paste: p after, P before, l/→ child",
     " a        Add: a after, A before, l/→ child",
@@ -123,7 +134,6 @@ pub const PROMPT_DELETE_RECENT_START: &str = "Remove '";
 pub const PROMPT_DELETE_RECENT_END: &str = "' from recent files?";
 pub const PROMPT_CHANGE_PW: &str = "Are you sure you want to change the password?";
 pub const PROMPT_NO_PASSPHRASE: &str = "You are creating the secret file without password?";
-pub const PROMPT_DISCARD: &str = "Discard changes?";
 
 pub const OVERLAY_EXPORT_NODE: &str = " Export Node ";
 pub const OVERLAY_EXPORT_FORMAT: &str = " Select Export Format ";
@@ -139,6 +149,7 @@ pub const MSG_NOT_IMPLEMENTED: &str = "This feature is not yet implemented";
 pub const MSG_NO_OPEN_FILE: &str = "No file is currently open";
 pub const MSG_CANNOT_DELETE_OPEN: &str = "Cannot delete the currently open file from recent files";
 pub const MSG_CANNOT_WRITE: &str = "Cannot write to this path";
+pub const MSG_FILE_EXISTS: &str = "A file with that name already exists";
 pub const MSG_WRONG_PW: &str = "wrong password: ";
 pub const MSG_CURRENT_PW_INCORRECT: &str = "Current password is incorrect";
 pub const MSG_PW_EMPTY: &str = "New password fields cannot be empty";
@@ -154,7 +165,6 @@ pub const MSG_NO_FILE_PATH: &str = "No file path set";
 
 pub const EMPTY_DIR: &str = "  (empty directory)";
 pub const NO_MATCHING_FILES: &str = "  No matching files";
-pub const NO_DESCRIPTION: &str = "No description.";
 pub const ADD_FIELD_BUTTON: &str = "+ Add Field";
 pub const PASSWORD_MASK: &str = "*****";
 pub const COPY_CHECK: &str = "✓ Copied!";
@@ -169,12 +179,17 @@ pub const FB_FILTER_ALL: &str = "All";
 pub const FB_FILTER_PWDKEEPER: &str = "PwdKeeper";
 pub const FB_HINT_FILTER: &str = " [f] ";
 pub const FB_HINT_SEARCH: &str = " [/]search ";
-pub const FB_HINT_NEW_DIR: &str = " [n]new dir ";
+pub const FB_HINT_NEW: &str = " [n]new ";
 pub const FB_HINT_RENAME: &str = " [r]rename ";
 pub const FB_HINT_DELETE: &str = " [d]delete ";
-pub const FB_HINT_LIST: &str = " [N]list ";
-pub const FB_HINT_NAME: &str = " [N]name ";
+pub const FB_HINT_LIST: &str = " Esc:list ";
+pub const FB_PROMPT_NEW: &str = " n:new file  N:new folder  Esc:cancel ";
 pub const FB_HINT_CONFIRM: &str = "Enter:confirm";
 pub const FB_HINT_CANCEL: &str = "Esc:cancel";
 pub const FB_DELETE_CONFIRM_SUFFIX: &str = " (y/N) ";
+pub const FB_HINT_DISKS: &str = " [D]disks ";
+pub const FB_HINT_HIDDEN: &str = " [Ctrl+h]hidden ";
+pub const FB_HIDDEN_ON: &str = "Hidden: on";
+pub const FB_HIDDEN_OFF: &str = "Hidden: off";
+pub const FB_HINT_LOCATIONS: &str = " j/k:move  Enter:open  Esc:close ";
 pub const MSG_CANNOT_DELETE_FILE: &str = "Cannot delete the currently open file";

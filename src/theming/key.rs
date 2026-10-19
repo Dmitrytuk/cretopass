@@ -31,17 +31,24 @@ pub enum Action {
     ToggleSearch,
     ConfirmSearch,
     ClearSearch,
+    BeginInput,
+    ExitInput,
     NextField,
     PrevField,
     InsertChar(char),
     Backspace,
     DeleteChar,
-    SelectType1,
-    SelectType2,
-    SelectType3,
+    /// Reverts the form's node to the previous history snapshot.
+    Undo,
+    /// Re-applies the next history snapshot after an undo.
+    Redo,
+    /// Selects the item at the given index in a numbered list.
+    SelectIndex(usize),
     ConfigDelete,
     ToggleSetting,
     SaveConfig,
+    /// Toggles plaintext display of a password field.
+    ToggleShowPassword,
     Yes,
     No,
     ExportNode,
@@ -71,6 +78,7 @@ impl Action {
             KeyCode::Char('p') => Self::PasteStart,
             KeyCode::Char('a') => Self::AddStart,
             KeyCode::Char('i') => Self::OpenDetail,
+            KeyCode::Tab => Self::OpenDetail,
             KeyCode::Char('/') => Self::ToggleSearch,
             KeyCode::Char('q') => Self::Quit,
             KeyCode::Char('H') => Self::ReturnToMenu,
@@ -99,28 +107,66 @@ impl Action {
         }
     }
 
+    /// Dispatch for the `PendingCut` mode entered by the first `d` press.
+    pub fn from_pending_cut(key: &KeyEvent) -> Self {
+        match key.code {
+            KeyCode::Char('d') => Self::Cut,
+            _ => Self::Cancel,
+        }
+    }
+
     pub fn from_search(key: &KeyEvent) -> Self {
         match key.code {
             KeyCode::Enter => Self::ConfirmSearch,
             KeyCode::Esc => Self::ClearSearch,
-            KeyCode::Backspace | KeyCode::Delete => Self::Backspace,
+            KeyCode::Backspace => Self::Backspace,
             KeyCode::Char(c) => Self::InsertChar(c),
             _ => Self::None,
         }
     }
 
-    pub fn from_form(key: &KeyEvent) -> Self {
+    /// Dispatch for the form's navigation level. Text is not editable here;
+    /// `i`/`Enter` enter the input level, `j`/`k`/arrows/Tab move between
+    /// fields, `u`/`r` undo/redo, `Esc` closes the form.
+    pub fn from_form_nav(key: &KeyEvent) -> Self {
         match key.code {
-            KeyCode::Tab | KeyCode::Down => Self::NextField,
-            KeyCode::Up => Self::PrevField,
+            KeyCode::Char('j') | KeyCode::Down | KeyCode::Tab => Self::NextField,
+            KeyCode::Char('k') | KeyCode::Up | KeyCode::BackTab => Self::PrevField,
+            KeyCode::Char('i') | KeyCode::Enter => Self::BeginInput,
+            KeyCode::Char('u') => Self::Undo,
+            KeyCode::Char('r') => Self::Redo,
+            KeyCode::Delete => Self::DeleteChar,
+            KeyCode::Char('d') => Self::Cut,
+            KeyCode::Char('p') => Self::PasteStart,
+            KeyCode::Esc => Self::Cancel,
+            _ => Self::None,
+        }
+    }
+
+    /// Dispatch while the form holds a pending field cut (`Cut`) or paste
+    /// (`Paste`) prefix. Mirrors the tree's `PendingCut` / `PendingPaste`.
+    pub fn from_form_pending(key: &KeyEvent, paste: bool) -> Self {
+        match (paste, key.code) {
+            (false, KeyCode::Char('d')) => Self::Cut,
+            (true, KeyCode::Char('p')) => Self::PasteSibling,
+            (true, KeyCode::Char('P')) => Self::PasteBefore,
+            _ => Self::Cancel,
+        }
+    }
+
+    /// Dispatch for the form's input level. Printable keys edit the active
+    /// field; both `Enter` and `Esc` return to the navigation level, committing
+    /// the field's text.
+    pub fn from_form_input(key: &KeyEvent) -> Self {
+        match key.code {
             KeyCode::Left => Self::CursorLeft,
             KeyCode::Right => Self::CursorRight,
             KeyCode::Home => Self::CursorHome,
             KeyCode::End => Self::CursorEnd,
             KeyCode::Backspace => Self::Backspace,
             KeyCode::Delete => Self::DeleteChar,
-            KeyCode::Enter => Self::Confirm,
-            KeyCode::Esc => Self::Cancel,
+            KeyCode::Enter => Self::ExitInput,
+            KeyCode::Esc => Self::ExitInput,
             KeyCode::Char(c) => Self::InsertChar(c),
             _ => Self::None,
         }
@@ -130,9 +176,12 @@ impl Action {
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => Self::NavDown,
             KeyCode::Char('k') | KeyCode::Up => Self::NavUp,
-            KeyCode::Enter => Self::CopyField,
-            KeyCode::Char('i') | KeyCode::Char('I') => Self::EditNode,
-            KeyCode::Esc | KeyCode::Char(' ') => Self::Cancel,
+            KeyCode::Tab => Self::NextField,
+            KeyCode::BackTab => Self::PrevField,
+            KeyCode::Enter => Self::EditNode,
+            KeyCode::Char('i') => Self::EditNode,
+            KeyCode::Char('c') | KeyCode::Char('y') => Self::CopyField,
+            KeyCode::Esc => Self::Cancel,
             _ => Self::None,
         }
     }
@@ -142,9 +191,10 @@ impl Action {
             KeyCode::Esc => Self::Cancel,
             KeyCode::Char('j') | KeyCode::Down => Self::NavDown,
             KeyCode::Char('k') | KeyCode::Up => Self::NavUp,
-            KeyCode::Char('1') => Self::SelectType1,
-            KeyCode::Char('2') => Self::SelectType2,
-            KeyCode::Char('3') => Self::SelectType3,
+            KeyCode::Char(c @ '1'..='9') => {
+                let index = (c as u8 - b'1') as usize;
+                Self::SelectIndex(index)
+            }
             KeyCode::Enter => Self::Confirm,
             _ => Self::None,
         }
@@ -172,7 +222,7 @@ impl Action {
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => Self::NavDown,
             KeyCode::Char('k') | KeyCode::Up => Self::NavUp,
-            KeyCode::Enter => Self::Confirm,
+            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Self::Confirm,
             KeyCode::Char('q') | KeyCode::Char('Q') => Self::Quit,
             KeyCode::Esc => Self::Back,
             KeyCode::Char('d') | KeyCode::Delete => Self::ConfigDelete,
@@ -193,9 +243,41 @@ impl Action {
     }
 
     pub fn from_change_pw_input(key: &KeyEvent) -> Self {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return match key.code {
+                KeyCode::Char('s') => Self::ToggleShowPassword,
+                _ => Self::None,
+            };
+        }
         match key.code {
-            KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => Self::NextField,
-            KeyCode::Up | KeyCode::Char('k') => Self::PrevField,
+            KeyCode::Tab | KeyCode::Down => Self::NextField,
+            KeyCode::BackTab | KeyCode::Up => Self::PrevField,
+            KeyCode::Enter => Self::Confirm,
+            KeyCode::Esc => Self::Cancel,
+            KeyCode::Backspace => Self::Backspace,
+            KeyCode::Delete => Self::DeleteChar,
+            KeyCode::Left => Self::CursorLeft,
+            KeyCode::Right => Self::CursorRight,
+            KeyCode::Home => Self::CursorHome,
+            KeyCode::End => Self::CursorEnd,
+            KeyCode::Char(c) => Self::InsertChar(c),
+            _ => Self::None,
+        }
+    }
+
+    /// Dispatch for the dedicated "create new secret file" dialog. Password
+    /// fields are focused, so `j`/`k` are typed as text and field navigation
+    /// uses `Tab`/arrows. `Ctrl+S` reveals the passwords.
+    pub fn from_create_secret_file(key: &KeyEvent) -> Self {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return match key.code {
+                KeyCode::Char('s') => Self::ToggleShowPassword,
+                _ => Self::None,
+            };
+        }
+        match key.code {
+            KeyCode::Tab | KeyCode::Down => Self::NextField,
+            KeyCode::BackTab | KeyCode::Up => Self::PrevField,
             KeyCode::Enter => Self::Confirm,
             KeyCode::Esc => Self::Cancel,
             KeyCode::Backspace => Self::Backspace,
@@ -210,6 +292,12 @@ impl Action {
     }
 
     pub fn from_passphrase_input(key: &KeyEvent) -> Self {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return match key.code {
+                KeyCode::Char('s') => Self::ToggleShowPassword,
+                _ => Self::None,
+            };
+        }
         match key.code {
             KeyCode::Esc => Self::Cancel,
             KeyCode::Enter => Self::Confirm,
@@ -222,5 +310,334 @@ impl Action {
             KeyCode::Char(c) => Self::InsertChar(c),
             _ => Self::None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn from_search_delete_is_none() {
+        assert_eq!(Action::from_search(&key(KeyCode::Delete)), Action::None);
+    }
+
+    #[test]
+    fn from_search_backspace_is_backspace() {
+        assert_eq!(
+            Action::from_search(&key(KeyCode::Backspace)),
+            Action::Backspace
+        );
+    }
+
+    #[test]
+    fn from_search_printable_inserts() {
+        assert_eq!(
+            Action::from_search(&key(KeyCode::Char('x'))),
+            Action::InsertChar('x')
+        );
+    }
+
+    #[test]
+    fn from_search_enter_confirms_and_esc_clears() {
+        assert_eq!(
+            Action::from_search(&key(KeyCode::Enter)),
+            Action::ConfirmSearch
+        );
+        assert_eq!(Action::from_search(&key(KeyCode::Esc)), Action::ClearSearch);
+    }
+
+    #[test]
+    fn from_pending_cut_second_d_cuts() {
+        assert_eq!(
+            Action::from_pending_cut(&key(KeyCode::Char('d'))),
+            Action::Cut
+        );
+    }
+
+    #[test]
+    fn from_pending_cut_any_other_key_cancels() {
+        assert_eq!(
+            Action::from_pending_cut(&key(KeyCode::Char('x'))),
+            Action::Cancel
+        );
+        assert_eq!(Action::from_pending_cut(&key(KeyCode::Esc)), Action::Cancel);
+        assert_eq!(
+            Action::from_pending_cut(&key(KeyCode::Enter)),
+            Action::Cancel
+        );
+    }
+
+    #[test]
+    fn from_normal_tab_opens_detail() {
+        assert_eq!(Action::from_normal(&key(KeyCode::Tab)), Action::OpenDetail);
+        assert_eq!(
+            Action::from_normal(&key(KeyCode::Char('i'))),
+            Action::OpenDetail
+        );
+    }
+
+    #[test]
+    fn from_detail_i_and_enter_edit_and_c_y_copy() {
+        assert_eq!(
+            Action::from_detail(&key(KeyCode::Char('i'))),
+            Action::EditNode
+        );
+        assert_eq!(Action::from_detail(&key(KeyCode::Enter)), Action::EditNode);
+        assert_eq!(
+            Action::from_detail(&key(KeyCode::Char('c'))),
+            Action::CopyField
+        );
+        assert_eq!(
+            Action::from_detail(&key(KeyCode::Char('y'))),
+            Action::CopyField
+        );
+    }
+
+    #[test]
+    fn from_detail_tab_navigates_fields() {
+        assert_eq!(Action::from_detail(&key(KeyCode::Tab)), Action::NextField);
+        assert_eq!(
+            Action::from_detail(&key(KeyCode::BackTab)),
+            Action::PrevField
+        );
+    }
+
+    #[test]
+    fn from_detail_esc_cancels_and_space_is_unbound() {
+        assert_eq!(Action::from_detail(&key(KeyCode::Esc)), Action::Cancel);
+        assert_eq!(Action::from_detail(&key(KeyCode::Char(' '))), Action::None);
+    }
+
+    #[test]
+    fn from_detail_o_is_unbound() {
+        assert_eq!(Action::from_detail(&key(KeyCode::Char('o'))), Action::None);
+        assert_eq!(Action::from_detail(&key(KeyCode::Char('O'))), Action::None);
+    }
+
+    #[test]
+    fn from_form_nav_jk_move_fields_and_i_enter_begin_input() {
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('j'))),
+            Action::NextField
+        );
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Down)),
+            Action::NextField
+        );
+        assert_eq!(Action::from_form_nav(&key(KeyCode::Tab)), Action::NextField);
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('k'))),
+            Action::PrevField
+        );
+        assert_eq!(Action::from_form_nav(&key(KeyCode::Up)), Action::PrevField);
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::BackTab)),
+            Action::PrevField
+        );
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('i'))),
+            Action::BeginInput
+        );
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Enter)),
+            Action::BeginInput
+        );
+        assert_eq!(Action::from_form_nav(&key(KeyCode::Esc)), Action::Cancel);
+    }
+
+    #[test]
+    fn from_form_nav_binds_undo_and_redo() {
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('u'))),
+            Action::Undo
+        );
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('r'))),
+            Action::Redo
+        );
+    }
+
+    #[test]
+    fn from_form_nav_does_not_insert_chars() {
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('x'))),
+            Action::None
+        );
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('5'))),
+            Action::None
+        );
+    }
+
+    #[test]
+    fn from_form_input_inserts_and_enter_esc_exit() {
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Char('x'))),
+            Action::InsertChar('x')
+        );
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Char('j'))),
+            Action::InsertChar('j')
+        );
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Esc)),
+            Action::ExitInput
+        );
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Enter)),
+            Action::ExitInput
+        );
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Left)),
+            Action::CursorLeft
+        );
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Backspace)),
+            Action::Backspace
+        );
+    }
+
+    #[test]
+    fn from_form_nav_binds_field_cut_and_paste() {
+        assert_eq!(Action::from_form_nav(&key(KeyCode::Char('d'))), Action::Cut);
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('p'))),
+            Action::PasteStart
+        );
+    }
+
+    #[test]
+    fn from_form_pending_cut_requires_second_d() {
+        assert_eq!(
+            Action::from_form_pending(&key(KeyCode::Char('d')), false),
+            Action::Cut
+        );
+        assert_eq!(
+            Action::from_form_pending(&key(KeyCode::Char('p')), false),
+            Action::Cancel
+        );
+        assert_eq!(
+            Action::from_form_pending(&key(KeyCode::Esc), false),
+            Action::Cancel
+        );
+    }
+
+    #[test]
+    fn from_form_pending_paste_chooses_direction() {
+        assert_eq!(
+            Action::from_form_pending(&key(KeyCode::Char('p')), true),
+            Action::PasteSibling
+        );
+        assert_eq!(
+            Action::from_form_pending(&key(KeyCode::Char('P')), true),
+            Action::PasteBefore
+        );
+        assert_eq!(
+            Action::from_form_pending(&key(KeyCode::Char('d')), true),
+            Action::Cancel
+        );
+    }
+
+    #[test]
+    fn from_form_input_does_not_navigate_fields() {
+        assert_eq!(Action::from_form_input(&key(KeyCode::Tab)), Action::None);
+        assert_eq!(Action::from_form_input(&key(KeyCode::Down)), Action::None);
+        assert_eq!(Action::from_form_input(&key(KeyCode::Up)), Action::None);
+    }
+
+    #[test]
+    fn from_home_l_and_right_open_selected_item() {
+        assert_eq!(Action::from_home(&key(KeyCode::Char('l'))), Action::Confirm);
+        assert_eq!(Action::from_home(&key(KeyCode::Right)), Action::Confirm);
+        assert_eq!(Action::from_home(&key(KeyCode::Enter)), Action::Confirm);
+    }
+
+    fn ctrl(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn ctrl_s_toggles_show_password() {
+        assert_eq!(
+            Action::from_passphrase_input(&ctrl(KeyCode::Char('s'))),
+            Action::ToggleShowPassword
+        );
+        assert_eq!(
+            Action::from_change_pw_input(&ctrl(KeyCode::Char('s'))),
+            Action::ToggleShowPassword
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&ctrl(KeyCode::Char('s'))),
+            Action::ToggleShowPassword
+        );
+    }
+
+    #[test]
+    fn create_secret_file_navigates_with_tab_and_arrows() {
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Tab)),
+            Action::NextField
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::BackTab)),
+            Action::PrevField
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Down)),
+            Action::NextField
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Up)),
+            Action::PrevField
+        );
+    }
+
+    #[test]
+    fn create_secret_file_typing_j_k_inserts_text() {
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Char('j'))),
+            Action::InsertChar('j')
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Char('k'))),
+            Action::InsertChar('k')
+        );
+    }
+
+    #[test]
+    fn create_secret_file_enter_confirms_and_esc_cancels() {
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Enter)),
+            Action::Confirm
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Esc)),
+            Action::Cancel
+        );
+    }
+
+    #[test]
+    fn change_pw_input_typing_j_k_inserts_text() {
+        assert_eq!(
+            Action::from_change_pw_input(&key(KeyCode::Char('j'))),
+            Action::InsertChar('j')
+        );
+        assert_eq!(
+            Action::from_change_pw_input(&key(KeyCode::Char('k'))),
+            Action::InsertChar('k')
+        );
+        assert_eq!(
+            Action::from_change_pw_input(&key(KeyCode::Tab)),
+            Action::NextField
+        );
+        assert_eq!(
+            Action::from_change_pw_input(&key(KeyCode::BackTab)),
+            Action::PrevField
+        );
     }
 }

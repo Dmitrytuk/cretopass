@@ -10,6 +10,21 @@ _Avoid_: Settings menu, Launcher
 **File Browser**: Modal for navigating the filesystem to pick a secret file (Open), name a new one (Create), or select a file for import.
 _Avoid_: File Picker, Directory Browser
 
+**File Browser session**: In-memory state shared by successive File Browser openings during one program run: the Last directory and whether Hidden entries are shown. Never written to config or disk.
+_Avoid_: Browser config, Persisted browser state
+
+**Last directory**: The directory most recently displayed by the File Browser. The next opening starts there when it is still listable, otherwise it falls back to Home.
+_Avoid_: Previous folder, Current path
+
+**Hidden entry**: A filesystem entry whose name starts with `.`. Browsing shows or hides these entries with the Hidden-entry toggle; no other names are treated as hidden.
+_Avoid_: Dotfile, Secret file (reserved for encrypted vault files)
+
+**Location**: A selectable row in the File Browser's Locations overlay: either the pinned Home shortcut or a Mounted disk.
+_Avoid_: Bookmark, Sidebar item
+
+**Mounted disk**: A filesystem volume reported by the OS and offered as a Location, identified by its mount point, filesystem type, and free/total space.
+_Avoid_: Drive, Partition, Volume
+
 **Secret file**: An age-encrypted file containing a JSON-serialized Node tree. The primary persistence format. Identified by the `age-encryption.org/v1` header.
 _Avoid_: Encrypted file, Vault file
 

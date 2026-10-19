@@ -14,7 +14,7 @@ writes back to an age-encrypted JSON file after every mutation.
 | `theming` | [0004](../src/theming/docs/adr/0004-theming.md) | Centralized keybindings, styles, icons, and UI strings |
 | `tree` | [0005](../src/tree/docs/adr/0005-tree-module.md) | Tree data model, state machine, rendering, event loop |
 | `vault` | [0006](../src/vault/docs/adr/0006-vault-module.md) | Home screen, active vault state, configuration persistence |
-| `file_browser` | [0007](../src/file_browser/docs/adr/0007-file-browser.md) | OS directory browser overlay |
+| `file_browser` | [0007](../src/file_browser/docs/adr/0007-file-browser.md) | OS directory browser overlay with mounted-disk locations and hidden-entry toggle |
 | `cli` | [0009](../src/cli/docs/adr/0009-cli-module.md) | CLI lifecycle subcommands (`update`, `remove`) — no TUI |
 
 ## Cross-module data flow
@@ -53,6 +53,7 @@ main.rs  ──▶  lib.rs  ──▶  vault::widget::run()   ──▶  tree::a
 | `uuid` 1 (v4, serde) | node, widget | stable node identities |
 | `rkyv` | vault::utils | zero-copy config serialization |
 | `zeroize` | vault::active_file, widget | secure passphrase wipe on drop |
+| `sysinfo` 0.38 (disk) | file_handling::disks | cross-platform mounted-disk enumeration for file-browser Locations |
 
 ## Re-exports (public API)
 
