@@ -5,7 +5,7 @@ use crate::cursor::{
     backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
     selected_span,
 };
-use crate::file_handling::{Autosave, SaveError, SaveEvent, save_tree};
+use crate::file_handling::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree};
 use crate::theming::Action;
 use crate::theming::{ElementStyle, Icon, texts};
 use crate::tree::node::{ExtraField, FieldType, Node};
@@ -72,7 +72,7 @@ pub fn run_app<B: Backend>(
     state: &mut TreeState,
     target: Option<SaveTarget>,
 ) -> io::Result<ExitStatus> {
-    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+    let runtime = save_runtime()?;
     let (save_tx, mut save_rx) = mpsc::unbounded_channel::<SaveEvent>();
     let mut autosave = start_autosave(target, save_tx)?;
     let has_worker = autosave.is_some();
@@ -81,7 +81,7 @@ pub fn run_app<B: Backend>(
     let mut saved: u64 = 0;
     let mut save_open = has_worker;
 
-    runtime.block_on(async {
+    let status = runtime.block_on(async {
         let mut events = EventStream::new();
         terminal.draw(|f| ui(f, state))?;
 
@@ -172,9 +172,16 @@ pub fn run_app<B: Backend>(
                     state.save_state = SaveState::Saving;
                     terminal.draw(|f| ui(f, state))?;
 
-                    match wait_for_save(&mut save_rx, state, &mut saved, target).await {
-                        Ok(()) => break Ok(ExitStatus::Saved),
-                        Err(error) => park_blocked(state, error),
+                    let flush = tokio::time::timeout(
+                        SAVE_TIMEOUT,
+                        wait_for_save(&mut save_rx, state, &mut saved, target),
+                    )
+                    .await;
+                    match flush {
+                        Ok(Ok(())) => break Ok(ExitStatus::Saved),
+                        Ok(Err(error)) => park_blocked(state, error),
+                        // The worker is still stuck; offer retry / force-quit.
+                        Err(_elapsed) => park_blocked(state, SaveError::WorkerStopped),
                     }
                 } else {
                     break Ok(ExitStatus::Saved);
@@ -183,7 +190,33 @@ pub fn run_app<B: Backend>(
 
             terminal.draw(|f| ui(f, state))?;
         }
-    })
+    })?;
+
+    if let Some(worker) = autosave {
+        match status {
+            // A force-quit may leave a save stuck; detach instead of waiting.
+            ExitStatus::Unsaved => worker.detach(),
+            ExitStatus::Saved => {
+                let _ = worker.shutdown(SAVE_TIMEOUT);
+            }
+        }
+    }
+
+    Ok(status)
+}
+
+/// Builds the current-thread runtime that drives the event loop.
+///
+/// The time driver must be enabled explicitly (it is off by default); the
+/// bounded exit flush relies on [`tokio::time::timeout`].
+///
+/// # Errors
+///
+/// Returns an error when the runtime cannot be built.
+fn save_runtime() -> io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
 }
 
 /// What the exit path must do to make the vault durable.
@@ -2389,6 +2422,20 @@ mod tests {
     fn start_autosave_without_a_target_returns_none() {
         let (tx, _rx) = mpsc::unbounded_channel();
         assert!(start_autosave(None, tx).unwrap().is_none());
+    }
+
+    #[test]
+    fn runtime_supports_bounded_timeouts() {
+        let runtime = save_runtime().unwrap();
+        let timed_out = runtime.block_on(async {
+            tokio::time::timeout(
+                std::time::Duration::from_millis(1),
+                std::future::pending::<()>(),
+            )
+            .await
+        });
+
+        assert!(timed_out.is_err());
     }
 
     #[test]

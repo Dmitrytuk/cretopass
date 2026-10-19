@@ -8,9 +8,16 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use crate::file_handling::error::FileHandlingError;
 use crate::tree::node::Node;
+
+/// Bound on waiting for the save worker to finish.
+///
+/// Used for the exit flush and for stopping the worker. Long enough to tolerate
+/// a slow scrypt run, short enough to return control on a stalled filesystem.
+pub const SAVE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Error reported by a background save attempt.
 ///
@@ -77,8 +84,13 @@ struct Shared {
 
 /// Owns the single background writer thread.
 ///
-/// The worker is stopped and joined on drop. Any snapshot still waiting in the
-/// slot is written before the thread exits.
+/// Call [`Autosave::shutdown`] to stop the worker with a bounded wait; the
+/// returned error reports only a join timeout. [`Autosave::detach`] stops
+/// without waiting, for a force-quit while a save is stuck. [`Drop`] repeats a
+/// best-effort bounded join as a fallback for callers that forget.
+///
+/// Any snapshot still waiting in the slot is written before the thread exits;
+/// on timeout the thread is detached and left to be reaped at process exit.
 pub struct Autosave {
     shared: Arc<Shared>,
     handle: Option<JoinHandle<()>>,
@@ -133,23 +145,67 @@ impl Autosave {
 
         generation
     }
+
+    /// Stops the worker, waiting up to `timeout` for it to finish.
+    ///
+    /// Any snapshot still waiting in the slot is written first. When the thread
+    /// does not stop within `timeout` it is detached and left to finish on its
+    /// own; the returned [`SaveError::WorkerStopped`] reports that timeout.
+    pub fn shutdown(mut self, timeout: Duration) -> Result<(), SaveError> {
+        self.request_stop();
+        match self.handle.take() {
+            Some(handle) => join_bounded(handle, timeout),
+            None => Ok(()),
+        }
+    }
+
+    /// Stops the worker without waiting, detaching the thread.
+    ///
+    /// Used when the user force-quits while a save is stuck: the thread is left
+    /// to be reaped at process exit so the UI can return immediately.
+    pub fn detach(mut self) {
+        self.request_stop();
+        // Taking the handle detaches the thread; `Drop` then skips its join.
+        self.handle.take();
+    }
+
+    /// Signals the worker to exit once the slot is empty.
+    fn request_stop(&self) {
+        let mut state = lock(&self.shared.state);
+        state.shutdown = true;
+        self.shared.available.notify_one();
+    }
 }
 
 impl Drop for Autosave {
     fn drop(&mut self) {
-        {
-            let mut state = lock(&self.shared.state);
-            state.shutdown = true;
-            self.shared.available.notify_one();
-        }
+        self.request_stop();
 
         if let Some(handle) = self.handle.take() {
-            // A worker panic is reported through its save event when possible;
-            // a panic in `on_event` has no receiver left to report to, so the
-            // join result adds no actionable information here.
-            let _ = handle.join();
+            // Best-effort bounded join. On timeout the worker is detached and
+            // reaped at process exit. A worker panic is reported through its
+            // save event when possible; a panic in `on_event` has no receiver
+            // left to report to, so the join result adds nothing here.
+            let _ = join_bounded(handle, SAVE_TIMEOUT);
         }
     }
+}
+
+/// Joins `handle`, giving up after `timeout`.
+///
+/// On timeout the handle is dropped (detaching the thread) and
+/// [`SaveError::WorkerStopped`] is returned. `is_finished` polling is used
+/// because `std::thread::JoinHandle` has no timed join.
+fn join_bounded(handle: JoinHandle<()>, timeout: Duration) -> Result<(), SaveError> {
+    let deadline = Instant::now() + timeout;
+    while !handle.is_finished() {
+        if Instant::now() >= deadline {
+            return Err(SaveError::WorkerStopped);
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    let _ = handle.join();
+    Ok(())
 }
 
 /// Runs the writer loop until shutdown is requested and the slot is empty.
@@ -310,6 +366,64 @@ mod tests {
         drop(autosave);
 
         assert_eq!(saved_rx.recv_timeout(TIMEOUT).unwrap(), "pending");
+    }
+
+    #[test]
+    fn shutdown_joins_an_idle_worker() {
+        let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
+        let autosave = Autosave::spawn(
+            |_: &Node| Ok(()),
+            move |event| {
+                let _ = events_tx.send(event);
+            },
+        )
+        .unwrap();
+
+        assert!(autosave.shutdown(TIMEOUT).is_ok());
+    }
+
+    #[test]
+    fn shutdown_reports_a_stuck_worker_without_hanging() {
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let save = move |_: &Node| {
+            // Block until released; the test asserts the timeout fires first.
+            let _ = release_rx.recv_timeout(TIMEOUT);
+            Ok(())
+        };
+
+        let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(save, move |event| {
+            let _ = events_tx.send(event);
+        })
+        .unwrap();
+
+        autosave.submit(node("stuck"));
+        let result = autosave.shutdown(Duration::from_millis(50));
+
+        assert!(matches!(result, Err(SaveError::WorkerStopped)));
+        // Unblock the detached worker so it does not linger past the test.
+        let _ = release_tx.send(());
+    }
+
+    #[test]
+    fn detach_returns_while_a_save_is_stuck() {
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let save = move |_: &Node| {
+            let _ = release_rx.recv_timeout(TIMEOUT);
+            Ok(())
+        };
+
+        let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(save, move |event| {
+            let _ = events_tx.send(event);
+        })
+        .unwrap();
+
+        autosave.submit(node("stuck"));
+        autosave.detach();
+
+        // Unblock the detached worker so it does not linger past the test.
+        let _ = release_tx.send(());
     }
 
     #[test]
