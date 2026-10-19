@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   legacy description becomes a leading Description field. The serialized format
   no longer contains a `description` key.
 
+### Fixed
+
+- A cut node is now removed from the cut buffer after a successful paste, so it
+  can no longer be pasted repeatedly. Previously each paste inserted a clone
+  that kept the original node id, letting multiple nodes share one id.
+
 ## [0.1.0] - 2026-10-13
 
 ### Added

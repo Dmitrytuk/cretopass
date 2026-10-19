@@ -726,57 +726,79 @@ impl TreeState {
         }
     }
 
-    /// Inserts the cut buffer node as a sibling immediately after the selected node.
+    /// Inserts the cut buffer node as a sibling immediately after the selected
+    /// node.
+    ///
+    /// The buffer is consumed on success (a cut node moves once); on failure
+    /// the node is put back so it is not lost.
     pub fn paste_sibling(&mut self) {
-        let node = match &self.cut_buffer {
-            Some(n) => n.clone(),
-            None => return,
+        let Some(node) = self.cut_buffer.take() else {
+            return;
         };
         let selected_id = match self.selected_node_id() {
             Some(id) => id,
-            None => return,
+            None => {
+                self.cut_buffer = Some(node);
+                return;
+            }
         };
-        if self.root.contains(selected_id) {
-            insert_after(&mut self.root, selected_id, node);
-            self.update_visible();
-            self.modified = true;
+        match insert_after(&mut self.root, selected_id, node) {
+            Ok(()) => {
+                self.update_visible();
+                self.modified = true;
+            }
+            Err(node) => self.cut_buffer = Some(node),
         }
     }
 
-    /// Inserts the cut buffer node as a sibling immediately before the selected node.
+    /// Inserts the cut buffer node as a sibling immediately before the selected
+    /// node.
     ///
-    /// No-op when the selected node is the root (it has no parent to provide
-    /// a sibling slot).
+    /// The buffer is consumed on success (a cut node moves once); on failure
+    /// the node is put back so it is not lost. No-op when the selected node is
+    /// the root (it has no parent to provide a sibling slot).
     pub fn paste_sibling_before(&mut self) {
-        let node = match &self.cut_buffer {
-            Some(n) => n.clone(),
-            None => return,
+        let Some(node) = self.cut_buffer.take() else {
+            return;
         };
         let selected_id = match self.selected_node_id() {
             Some(id) => id,
-            None => return,
+            None => {
+                self.cut_buffer = Some(node);
+                return;
+            }
         };
-        if insert_before(&mut self.root, selected_id, node) {
-            self.update_visible();
-            self.modified = true;
+        match insert_before(&mut self.root, selected_id, node) {
+            Ok(()) => {
+                self.update_visible();
+                self.modified = true;
+            }
+            Err(node) => self.cut_buffer = Some(node),
         }
     }
 
     /// Inserts the cut buffer node as the last child of the selected node.
+    ///
+    /// The buffer is consumed on success (a cut node moves once); on failure
+    /// the node is put back so it is not lost.
     pub fn paste_child(&mut self) {
-        let node = match &self.cut_buffer {
-            Some(n) => n.clone(),
-            None => return,
+        let Some(node) = self.cut_buffer.take() else {
+            return;
         };
         let selected_id = match self.selected_node_id() {
             Some(id) => id,
-            None => return,
+            None => {
+                self.cut_buffer = Some(node);
+                return;
+            }
         };
         if let Some(target) = self.root.find_mut(selected_id) {
             target.add_child(node);
             self.expanded.insert(selected_id);
             self.update_visible();
             self.modified = true;
+        } else {
+            self.cut_buffer = Some(node);
         }
     }
 
@@ -812,10 +834,10 @@ impl TreeState {
                 self.expanded.insert(selected_id);
             }
             AddPosition::SiblingAfter => {
-                insert_after(&mut self.root, selected_id, node);
+                let _ = insert_after(&mut self.root, selected_id, node);
             }
             AddPosition::SiblingBefore => {
-                insert_before(&mut self.root, selected_id, node);
+                let _ = insert_before(&mut self.root, selected_id, node);
             }
         }
         self.update_visible();
@@ -946,26 +968,34 @@ fn remove_node(root: &mut Node, id: Uuid) -> Option<Node> {
     None
 }
 
-fn insert_after(root: &mut Node, target_id: Uuid, node: Node) -> bool {
+/// Inserts `node` immediately after the child with `target_id`.
+///
+/// Returns the node back in `Err` when no parent of `target_id` exists (i.e.
+/// the target is the root or is absent), so the caller can restore it.
+fn insert_after(root: &mut Node, target_id: Uuid, node: Node) -> Result<(), Node> {
     if let Some(parent) = find_parent_mut(root, target_id) {
         let pos = parent.children.iter().position(|c| c.id == target_id);
         if let Some(pos) = pos {
             parent.children.insert(pos + 1, node);
-            return true;
+            return Ok(());
         }
     }
-    false
+    Err(node)
 }
 
-fn insert_before(root: &mut Node, target_id: Uuid, node: Node) -> bool {
+/// Inserts `node` immediately before the child with `target_id`.
+///
+/// Returns the node back in `Err` when no parent of `target_id` exists (i.e.
+/// the target is the root or is absent), so the caller can restore it.
+fn insert_before(root: &mut Node, target_id: Uuid, node: Node) -> Result<(), Node> {
     if let Some(parent) = find_parent_mut(root, target_id) {
         let pos = parent.children.iter().position(|c| c.id == target_id);
         if let Some(pos) = pos {
             parent.children.insert(pos, node);
-            return true;
+            return Ok(());
         }
     }
-    false
+    Err(node)
 }
 
 /// Returns `true` when some node in the tree has `id` as one of its children
@@ -1139,6 +1169,56 @@ mod tests {
         state.cut_buffer = Some(Node::new("X"));
         state.paste_sibling_before();
         assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "X", "B"]);
+    }
+
+    #[test]
+    fn paste_sibling_consumes_the_buffer() {
+        let mut state = make_tree();
+        state.selected = 1; // "A"
+        state.cut_buffer = Some(Node::new("X"));
+        state.paste_sibling();
+        assert!(state.cut_buffer.is_none());
+    }
+
+    #[test]
+    fn paste_child_consumes_the_buffer() {
+        let mut state = make_tree();
+        state.selected = 1; // "A"
+        state.cut_buffer = Some(Node::new("X"));
+        state.paste_child();
+        assert!(state.cut_buffer.is_none());
+    }
+
+    #[test]
+    fn second_paste_is_a_noop() {
+        let mut state = make_tree();
+        state.selected = 1; // "A"
+        let cut = Node::new("X");
+        let cut_id = cut.id;
+        state.cut_buffer = Some(cut);
+        state.paste_sibling();
+        let after_first = names(&state);
+        state.paste_sibling();
+        assert_eq!(names(&state), after_first);
+        assert_eq!(
+            state
+                .root
+                .children
+                .iter()
+                .filter(|c| c.id == cut_id)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn paste_sibling_before_root_keeps_the_buffer() {
+        let mut state = make_tree();
+        state.selected = 0; // root has no sibling slot
+        state.cut_buffer = Some(Node::new("X"));
+        state.paste_sibling_before();
+        assert!(state.cut_buffer.is_some());
+        assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "B"]);
     }
 
     #[test]

@@ -151,7 +151,9 @@ parent row (`collapse_or_select_parent`).
 
 ## Cut buffer
 
-- `cut_buffer: Option<Node>` is copy-style (can paste multiple times).
+- `cut_buffer: Option<Node>` is move-style: a cut node is consumed by the next
+  successful paste, so it can be inserted only once. A failed paste (e.g. `P`
+  on the root, which has no sibling slot) puts the node back in the buffer.
 - `p` enters `PendingPaste`; `p` pastes after, `P` pastes before, `l`/`→`
   pastes as last child.
 - System clipboard only used in detail overlay (Enter on a row). Targets: `pbcopy` (macOS), `wl-copy`/`xclip`/`xsel` (Linux).

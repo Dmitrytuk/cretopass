@@ -56,7 +56,7 @@ _Avoid_: Open
 
 **Collapse**: Hiding a Branch Node's children in the Tree view.
 
-**Cut buffer**: The internal clipboard holding a cut Node, ready for paste. Copy-style: can paste multiple times. Distinct from the system clipboard.
+**Cut buffer**: The internal clipboard holding a cut Node, ready for paste. Move-style: the next successful paste consumes the node, so it can be inserted only once. A failed paste leaves the node in the buffer. Distinct from the system clipboard.
 _Avoid_: Clipboard, Yank buffer
 
 **Search**: Filtering the visible tree by node name. Activated with `/`. Matched nodes are highlighted; navigation is constrained to matches while search is active.
