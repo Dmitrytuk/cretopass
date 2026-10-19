@@ -31,67 +31,44 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserSta
 
     let inner = block.inner(overlay_area);
 
-    // Split the inner area: path bar, list, optional inputs/confirm, help bar
-    let mut constraints = vec![
+    // Split the inner area: path bar, file list, options bar.
+    let layout = Layout::vertical([
         Constraint::Length(1), // path bar
         Constraint::Min(1),    // file list
         Constraint::Length(2), // options bar (filter + search + actions)
-    ];
-
-    let has_error = state.error.is_some();
-    let has_file_input =
-        state.mode == FileBrowserMode::CreateFile && state.focus == FocusTarget::Input;
-    let has_rename = state.focus == FocusTarget::Rename;
-    let has_delete_confirm = state.confirm_delete.is_some();
-
-    if has_file_input {
-        constraints.push(Constraint::Length(1)); // file name input
-    }
-    if has_rename {
-        constraints.push(Constraint::Length(1)); // rename input
-    }
-    if has_delete_confirm {
-        constraints.push(Constraint::Length(1)); // delete confirmation
-    }
-    if has_error {
-        constraints.push(Constraint::Length(1)); // error bar
-    }
-
-    let layout = Layout::vertical(constraints).split(inner);
+    ])
+    .split(inner);
 
     render_path_bar(frame, layout[0], state);
     render_file_list(frame, layout[1], state);
     render_options_bar(frame, layout[2], state);
 
-    let mut next = 3;
-    if has_file_input {
-        render_file_input(
+    // Transient prompts are centered popups stacked over the browser:
+    // the active input / delete confirmation first, the error on top.
+    if state.mode == FileBrowserMode::CreateFile && state.focus == FocusTarget::Input {
+        render_input_popup(
             frame,
-            layout[next],
+            overlay_area,
+            texts::OVERLAY_NEW_FILE,
             texts::LABEL_NAME_INLINE,
             &state.creating_name,
             state.creating_cursor,
-            &[texts::FB_HINT_CONFIRM],
         );
-        next += 1;
-    }
-    if has_rename {
-        render_file_input(
+    } else if state.focus == FocusTarget::Rename {
+        render_input_popup(
             frame,
-            layout[next],
+            overlay_area,
+            texts::OVERLAY_RENAME,
             texts::LABEL_RENAME,
             &state.rename_name,
             state.rename_cursor,
-            &[texts::FB_HINT_CONFIRM, texts::FB_HINT_CANCEL],
         );
-        next += 1;
+    } else if state.confirm_delete.is_some() {
+        render_delete_popup(frame, overlay_area, state);
     }
-    if has_delete_confirm {
-        render_delete_confirmation(frame, layout[next], state);
-        next += 1;
-    }
-    if has_error {
-        render_error_bar(frame, layout[next], state);
+
+    if state.error.is_some() {
+        render_error_popup(frame, overlay_area, state);
     }
 }
 
@@ -250,51 +227,109 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     frame.render_widget(Paragraph::new(Text::from(lines)), area);
 }
 
-fn render_file_input(
+fn render_input_popup(
     frame: &mut Frame,
     area: Rect,
+    title: &str,
     label: &str,
     text: &str,
     cursor: usize,
-    hints: &[&str],
 ) {
-    let mut spans = cursor_field_spans(label, text, cursor, true);
-    for hint in hints {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(*hint, ElementStyle::FbHintText.style()));
-    }
-    frame.render_widget(Paragraph::new(Text::from(vec![Line::from(spans)])), area);
+    let popup_area = centered_popup(area, 5);
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .style(ElementStyle::FieldTypeBlock.style());
+
+    let inner = block.inner(popup_area);
+    let lines = vec![
+        Line::from(""),
+        Line::from(cursor_field_spans(label, text, cursor, true)),
+        Line::from(Span::styled(
+            format!("{}  {}", texts::FB_HINT_CONFIRM, texts::FB_HINT_CANCEL),
+            ElementStyle::GrayHint.style(),
+        )),
+    ];
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(block, popup_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-fn render_delete_confirmation(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
-    if let Some(ref path_str) = state.confirm_delete {
-        let filename = std::path::Path::new(path_str)
-            .file_name()
-            .map(|n| n.to_string_lossy())
-            .unwrap_or(std::borrow::Cow::Borrowed(path_str));
+fn render_delete_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
+    let Some(ref path_str) = state.confirm_delete else {
+        return;
+    };
 
-        let text = Line::from(vec![
-            Span::styled(
-                format!(" Delete {}? ", filename),
-                ElementStyle::FbDeleteConfirm.style(),
-            ),
-            Span::styled(
-                texts::FB_DELETE_CONFIRM_SUFFIX,
-                ElementStyle::FbDeleteHint.style(),
-            ),
-        ]);
+    let filename = std::path::Path::new(path_str)
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or(std::borrow::Cow::Borrowed(path_str));
 
-        frame.render_widget(Paragraph::new(text), area);
-    }
+    let popup_area = centered_popup(area, 5);
+    let block = Block::default()
+        .title(texts::OVERLAY_CONFIRM_DELETE)
+        .borders(Borders::ALL)
+        .style(ElementStyle::ConfirmDeleteBlock.style());
+
+    let inner = block.inner(popup_area);
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!(" Delete {filename}? "),
+            ElementStyle::ConfirmMessage.style(),
+        )),
+        Line::from(Span::styled(
+            texts::FB_DELETE_CONFIRM_SUFFIX,
+            ElementStyle::DismissHint.style(),
+        )),
+    ];
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(block, popup_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-fn render_error_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
-    if let Some(ref err) = state.error {
-        let text = Line::from(Span::styled(
-            format!(" {}", err),
-            ElementStyle::FbErrorBar.style(),
-        ));
-        frame.render_widget(Paragraph::new(text), area);
+fn render_error_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
+    let Some(ref err) = state.error else {
+        return;
+    };
+
+    let popup_area = centered_popup(area, 5);
+    let block = Block::default()
+        .title(texts::HOME_ALERT)
+        .borders(Borders::ALL)
+        .style(ElementStyle::HomeAlertBlock.style());
+
+    let inner = block.inner(popup_area);
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!(" {err}"),
+            ElementStyle::ConfirmMessage.style(),
+        )),
+        Line::from(Span::styled(
+            texts::HINT_ALERT,
+            ElementStyle::DismissHint.style(),
+        )),
+    ];
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(block, popup_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+/// Builds a small dialog rect centered on `area`, clamped to fit.
+fn centered_popup(area: Rect, height: u16) -> Rect {
+    let height = height.min(area.height.saturating_sub(2));
+    let width = (area.width * 2 / 3)
+        .max(30)
+        .min(area.width.saturating_sub(2));
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
     }
 }
 
@@ -414,6 +449,64 @@ mod tests {
         assert!(
             text.contains("Enter:confirm"),
             "should show Enter:confirm hint:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_create_file_name_input_is_popup() {
+        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        populate_tmp(&mut state);
+        state.focus = FocusTarget::Input;
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("New File"),
+            "name input should render as a titled popup:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_rename_input_is_popup() {
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        state.focus = FocusTarget::Rename;
+        state.rename_name = "renamed.age".to_string();
+        state.rename_cursor = state.rename_name.len();
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("Rename"),
+            "rename input should render as a titled popup:\n{text}"
+        );
+        assert!(
+            text.contains("renamed.age"),
+            "popup should show the name being edited:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_delete_confirm_is_popup() {
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        state.confirm_delete = Some("/tmp/secret.age".to_string());
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("Confirm Delete"),
+            "delete confirmation should render as a titled popup:\n{text}"
+        );
+        assert!(
+            text.contains("Delete secret.age?"),
+            "popup should name the file to delete:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_error_is_popup() {
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        state.error = Some("Permission denied".to_string());
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("Alert"),
+            "error should render as a titled popup:\n{text}"
         );
     }
 

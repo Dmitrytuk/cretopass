@@ -53,9 +53,6 @@ pub enum ElementStyle {
     FbEmptyText,
     FbHintText,
     FbActiveSearch,
-    FbDeleteConfirm,
-    FbDeleteHint,
-    FbErrorBar,
     HomeSelected,
     HomeNormal,
     HomeBlockBorder,
@@ -169,12 +166,6 @@ impl ElementStyle {
             Self::FbEmptyText => Style::default().fg(Color::DarkGray),
             Self::FbHintText => Style::default().fg(Color::DarkGray),
             Self::FbActiveSearch => Style::default().fg(Color::Yellow),
-            Self::FbDeleteConfirm => Style::default()
-                .bg(Color::Red)
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-            Self::FbDeleteHint => Style::default().bg(Color::Red).fg(Color::DarkGray),
-            Self::FbErrorBar => Style::default().bg(Color::Red).fg(Color::White),
             Self::HomeSelected => Style::default().bg(Color::DarkGray).fg(Color::White),
             Self::HomeNormal => Style::default().fg(Color::White),
             Self::HomeBlockBorder => Style::default().fg(Color::Cyan),

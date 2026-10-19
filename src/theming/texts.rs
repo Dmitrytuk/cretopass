@@ -24,6 +24,8 @@ pub const HOME_DELETE_CONFIRM: &str = " Confirm Delete ";
 pub const BROWSER_OPEN: &str = " Open File ";
 pub const BROWSER_CREATE: &str = " Create New Secret File ";
 pub const BROWSER_IMPORT: &str = " Import File ";
+pub const OVERLAY_NEW_FILE: &str = " New File ";
+pub const OVERLAY_RENAME: &str = " Rename ";
 
 pub const MENU_ITEMS: &[&str] = &[
     "Open secret file",

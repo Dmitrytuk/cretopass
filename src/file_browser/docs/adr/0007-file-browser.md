@@ -19,13 +19,14 @@ file listing UX to vault-specific modal logic, preventing reuse.
 |------|---------------|
 | `state.rs` | `FileBrowserState`, `FileBrowserMode` (OpenFile/CreateFile/ImportFile), `FocusTarget` (List/Input/Rename), `NewFilePrefix` (None/Pending), `FileFilter` (All/PwdKeeperOnly), `FileBrowserAction` (Selected/Cancelled/Renamed) |
 | `handler.rs` | `handle_key()` dispatches to list/input/rename handlers. Supports j/k navigation, Enter, search, filter toggle, directory traversal, rename, delete, the `n` prefix (new file/folder), text editing |
-| `render.rs` | `render_file_browser()` renders overlay with path bar, file list (icons, selection, scrolling), options bar (filter + search hints), optional file input / rename input / delete confirmation / error bar |
+| `render.rs` | `render_file_browser()` renders overlay with path bar, file list (icons, selection, scrolling), options bar (filter + search hints), plus centered popups for the file-name input / rename input / delete confirmation / error |
 
 ## Contracts
 
 - `FileBrowserState` receives `current_dir` and `FileBrowserMode` on construction.
 - `handle_key(key, state) → Option<FileBrowserAction>` — returns `None` while browsing, `Some(Selected(path))` or `Some(Cancelled)` to exit.
-- Enter in the name input returns `Selected` only when no file with that name exists at the target path; otherwise it sets an inline error and stays open.
+- Enter in the name input returns `Selected` only when no file with that name exists at the target path; otherwise it shows a dismissable error popup and stays open.
+- The name input, rename input, delete confirmation, and errors render as centered popups stacked over the browser; an error popup sits on top of any active dialog and is dismissed by the next key.
 - All I/O (list_dir, delete_file, rename, create_dir, probe writability) goes through `file_handling`.
 - Re-exports `FileEntry` from `file_handling` so consumers don't need to import it separately.
 

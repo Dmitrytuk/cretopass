@@ -10,6 +10,12 @@ use crate::theming::texts;
 /// or cancelled the file browser.  Returns `None` when the browser
 /// state was just mutated (re-render needed).
 pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBrowserAction> {
+    // ── Error popup: any key dismisses it and returns to the dialog below ──
+    if state.error.is_some() {
+        state.error = None;
+        return None;
+    }
+
     // ── New file / new folder prefix (`n`) in CreateFile mode ──
     if state.pending == NewFilePrefix::Pending {
         state.pending = NewFilePrefix::None;
@@ -546,6 +552,29 @@ mod tests {
         let result = handle_key(key(KeyCode::Enter), &mut state);
 
         assert_eq!(result, None);
+    }
+
+    // ── Error popup dismissal ──
+
+    #[test]
+    fn test_any_key_dismisses_error_and_keeps_draft() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.focus = FocusTarget::Input;
+        state.creating_name = "taken.age".to_string();
+        state.creating_cursor = state.creating_name.len();
+        state.error = Some(texts::MSG_FILE_EXISTS.to_string());
+
+        // First key dismisses the error popup and must not leak into the field.
+        let result = handle_key(key(KeyCode::Char('x')), &mut state);
+
+        assert_eq!(result, None);
+        assert_eq!(state.error, None);
+        assert_eq!(state.creating_name, "taken.age", "draft must be preserved");
+        assert_eq!(state.focus, FocusTarget::Input);
+
+        // The next key edits normally.
+        handle_key(key(KeyCode::Char('x')), &mut state);
+        assert_eq!(state.creating_name, "taken.agex");
     }
 
     // ── Full create-file flow ──
