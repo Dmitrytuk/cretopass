@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The file browser list and `Locations` overlay keep a 3-row margin around the
-  cursor (`scrolloff`-style) instead of letting it hug the bottom edge before
-  scrolling.
+  cursor (`scrolloff`-style). The cursor moves within that margin before the
+  viewport scrolls in either direction, instead of staying pinned to the bottom
+  edge.
 - Node descriptions are now ordinary extra fields (a `Custom` field labelled
   "Description") instead of a dedicated `description` slot. Descriptions can be
   added, reordered, duplicated and deleted like any other field, and a node has

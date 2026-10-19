@@ -14,7 +14,10 @@ const DEFAULT_HEIGHT: u16 = 18;
 const SCROLL_OFFSET: usize = 3;
 
 /// Renders the file browser modal over the given screen area.
-pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
+///
+/// The renderer also maintains the list viewport offsets so the cursor moves
+/// inside the scroll margin before the viewport follows it.
+pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowserState) {
     let overlay_area = make_overlay(area);
 
     // Clear overlay area first, then draw block borders on top
@@ -97,25 +100,46 @@ fn render_path_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     frame.render_widget(Paragraph::new(text), area);
 }
 
-/// Returns the first visible item for a selection at `selected_pos`.
+/// Updates the first visible item so the cursor moves inside a 3-row margin
+/// before the viewport starts scrolling.
 ///
-/// Keeps up to [`SCROLL_OFFSET`] rows of context below the cursor while
-/// scrolling down (and above it while scrolling up). At the end of the list
-/// the last item is allowed to reach the bottom row, so the margin is clamped
-/// to `item_count - viewport_height`; short lists never scroll.
-fn scroll_start(selected_pos: usize, item_count: usize, viewport_height: usize) -> usize {
+/// Unlike a stateless calculation, this keeps the viewport where it is while
+/// the selection moves up or down within the margin band. Scrolling only
+/// starts when the selection would cross the top or bottom margin.
+fn update_scroll(
+    scroll: &mut usize,
+    selected_pos: usize,
+    item_count: usize,
+    viewport_height: usize,
+) {
     if viewport_height == 0 {
-        return 0;
+        *scroll = 0;
+        return;
     }
 
     let margin = SCROLL_OFFSET.min(viewport_height.saturating_sub(1) / 2);
-    let max_row = viewport_height.saturating_sub(1).saturating_sub(margin);
     let max_scroll = item_count.saturating_sub(viewport_height);
 
-    selected_pos.saturating_sub(max_row).min(max_scroll)
+    let top = scroll.saturating_add(margin);
+    let bottom = scroll
+        .saturating_add(viewport_height)
+        .saturating_sub(1)
+        .saturating_sub(margin);
+
+    if selected_pos < top {
+        *scroll = selected_pos.saturating_sub(margin);
+    } else if selected_pos > bottom {
+        *scroll = selected_pos
+            .saturating_add(margin)
+            .saturating_add(1)
+            .saturating_sub(viewport_height);
+    }
+
+    // At the end of the list the last item may reach the bottom row.
+    *scroll = (*scroll).min(max_scroll);
 }
 
-fn render_file_list(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
+fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBrowserState) {
     let indices = state.filtered_indices();
     let list_height = area.height as usize;
 
@@ -125,7 +149,8 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
         .position(|&i| i == state.selected)
         .unwrap_or(0);
 
-    let scroll = scroll_start(sel_pos, indices.len(), list_height);
+    update_scroll(&mut state.scroll, sel_pos, indices.len(), list_height);
+    let scroll = state.scroll;
 
     let visible: Vec<Line> = indices
         .iter()
@@ -266,7 +291,7 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     frame.render_widget(Paragraph::new(Text::from(lines)), area);
 }
 
-fn render_locations_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
+fn render_locations_popup(frame: &mut Frame, area: Rect, state: &mut FileBrowserState) {
     let row_count = state.locations.len().max(1) as u16;
     let height = row_count.saturating_add(3); // borders + rows + hint
     let popup_area = centered_popup_sized(area, height, 3, 4, 40);
@@ -280,7 +305,13 @@ fn render_locations_popup(frame: &mut Frame, area: Rect, state: &FileBrowserStat
     let layout = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
     let list_height = layout[0].height as usize;
 
-    let scroll = scroll_start(state.location_selected, state.locations.len(), list_height);
+    update_scroll(
+        &mut state.location_scroll,
+        state.location_selected,
+        state.locations.len(),
+        list_height,
+    );
+    let scroll = state.location_scroll;
 
     let label_width = state
         .locations
@@ -486,7 +517,7 @@ mod tests {
     }
 
     /// Renders and returns the full buffer content as a single string.
-    fn render_to_text(state: &FileBrowserState) -> String {
+    fn render_to_text(state: &mut FileBrowserState) -> String {
         let mut terminal = make_terminal();
         terminal
             .draw(|f| {
@@ -506,7 +537,7 @@ mod tests {
     fn test_render_open_file_shows_path_bar() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("/tmp"),
             "path bar should show '/tmp', got:\n{text}"
@@ -517,7 +548,7 @@ mod tests {
     fn test_render_open_file_shows_entries() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         // At least one entry name should appear in the output
         let has_entry = state.entries.iter().any(|e| text.contains(&e.name));
         assert!(has_entry, "no entry name found in rendered output:\n{text}");
@@ -527,7 +558,7 @@ mod tests {
     fn test_render_open_file_shows_filter_hint() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("Filter:"),
             "options bar should show filter indicator:\n{text}"
@@ -542,7 +573,7 @@ mod tests {
     fn test_render_open_file_shows_search_hint() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("[/]search") || text.contains("Search:"),
             "options bar should have search hint:\n{text}"
@@ -555,7 +586,7 @@ mod tests {
         let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
         state.focus = FocusTarget::List;
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         // Title should be "Create New Secret File"
         assert!(
             text.contains("Create New Secret File"),
@@ -573,7 +604,7 @@ mod tests {
         let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
         state.focus = FocusTarget::Input;
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("Name:"),
             "should show Name: input when focused:\n{text}"
@@ -589,7 +620,7 @@ mod tests {
         let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
         state.focus = FocusTarget::Input;
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("New File"),
             "name input should render as a titled popup:\n{text}"
@@ -603,7 +634,7 @@ mod tests {
         state.focus = FocusTarget::Rename;
         state.rename_name = "renamed.age".to_string();
         state.rename_cursor = state.rename_name.len();
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("Rename"),
             "rename input should render as a titled popup:\n{text}"
@@ -619,7 +650,7 @@ mod tests {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         state.confirm_delete = Some("/tmp/secret.age".to_string());
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("Confirm Delete"),
             "delete confirmation should render as a titled popup:\n{text}"
@@ -635,7 +666,7 @@ mod tests {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         state.error = Some("Permission denied".to_string());
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("Alert"),
             "error should render as a titled popup:\n{text}"
@@ -649,7 +680,7 @@ mod tests {
         state.focus = FocusTarget::Input;
         state.creating_name = "myvault.age".to_string();
         state.creating_cursor = 5;
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("myvault"),
             "should show the typed name:\n{text}"
@@ -662,7 +693,7 @@ mod tests {
         populate_tmp(&mut state);
         state.search_active = true;
         state.search_query = "test".to_string();
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("Search: test"),
             "should show search query:\n{text}"
@@ -674,7 +705,7 @@ mod tests {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         state.error = Some("Permission denied".to_string());
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("Permission denied"),
             "should show error text:\n{text}"
@@ -692,7 +723,7 @@ mod tests {
         let _ = std::fs::create_dir_all(empty_dir);
         state.entries = file_handling::list_dir(empty_dir).unwrap();
         state.filter = FileFilter::PwdKeeperOnly;
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         // Searching for something non-existent
         assert!(
             text.contains("No matching files") || text.contains("(empty directory)"),
@@ -705,7 +736,7 @@ mod tests {
     fn test_render_new_hint_shown_in_create_mode() {
         let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("[n]new"),
             "should show new file/folder hint in CreateFile mode:\n{text}"
@@ -716,7 +747,7 @@ mod tests {
     fn test_render_new_hint_hidden_in_open_mode() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             !text.contains("[n]new"),
             "should NOT show new file/folder hint in OpenFile mode:\n{text}"
@@ -728,7 +759,7 @@ mod tests {
         let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
         state.pending = NewFilePrefix::Pending;
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("n:new file") && text.contains("N:new folder"),
             "should show the n-prefix prompt while pending:\n{text}"
@@ -739,7 +770,7 @@ mod tests {
     fn test_render_dirs_marked_with_arrow_icon() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         // The selected entry should show ▸ prefix
         let has_arrow = text.contains('▸');
         assert!(has_arrow, "should have selection arrow (▸):\n{text}");
@@ -769,7 +800,7 @@ mod tests {
             .position(|e| e.name == "myvault.age")
             .unwrap_or(0);
 
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
 
         assert!(
             text.contains("[PWD]"),
@@ -794,7 +825,7 @@ mod tests {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
 
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("Hidden: off"),
             "hidden indicator should start off:\n{text}"
@@ -809,7 +840,7 @@ mod tests {
         );
 
         state.show_hidden = true;
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
         assert!(
             text.contains("Hidden: on"),
             "hidden indicator should reflect the toggle:\n{text}"
@@ -839,7 +870,7 @@ mod tests {
         state.location_selected = 1;
         state.focus = FocusTarget::Locations;
 
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
 
         assert!(
             text.contains("Locations"),
@@ -866,7 +897,7 @@ mod tests {
         state.locations.clear();
         state.focus = FocusTarget::Locations;
 
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
 
         assert!(
             text.contains("Locations"),
@@ -877,55 +908,104 @@ mod tests {
     // ── Scroll margin (scrolloff) ──
 
     #[test]
-    fn test_scroll_start_keeps_top_context() {
-        // Height 10 with a 3-row margin: the cursor may sit on row 6 before
-        // the viewport starts following it.
-        assert_eq!(scroll_start(0, 100, 10), 0);
-        assert_eq!(scroll_start(6, 100, 10), 0);
-        assert_eq!(scroll_start(7, 100, 10), 1);
-        assert_eq!(scroll_start(8, 100, 10), 2);
+    fn test_update_scroll_moves_cursor_before_scrolling_down() {
+        let mut scroll = 0;
+
+        for selected in 0..=9 {
+            update_scroll(&mut scroll, selected, 100, 13);
+            assert_eq!(scroll, 0, "selected {selected} should not scroll yet");
+        }
+
+        update_scroll(&mut scroll, 10, 100, 13);
+        assert_eq!(scroll, 1, "scrolling starts at the bottom margin");
     }
 
     #[test]
-    fn test_scroll_start_keeps_three_rows_below_cursor() {
-        let height = 10;
-        let selected = 50;
-        let scroll = scroll_start(selected, 100, height);
+    fn test_update_scroll_moves_cursor_before_scrolling_up() {
+        let mut scroll = 0;
+        update_scroll(&mut scroll, 10, 100, 13);
+        assert_eq!(scroll, 1);
 
-        assert_eq!(scroll, 44);
+        // Moving up keeps the viewport in place until the top margin.
+        for selected in (4..=9).rev() {
+            update_scroll(&mut scroll, selected, 100, 13);
+            assert_eq!(
+                scroll, 1,
+                "selected {selected} should move within the viewport"
+            );
+        }
+
+        update_scroll(&mut scroll, 3, 100, 13);
         assert_eq!(
-            selected - scroll,
-            6,
-            "cursor should stay 3 rows above the bottom"
+            scroll, 0,
+            "the viewport follows once the top margin is reached"
         );
     }
 
     #[test]
-    fn test_scroll_start_clamps_at_end_of_list() {
-        // Last item sits on the bottom row instead of leaving blank rows.
-        assert_eq!(scroll_start(99, 100, 10), 90);
-        assert_eq!(scroll_start(98, 100, 10), 90);
-        assert_eq!(scroll_start(97, 100, 10), 90);
-        assert_eq!(scroll_start(96, 100, 10), 90);
-        assert_eq!(scroll_start(95, 100, 10), 89);
+    fn test_update_scroll_clamps_at_end_of_list() {
+        let mut scroll = 0;
+        update_scroll(&mut scroll, 99, 100, 13);
+        assert_eq!(scroll, 87);
+
+        // The cursor moves up from the last row before the viewport scrolls.
+        for selected in (90..=98).rev() {
+            update_scroll(&mut scroll, selected, 100, 13);
+            assert_eq!(
+                scroll, 87,
+                "selected {selected} should remain in the final viewport"
+            );
+        }
+
+        update_scroll(&mut scroll, 89, 100, 13);
+        assert_eq!(scroll, 86);
     }
 
     #[test]
-    fn test_scroll_start_short_list_never_scrolls() {
-        assert_eq!(scroll_start(4, 5, 10), 0);
-        assert_eq!(scroll_start(0, 0, 10), 0);
+    fn test_update_scroll_jump_brings_selection_into_margin() {
+        let mut scroll = 0;
+        update_scroll(&mut scroll, 50, 100, 13);
+
+        assert_eq!(scroll, 41);
+        assert_eq!(50 - scroll, 9, "jump lands on the bottom margin");
+
+        update_scroll(&mut scroll, 0, 100, 13);
+        assert_eq!(scroll, 0);
     }
 
     #[test]
-    fn test_scroll_start_tiny_viewport_keeps_cursor_visible() {
-        assert_eq!(scroll_start(0, 100, 0), 0);
+    fn test_update_scroll_short_list_never_scrolls() {
+        let mut scroll = 0;
+        update_scroll(&mut scroll, 4, 5, 13);
+        assert_eq!(scroll, 0);
+
+        update_scroll(&mut scroll, 0, 0, 13);
+        assert_eq!(scroll, 0);
+    }
+
+    #[test]
+    fn test_update_scroll_tiny_viewport_keeps_cursor_visible() {
+        let mut scroll = 0;
+        update_scroll(&mut scroll, 0, 100, 0);
+        assert_eq!(scroll, 0);
+
         // Height 1: the cursor is the only row.
-        assert_eq!(scroll_start(5, 100, 1), 5);
+        scroll = 0;
+        update_scroll(&mut scroll, 5, 100, 1);
+        assert_eq!(scroll, 5);
+
         // Height 2–3: margin collapses to 0, cursor stays on the last row.
-        assert_eq!(scroll_start(5, 100, 2), 4);
-        assert_eq!(scroll_start(5, 100, 3), 4);
+        scroll = 0;
+        update_scroll(&mut scroll, 5, 100, 2);
+        assert_eq!(scroll, 4);
+        scroll = 0;
+        update_scroll(&mut scroll, 5, 100, 3);
+        assert_eq!(scroll, 4);
+
         // Height 4: margin caps at 1, cursor stays one row above the bottom.
-        assert_eq!(scroll_start(5, 100, 4), 3);
+        scroll = 0;
+        update_scroll(&mut scroll, 5, 100, 4);
+        assert_eq!(scroll, 3);
     }
 
     #[test]
@@ -940,7 +1020,7 @@ mod tests {
         state.entries = file_handling::list_dir(dir.path()).unwrap();
         state.selected = 12;
 
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
 
         // The 13-row list keeps rows 13–15 visible below the cursor.
         assert!(
@@ -950,6 +1030,40 @@ mod tests {
         assert!(
             !text.contains("file16.txt"),
             "only the 3-row margin should be visible below the cursor:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_file_list_moves_cursor_before_scrolling_up() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..30 {
+            std::fs::write(dir.path().join(format!("file{i:02}.txt")), b"x").unwrap();
+        }
+
+        let mut state = new_state(FileBrowserMode::OpenFile);
+        state.current_dir = dir.path().to_path_buf();
+        state.entries = file_handling::list_dir(dir.path()).unwrap();
+
+        state.selected = 12;
+        let _ = render_to_text(&mut state);
+        assert_eq!(state.scroll, 3);
+
+        state.selected = 11;
+        let _ = render_to_text(&mut state);
+        assert_eq!(
+            state.scroll, 3,
+            "cursor should move up inside the viewport before scrolling"
+        );
+
+        state.selected = 6;
+        let _ = render_to_text(&mut state);
+        assert_eq!(state.scroll, 3, "cursor should reach the top margin");
+
+        state.selected = 5;
+        let _ = render_to_text(&mut state);
+        assert_eq!(
+            state.scroll, 2,
+            "viewport should follow only after the margin"
         );
     }
 
@@ -970,7 +1084,7 @@ mod tests {
         state.location_selected = 20;
         state.focus = FocusTarget::Locations;
 
-        let text = render_to_text(&state);
+        let text = render_to_text(&mut state);
 
         assert!(
             text.contains("loc-20") && text.contains("loc-23"),
@@ -979,6 +1093,27 @@ mod tests {
         assert!(
             !text.contains("loc-24"),
             "only the 3-row margin should be visible below the cursor:\n{text}"
+        );
+
+        state.location_selected = 19;
+        let _ = render_to_text(&mut state);
+        assert_eq!(
+            state.location_scroll, 5,
+            "cursor should move up inside the overlay before scrolling"
+        );
+
+        state.location_selected = 8;
+        let _ = render_to_text(&mut state);
+        assert_eq!(
+            state.location_scroll, 5,
+            "cursor should reach the overlay top margin"
+        );
+
+        state.location_selected = 7;
+        let _ = render_to_text(&mut state);
+        assert_eq!(
+            state.location_scroll, 4,
+            "overlay should scroll only after the margin"
         );
     }
 }

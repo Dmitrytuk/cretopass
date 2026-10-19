@@ -147,7 +147,7 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 
         terminal.draw(|f| {
             let area = f.area();
-            render(f, area, &state);
+            render(f, area, &mut state);
         })?;
 
         if let Event::Key(key) = event::read()? {
@@ -401,7 +401,7 @@ fn handle_file_browser_key<B: Backend>(
                                 let save_node = root.clone();
 
                                 state.status = Some(texts::STATUS_SAVING);
-                                terminal.draw(|f| render(f, f.area(), state))?;
+                                terminal.draw(|f| render(f, f.area(), &mut *state))?;
                                 match file_handling::save_tree(&save_node, &save_path, &save_pass) {
                                     Err(e) => {
                                         state.status = None;
@@ -798,7 +798,7 @@ fn handle_change_pw_input_key<B: Backend>(
                 {
                     let new_pass_bytes = zeroize::Zeroizing::new(new_pass.into_bytes());
                     state.status = Some(texts::STATUS_SAVING);
-                    terminal.draw(|f| render(f, f.area(), state))?;
+                    terminal.draw(|f| render(f, f.area(), &mut *state))?;
                     match file_handling::save_tree(node, path, &new_pass_bytes) {
                         Err(e) => {
                             state.status = None;
@@ -848,7 +848,7 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
             state.status = Some(texts::STATUS_SAVING);
-            terminal.draw(|f| render(f, f.area(), state))?;
+            terminal.draw(|f| render(f, f.area(), &mut *state))?;
             match file_handling::create_secret_file(&file_path, "") {
                 Err(e) => {
                     state.status = None;
@@ -1149,7 +1149,7 @@ fn handle_passphrase_key<B: Backend>(
                 ..
             } => {
                 state.status = Some(texts::STATUS_LOADING);
-                terminal.draw(|f| render(f, f.area(), state))?;
+                terminal.draw(|f| render(f, f.area(), &mut *state))?;
                 match file_handling::decrypt_to_node(&file_data, &passphrase) {
                     Err(e) => {
                         state.status = None;
@@ -1388,7 +1388,7 @@ fn handle_create_secret_file_key<B: Backend>(
             }
 
             state.status = Some(texts::STATUS_SAVING);
-            terminal.draw(|f| render(f, f.area(), state))?;
+            terminal.draw(|f| render(f, f.area(), &mut *state))?;
             match file_handling::create_secret_file(&file_path, &passphrase) {
                 Err(e) => {
                     state.status = None;
@@ -1435,13 +1435,18 @@ fn handle_create_secret_file_key<B: Backend>(
 
 // ── Rendering ──
 
-fn render(frame: &mut Frame, area: Rect, state: &HomeState) {
+fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
     render_home_window(frame, area, state);
 
+    // The file browser renderer maintains its viewport offsets, so it needs
+    // mutable access before the remaining modal arms borrow the state.
+    if let Some(HomeModal::FileBrowser(browser)) = &mut state.modal {
+        file_browser::render_file_browser(frame, area, browser);
+        return;
+    }
+
     match &state.modal {
-        Some(HomeModal::FileBrowser(browser)) => {
-            file_browser::render_file_browser(frame, area, browser);
-        }
+        Some(HomeModal::FileBrowser(_)) => {}
         Some(HomeModal::PassphraseInput { .. }) => render_passphrase_modal(frame, area, state),
         Some(HomeModal::CreateSecretFile { .. }) => {
             render_create_secret_file_modal(frame, area, state)

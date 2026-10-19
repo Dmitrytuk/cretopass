@@ -18,7 +18,7 @@ file listing UX to vault-specific modal logic, preventing reuse.
 
 | File | Responsibility |
 |------|---------------|
-| `state.rs` | `FileBrowserState`, `FileBrowserMode` (OpenFile/CreateFile/ImportFile), `FileBrowserSession` (last directory + hidden setting), `Location` (Home or mounted disk row), `FocusTarget` (List/Input/Rename/Locations), `NewFilePrefix` (None/Pending), `FileFilter` (All/PwdKeeperOnly), `FileBrowserAction` (Selected/Cancelled/Renamed) |
+| `state.rs` | `FileBrowserState`, `FileBrowserMode` (OpenFile/CreateFile/ImportFile), `FileBrowserSession` (last directory + hidden setting), `Location` (Home or mounted disk row), `FocusTarget` (List/Input/Rename/Locations), `NewFilePrefix` (None/Pending), `FileFilter` (All/PwdKeeperOnly), `FileBrowserAction` (Selected/Cancelled/Renamed), viewport offsets (`scroll`, `location_scroll`) |
 | `handler.rs` | `handle_key()` dispatches to list/input/rename/locations handlers. Supports j/k navigation, Enter, search, filter toggle, hidden-entry toggle (`Ctrl+h`), directory traversal, rename, delete, the `n` prefix (new file/folder), text editing |
 | `render.rs` | `render_file_browser()` renders overlay with path bar, file list (icons, selection, scrolling), and a two-row options bar (filter + search + hidden state; contextual actions). Centered popups for the name input / rename input / delete confirmation / error, plus the Locations overlay |
 
@@ -31,7 +31,8 @@ file listing UX to vault-specific modal logic, preventing reuse.
 - The name input, rename input, delete confirmation, and errors render as centered popups stacked over the browser; an error popup sits on top of any active dialog and is dismissed by the next key.
 - The Locations overlay pins `Home` first, then lists mounted disks returned by `file_handling::list_disks()`. It preselects the location with the longest path that is an ancestor of `current_dir`, falling back to the first row. Enter on an unreadable location keeps the overlay open and shows the error popup on top.
 - Hidden entries are names starting with `.`; nothing else is treated as hidden. `list_dir` excludes them and `list_dir_including_hidden` includes them.
-- The file list and Locations overlay keep a fixed 3-row scroll margin (`SCROLL_OFFSET`) around the selection, clamped on short viewports. At the end of the list the last item may sit on the bottom row, matching Vim/Neovim `scrolloff` behavior.
+- The file list and Locations overlay track viewport offsets (`scroll`, `location_scroll`) and keep a fixed 3-row margin (`SCROLL_OFFSET`) around the selection. The cursor moves inside that margin before the viewport scrolls, in both directions; the margin is clamped on short viewports, and at the end of the list the last item may sit on the bottom row, matching Vim/Neovim `scrolloff` behavior.
+- `render_file_browser()` takes `&mut FileBrowserState` because it maintains those viewport offsets while rendering.
 - All I/O (list_dir, list_disks, delete_file, rename, create_dir, probe writability) goes through `file_handling`.
 - Re-exports `FileEntry` from `file_handling` so consumers don't need to import it separately.
 

@@ -157,6 +157,7 @@ fn is_toggle_hidden_key(key: &KeyEvent) -> bool {
 fn open_locations(state: &mut FileBrowserState) {
     state.locations = build_locations();
     state.location_selected = preselect_location(&state.locations, &state.current_dir);
+    state.location_scroll = 0;
     state.focus = FocusTarget::Locations;
 }
 

@@ -107,6 +107,10 @@ pub struct FileBrowserState {
     pub locations: Vec<Location>,
     /// Selected row in the Locations overlay.
     pub location_selected: usize,
+    /// First visible row of the file list; maintained by the renderer.
+    pub scroll: usize,
+    /// First visible row of the Locations overlay; maintained by the renderer.
+    pub location_scroll: usize,
 }
 
 impl FileBrowserState {
@@ -138,6 +142,8 @@ impl FileBrowserState {
             show_hidden: session.show_hidden,
             locations: Vec::new(),
             location_selected: 0,
+            scroll: 0,
+            location_scroll: 0,
         }
     }
 
