@@ -34,7 +34,7 @@ pub fn run() -> io::Result<()> {
 pub fn run_with_root(root: Node) -> io::Result<()> {
     let mut state = TreeState::new(root);
     let mut terminal = setup_terminal()?;
-    let res = tree::app_tree::run_app(&mut terminal, &mut state, None);
+    let res = tree::app_tree::run_app(&mut terminal, &mut state, None).map(|_| ());
     cleanup_terminal(&mut terminal);
     if let Err(ref e) = res {
         eprintln!("Error: {e}");

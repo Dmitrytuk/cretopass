@@ -335,31 +335,52 @@ fn reopen_tree<B: Backend>(state: &mut HomeState, terminal: &mut Terminal<B>) ->
 
 /// Runs the tree and hands its final root back to the active vault.
 ///
-/// The autosave worker may have written a newer root to disk than the one
-/// `HomeState` originally decrypted. Keeping the in-memory home copy in sync
-/// prevents later home operations (change password, import) from overwriting
-/// those edits with stale data.
+/// On a normal exit the autosave worker may have written a newer root to disk
+/// than the one `HomeState` originally decrypted; keeping the in-memory home
+/// copy in sync prevents later home operations (change password, import) from
+/// overwriting those edits with stale data. A force-quit ([`ExitStatus::Unsaved`])
+/// instead drops the active vault, so no later home action can persist or
+/// overwrite with the discarded in-memory tree.
 fn run_tree<B: Backend>(
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
     mut tree_state: crate::tree::widget::TreeState,
     target: Option<SaveTarget>,
 ) -> io::Result<()> {
+    use crate::tree::app_tree::ExitStatus;
+
     if let Some(target) = &target {
         tree_state.active_vault_path = Some(target.path.clone());
     }
     let result = crate::tree::app_tree::run_app(terminal, &mut tree_state, target);
 
-    // Sync even on error: a later retry from Home must not start from a stale
-    // copy that could overwrite edits already written by the autosave worker.
     let return_to_menu = tree_state.return_to_menu;
-    if let Some(active) = state.active_vault.as_mut() {
-        active.node = Some(tree_state.root);
+    match result {
+        Ok(ExitStatus::Saved) => {
+            if let Some(active) = state.active_vault.as_mut() {
+                active.node = Some(tree_state.root);
+            }
+            if !return_to_menu {
+                state.quit = true;
+            }
+            Ok(())
+        }
+        Ok(ExitStatus::Unsaved) => {
+            state.active_vault = None;
+            if !return_to_menu {
+                state.quit = true;
+            }
+            Ok(())
+        }
+        // Sync even on error: a later retry from Home must not start from a
+        // stale copy that could overwrite edits already written by the worker.
+        Err(error) => {
+            if let Some(active) = state.active_vault.as_mut() {
+                active.node = Some(tree_state.root);
+            }
+            Err(error)
+        }
     }
-    if result.is_ok() && !return_to_menu {
-        state.quit = true;
-    }
-    result
 }
 
 // ── File browser key handling ──

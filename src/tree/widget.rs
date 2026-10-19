@@ -594,6 +594,21 @@ impl SaveState {
     }
 }
 
+/// State of a requested exit that is waiting on the autosave worker.
+///
+/// A `q` / `H` / `Ctrl-C` request whose final flush fails parks here so the
+/// user can retry, quit without saving, or cancel — instead of being trapped in
+/// the Tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveExit {
+    /// No exit is parked; the flush branch may run.
+    None,
+    /// The exit flush failed; the overlay offers retry / quit-anyway / stay.
+    Blocked,
+    /// The user chose to quit without saving; awaiting confirmation.
+    ConfirmDiscard,
+}
+
 /// Central application state.
 #[derive(Debug)]
 pub struct TreeState {
@@ -618,6 +633,8 @@ pub struct TreeState {
     /// Persistence status of the autosave worker, shown in the title bar and as
     /// the save-error overlay.
     pub save_state: SaveState,
+    /// A requested exit that is parked waiting on the save worker.
+    pub save_exit: SaveExit,
     /// If `true`, window title shows the full path; otherwise just the filename.
     pub display_full_path: bool,
 }
@@ -641,6 +658,7 @@ impl TreeState {
             active_vault_path: None,
             modified: false,
             save_state: SaveState::Idle,
+            save_exit: SaveExit::None,
             display_full_path: true,
         };
         state.update_visible();
