@@ -59,8 +59,6 @@ pub enum InputMode {
         form: FormState,
         target_index: usize,
     },
-    /// Confirmation popup for discarding unsaved changes in edit/add mode.
-    ConfirmDiscardChanges(FormState),
     /// Popup for selecting export scope (node only or with children).
     ExportNodeSelect {
         /// The node being exported.
@@ -99,9 +97,9 @@ pub enum AddPosition {
 
 /// Which level of the two-level Add/Edit form currently has focus.
 ///
-/// `Nav` moves between fields and triggers form-level actions (save, add
-/// field, cancel); `Input` edits the focused field's text. Entered with `i`,
-/// left with `Esc`.
+/// `Nav` moves between fields and triggers form-level actions (add field,
+/// cut/paste, undo, close); `Input` edits the focused field's text. Entered
+/// with `i` or `Enter`, left with `Enter` or `Esc` (which commits the field).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormFocus {
     /// Navigation level: `j`/`k`/arrows/Tab move between fields.
@@ -112,12 +110,12 @@ pub enum FormFocus {
 
 /// A single row of the Add/Edit form, in display order.
 ///
-/// The concrete list of rows depends on the form kind; see [`FormRow::rows`].
+/// The concrete list of rows depends on the form kind; see [`FormState::rows`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormRow {
     /// The node name (always present, never movable or deletable).
     Name,
-    /// An extra field at the given index into `FormState::extra_fields`.
+    /// An extra field at the given index into the node's `extra_fields`.
     ///
     /// A node's description is itself an extra field (`Custom("Description")`),
     /// so it is edited, moved and deleted exactly like any other.
@@ -141,23 +139,58 @@ pub enum FormPending {
     Paste,
 }
 
+/// A snapshot of a node's name and extra fields, used for form undo/redo.
+#[derive(Debug, Clone)]
+pub struct Snapshot {
+    /// Node name at capture time.
+    pub name: String,
+    /// Extra fields at capture time.
+    pub extra_fields: Vec<ExtraField>,
+}
+
+impl Snapshot {
+    /// Captures the current name and fields of `node`.
+    fn capture(node: &Node) -> Self {
+        Self {
+            name: node.name.clone(),
+            extra_fields: node.extra_fields.clone(),
+        }
+    }
+
+    /// Writes this snapshot's data into `node`.
+    fn apply(&self, node: &mut Node) {
+        node.name.clone_from(&self.name);
+        node.extra_fields.clone_from(&self.extra_fields);
+    }
+}
+
+/// The text of the focused field while the form is at the Input level.
+///
+/// Typing edits this scratch copy; the node is only written when the Input
+/// level is left.
+#[derive(Debug, Clone)]
+pub struct Scratch {
+    /// The text being edited.
+    pub text: String,
+    /// Cursor byte-offset inside [`Scratch::text`].
+    pub cursor: usize,
+}
+
 /// Editable state of the Add/Edit form.
 ///
-/// Owns all transient form data so that the surrounding [`InputMode`] variants
-/// do not each duplicate the same six fields. The selection is an index into
-/// [`FormState::rows`], which is derived from the data instead of being
-/// hard-coded arithmetic.
+/// For Edit (`node_id == Some`) the form holds no copy of the node's data: it
+/// reads and writes the real [`Node`] in the tree, which is the single source
+/// of truth. For Add (`node_id == None`) it holds a pre-creation `draft` node,
+/// used until the first committed change inserts the node into the tree.
 #[derive(Debug, Clone)]
 pub struct FormState {
     /// `Some` = editing an existing node; `None` = adding a new node.
     pub node_id: Option<Uuid>,
-    /// Node name.
-    pub name: String,
-    /// Extra fields in order (including the Description field, if any).
-    pub extra_fields: Vec<ExtraField>,
-    /// Index into [`FormState::rows`].
+    /// Pre-creation working node for the Add form; ignored once `node_id` is set.
+    pub draft: Node,
+    /// Index into the row list returned by [`FormState::rows`].
     pub selected_row: usize,
-    /// Cursor byte-offset inside the focused field's text.
+    /// Cursor byte-offset inside the focused field's text (Nav level).
     pub cursor: usize,
     /// Whether the form is in Nav or Input level.
     pub focus: FormFocus,
@@ -165,6 +198,12 @@ pub struct FormState {
     pub pending: FormPending,
     /// Field removed by `dd`, waiting to be pasted.
     pub field_cut_buffer: Option<ExtraField>,
+    /// Text of the focused field while at the Input level.
+    pub scratch: Option<Scratch>,
+    /// Undo/redo snapshots; `history[history_cursor]` is the current state.
+    pub history: Vec<Snapshot>,
+    /// Index of the current state within [`FormState::history`].
+    pub history_cursor: usize,
 }
 
 impl FormState {
@@ -172,13 +211,15 @@ impl FormState {
     pub fn new_add() -> Self {
         Self {
             node_id: None,
-            name: String::new(),
-            extra_fields: Vec::new(),
+            draft: Node::new(String::new()),
             selected_row: 0,
             cursor: 0,
             focus: FormFocus::Nav,
             pending: FormPending::None,
             field_cut_buffer: None,
+            scratch: None,
+            history: Vec::new(),
+            history_cursor: 0,
         }
     }
 
@@ -186,126 +227,305 @@ impl FormState {
     pub fn new_edit(node: &Node) -> Self {
         Self {
             node_id: Some(node.id),
-            name: node.name.clone(),
-            extra_fields: node.extra_fields.clone(),
+            draft: Node::new(String::new()),
             selected_row: 0,
             cursor: node.name.len(),
             focus: FormFocus::Nav,
             pending: FormPending::None,
             field_cut_buffer: None,
+            scratch: None,
+            history: vec![Snapshot::capture(node)],
+            history_cursor: 0,
         }
     }
 
-    /// Returns `true` when this form creates a new node.
+    /// Returns `true` when this form has not yet created its node.
     pub fn is_adding(&self) -> bool {
         self.node_id.is_none()
     }
 
+    /// Returns the node the form edits: the tree node for Edit, the draft for
+    /// Add.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the form edits a node that is not present in the tree; the
+    /// owning handler keeps the edited node in the tree for the form's lifetime.
+    pub fn node<'a>(&'a self, root: &'a Node) -> &'a Node {
+        match self.node_id {
+            Some(id) => root.find(id).expect("edited node is present in the tree"),
+            None => &self.draft,
+        }
+    }
+
+    /// Returns a mutable reference to the node the form edits.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the form edits a node that is not present in the tree; the
+    /// owning handler keeps the edited node in the tree for the form's lifetime.
+    fn node_mut<'a>(&'a mut self, root: &'a mut Node) -> &'a mut Node {
+        match self.node_id {
+            Some(id) => root
+                .find_mut(id)
+                .expect("edited node is present in the tree"),
+            None => &mut self.draft,
+        }
+    }
+
     /// The ordered list of rows currently shown by this form.
-    pub fn rows(&self) -> Vec<FormRow> {
-        let mut rows = vec![FormRow::Name];
-        rows.extend((0..self.extra_fields.len()).map(FormRow::Extra));
+    pub fn rows(&self, root: &Node) -> Vec<FormRow> {
+        let count = self.node(root).extra_fields.len();
+        let mut rows = Vec::with_capacity(count + 2);
+        rows.push(FormRow::Name);
+        rows.extend((0..count).map(FormRow::Extra));
         rows.push(FormRow::AddButton);
         rows
     }
 
     /// The currently focused row, clamped to the valid range.
-    pub fn current_row(&self) -> FormRow {
-        let rows = self.rows();
+    pub fn current_row(&self, root: &Node) -> FormRow {
+        let rows = self.rows(root);
         rows[self.selected_row.min(rows.len() - 1)]
     }
 
     /// Keeps `selected_row` within bounds after the row list changes.
-    pub fn clamp_selection(&mut self) {
-        let len = self.rows().len();
+    pub fn clamp_selection(&mut self, root: &Node) {
+        let len = self.rows(root).len();
         self.selected_row = self.selected_row.min(len.saturating_sub(1));
     }
 
     /// Selects the row at `index`, clamping to the valid range and resetting
     /// the cursor to the end of that row's text.
-    pub fn select_row(&mut self, index: usize) {
+    pub fn select_row(&mut self, root: &Node, index: usize) {
         self.selected_row = index;
-        self.clamp_selection();
-        self.cursor = self.active_len();
+        self.clamp_selection(root);
+        self.cursor = self.active_len(root);
     }
 
     /// The editable text of the focused row, if it has any.
-    pub fn active_text(&self) -> Option<&str> {
-        match self.current_row() {
-            FormRow::Name => Some(&self.name),
-            FormRow::Extra(i) => self.extra_fields.get(i).map(|f| f.value.as_str()),
-            FormRow::AddButton => None,
-        }
-    }
-
-    /// Mutable access to the editable text of the focused row.
-    pub fn active_text_mut(&mut self) -> Option<&mut String> {
-        match self.current_row() {
-            FormRow::Name => Some(&mut self.name),
-            FormRow::Extra(i) => self.extra_fields.get_mut(i).map(|f| &mut f.value),
+    pub fn active_text<'a>(&'a self, root: &'a Node) -> Option<&'a str> {
+        let node = self.node(root);
+        match self.current_row(root) {
+            FormRow::Name => Some(&node.name),
+            FormRow::Extra(i) => node.extra_fields.get(i).map(|f| f.value.as_str()),
             FormRow::AddButton => None,
         }
     }
 
     /// Byte length of the focused row's text (0 for the add button).
-    pub fn active_len(&self) -> usize {
-        self.active_text().map_or(0, str::len)
+    pub fn active_len(&self, root: &Node) -> usize {
+        self.active_text(root).map_or(0, str::len)
+    }
+
+    /// Enters the Input level, seeding the scratch buffer from the focused
+    /// field. A no-op on the `+ Add Field` row (which has no text).
+    pub fn begin_input(&mut self, root: &Node) {
+        let text = self.active_text(root).map(str::to_string);
+        if let Some(text) = text {
+            self.cursor = text.len();
+            self.scratch = Some(Scratch {
+                cursor: text.len(),
+                text,
+            });
+            self.focus = FormFocus::Input;
+        }
+    }
+
+    /// Leaves the Input level, committing the scratch text into the node when
+    /// it differs from the field's current value.
+    ///
+    /// Returns `true` when the node was modified.
+    pub fn commit_input(&mut self, root: &mut Node) -> bool {
+        self.focus = FormFocus::Nav;
+        let Some(scratch) = self.scratch.take() else {
+            self.cursor = self.active_len(root);
+            return false;
+        };
+        let changed = match self.current_row(root) {
+            FormRow::Name => {
+                if self.node(root).name == scratch.text {
+                    false
+                } else {
+                    self.node_mut(root).name = scratch.text;
+                    true
+                }
+            }
+            FormRow::Extra(i) => {
+                let current = self.node(root).extra_fields.get(i).map(|f| f.value.clone());
+                match current {
+                    Some(value) if value != scratch.text => {
+                        self.node_mut(root).extra_fields[i].value = scratch.text;
+                        true
+                    }
+                    _ => false,
+                }
+            }
+            FormRow::AddButton => false,
+        };
+        self.cursor = self.active_len(root);
+        changed
     }
 
     /// Cuts the focused extra field into `field_cut_buffer`.
     ///
-    /// No-op unless the focused row is an extra field.
-    pub fn cut_focused_field(&mut self) {
-        let FormRow::Extra(index) = self.current_row() else {
-            return;
+    /// Returns `true` when a field was removed. No-op unless the focused row is
+    /// an extra field.
+    pub fn cut_focused_field(&mut self, root: &mut Node) -> bool {
+        let FormRow::Extra(index) = self.current_row(root) else {
+            return false;
         };
-        if index >= self.extra_fields.len() {
-            return;
-        }
-        self.field_cut_buffer = Some(self.extra_fields.remove(index));
+        let removed = {
+            let node = self.node_mut(root);
+            if index >= node.extra_fields.len() {
+                return false;
+            }
+            node.extra_fields.remove(index)
+        };
+        self.field_cut_buffer = Some(removed);
         self.focus = FormFocus::Nav;
-        self.clamp_selection();
-        self.cursor = self.active_len();
+        self.clamp_selection(root);
+        self.cursor = self.active_len(root);
+        true
     }
 
     /// Pastes the cut field after the focused extra field.
     ///
-    /// No-op unless the focused row is an extra field and a field is buffered.
-    pub fn paste_field_after(&mut self) {
-        let FormRow::Extra(index) = self.current_row() else {
-            return;
+    /// Returns `true` when a field was inserted. No-op unless the focused row is
+    /// an extra field and a field is buffered.
+    pub fn paste_field_after(&mut self, root: &mut Node) -> bool {
+        let FormRow::Extra(index) = self.current_row(root) else {
+            return false;
         };
         let Some(field) = self.field_cut_buffer.take() else {
-            return;
+            return false;
         };
-        let at = (index + 1).min(self.extra_fields.len());
-        self.extra_fields.insert(at, field);
+        let at = {
+            let node = self.node_mut(root);
+            let at = (index + 1).min(node.extra_fields.len());
+            node.extra_fields.insert(at, field);
+            at
+        };
         self.focus = FormFocus::Nav;
-        self.selected_row = self.row_index_of_extra(at);
-        self.clamp_selection();
-        self.cursor = self.active_len();
+        self.selected_row = Self::row_index_of_extra(at);
+        self.clamp_selection(root);
+        self.cursor = self.active_len(root);
+        true
     }
 
     /// Pastes the cut field before the focused extra field.
     ///
-    /// No-op unless the focused row is an extra field and a field is buffered.
-    pub fn paste_field_before(&mut self) {
-        let FormRow::Extra(index) = self.current_row() else {
-            return;
+    /// Returns `true` when a field was inserted. No-op unless the focused row is
+    /// an extra field and a field is buffered.
+    pub fn paste_field_before(&mut self, root: &mut Node) -> bool {
+        let FormRow::Extra(index) = self.current_row(root) else {
+            return false;
         };
         let Some(field) = self.field_cut_buffer.take() else {
-            return;
+            return false;
         };
-        self.extra_fields.insert(index, field);
+        self.node_mut(root).extra_fields.insert(index, field);
         self.focus = FormFocus::Nav;
-        self.selected_row = self.row_index_of_extra(index);
-        self.clamp_selection();
-        self.cursor = self.active_len();
+        self.selected_row = Self::row_index_of_extra(index);
+        self.clamp_selection(root);
+        self.cursor = self.active_len(root);
+        true
     }
 
     /// Index in [`FormState::rows`] of the `Extra(extra_index)` row.
-    fn row_index_of_extra(&self, extra_index: usize) -> usize {
+    fn row_index_of_extra(extra_index: usize) -> usize {
         1 + extra_index
+    }
+
+    /// Appends `field` to the form's node and returns its extra-field index.
+    pub fn push_field(&mut self, root: &mut Node, field: ExtraField) -> usize {
+        let node = self.node_mut(root);
+        node.extra_fields.push(field);
+        node.extra_fields.len() - 1
+    }
+
+    /// Removes the extra field at `index`.
+    ///
+    /// Returns `true` when a field was removed.
+    pub fn remove_field(&mut self, root: &mut Node, index: usize) -> bool {
+        let node = self.node_mut(root);
+        if index < node.extra_fields.len() {
+            node.extra_fields.remove(index);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Moves the selection to the `Extra(extra_index)` row and enters the Input
+    /// level on its (empty) value.
+    pub fn focus_new_field(&mut self, root: &Node, extra_index: usize) {
+        self.selected_row = Self::row_index_of_extra(extra_index);
+        self.clamp_selection(root);
+        self.begin_input(root);
+    }
+
+    /// Resets the undo history to a single baseline snapshot of the form's node.
+    pub fn seed_history(&mut self, root: &Node) {
+        let snapshot = Snapshot::capture(self.node(root));
+        self.history = vec![snapshot];
+        self.history_cursor = 0;
+    }
+
+    /// Records the form's node as a new history entry, discarding any redo tail.
+    pub fn push_history(&mut self, root: &Node) {
+        let snapshot = Snapshot::capture(self.node(root));
+        self.history.truncate(self.history_cursor + 1);
+        self.history.push(snapshot);
+        self.history_cursor = self.history.len() - 1;
+    }
+
+    /// Returns `true` when an undo step is available.
+    pub fn can_undo(&self) -> bool {
+        self.history_cursor > 0
+    }
+
+    /// Returns `true` when a redo step is available.
+    pub fn can_redo(&self) -> bool {
+        self.history_cursor + 1 < self.history.len()
+    }
+
+    /// Moves one step back in history and applies the previous state.
+    ///
+    /// Returns `true` when the node changed.
+    pub fn undo(&mut self, root: &mut Node) -> bool {
+        if !self.can_undo() {
+            return false;
+        }
+        self.history_cursor -= 1;
+        let snapshot = self.history[self.history_cursor].clone();
+        snapshot.apply(self.node_mut(root));
+        self.after_history(root);
+        true
+    }
+
+    /// Moves one step forward in history and re-applies the next state.
+    ///
+    /// Returns `true` when the node changed.
+    pub fn redo(&mut self, root: &mut Node) -> bool {
+        if !self.can_redo() {
+            return false;
+        }
+        self.history_cursor += 1;
+        let snapshot = self.history[self.history_cursor].clone();
+        snapshot.apply(self.node_mut(root));
+        self.after_history(root);
+        true
+    }
+
+    /// Restores invariants after an undo/redo rewrote the node.
+    ///
+    /// The field cut buffer is cleared (it may reference fields the restored
+    /// state no longer has), and the selection is clamped to the new row list.
+    fn after_history(&mut self, root: &Node) {
+        self.field_cut_buffer = None;
+        self.clamp_selection(root);
+        self.cursor = self.active_len(root);
     }
 }
 
@@ -560,78 +780,54 @@ impl TreeState {
         }
     }
 
-    /// Finds a node by [`Uuid`] and replaces its name and extra fields.
-    pub fn update_node(&mut self, node_id: Uuid, name: String, extra_fields: Vec<ExtraField>) {
-        if let Some(target) = self.root.find_mut(node_id) {
-            target.name = name;
-            target.extra_fields = extra_fields;
-            self.update_visible();
-            self.modified = true;
-        }
-    }
-
-    /// Creates a new child node under the currently selected node.
-    pub fn add_child_to_selected(&mut self, name: String, extra_fields: Vec<ExtraField>) {
-        let id = match self.selected_node_id() {
-            Some(id) => id,
-            None => return,
-        };
-        let final_name = if name.is_empty() {
-            texts::DEFAULT_NAME.to_string()
-        } else {
-            name
-        };
-        let mut node = Node::new(&final_name);
-        node.extra_fields = extra_fields;
-        if let Some(target) = self.root.find_mut(id) {
-            target.add_child(node);
-            self.expanded.insert(id);
-            self.update_visible();
-            self.modified = true;
-        }
-    }
-
-    /// Creates a new sibling node immediately after the currently selected node.
+    /// Inserts `node` relative to the currently selected node according to
+    /// `position`, expands the parent, selects the new node, and returns its id.
     ///
-    /// No-op when the selected node is the root (it has no parent to provide
-    /// a sibling slot).
-    pub fn add_sibling_to_selected(&mut self, name: String, extra_fields: Vec<ExtraField>) {
-        let id = match self.selected_node_id() {
-            Some(id) => id,
-            None => return,
+    /// Returns `Err(node)` with the node unconsumed when the position is
+    /// unavailable (a sibling slot for the root) or nothing is selected.
+    pub fn insert_node_at_position(
+        &mut self,
+        position: AddPosition,
+        node: Node,
+    ) -> Result<Uuid, Node> {
+        let Some(selected_id) = self.selected_node_id() else {
+            return Err(node);
         };
-        let final_name = if name.is_empty() {
-            texts::DEFAULT_NAME.to_string()
-        } else {
-            name
-        };
-        let mut node = Node::new(&final_name);
-        node.extra_fields = extra_fields;
-        if insert_after(&mut self.root, id, node) {
-            self.update_visible();
-            self.modified = true;
+        let has_sibling_slot = has_parent(&self.root, selected_id);
+        if matches!(
+            position,
+            AddPosition::SiblingAfter | AddPosition::SiblingBefore
+        ) && !has_sibling_slot
+        {
+            return Err(node);
         }
+        let new_id = node.id;
+        match position {
+            AddPosition::Child => {
+                if let Some(target) = self.root.find_mut(selected_id) {
+                    target.add_child(node);
+                } else {
+                    return Err(node);
+                }
+                self.expanded.insert(selected_id);
+            }
+            AddPosition::SiblingAfter => {
+                insert_after(&mut self.root, selected_id, node);
+            }
+            AddPosition::SiblingBefore => {
+                insert_before(&mut self.root, selected_id, node);
+            }
+        }
+        self.update_visible();
+        self.select_by_id(new_id);
+        self.modified = true;
+        Ok(new_id)
     }
 
-    /// Creates a new sibling node immediately before the currently selected node.
-    ///
-    /// No-op when the selected node is the root (it has no parent to provide
-    /// a sibling slot).
-    pub fn add_sibling_before_to_selected(&mut self, name: String, extra_fields: Vec<ExtraField>) {
-        let id = match self.selected_node_id() {
-            Some(id) => id,
-            None => return,
-        };
-        let final_name = if name.is_empty() {
-            texts::DEFAULT_NAME.to_string()
-        } else {
-            name
-        };
-        let mut node = Node::new(&final_name);
-        node.extra_fields = extra_fields;
-        if insert_before(&mut self.root, id, node) {
-            self.update_visible();
-            self.modified = true;
+    /// Moves the selection to the visible row with the given [`Uuid`], if any.
+    pub fn select_by_id(&mut self, id: Uuid) {
+        if let Some(pos) = self.visible.iter().position(|v| v.id == id) {
+            self.selected = pos;
         }
     }
 
@@ -770,6 +966,15 @@ fn insert_before(root: &mut Node, target_id: Uuid, node: Node) -> bool {
         }
     }
     false
+}
+
+/// Returns `true` when some node in the tree has `id` as one of its children
+/// (i.e. `id` is not the root).
+fn has_parent(root: &Node, id: Uuid) -> bool {
+    if root.children.iter().any(|c| c.id == id) {
+        return true;
+    }
+    root.children.iter().any(|c| has_parent(c, id))
 }
 
 fn find_parent_mut(root: &mut Node, id: Uuid) -> Option<&mut Node> {
@@ -937,18 +1142,24 @@ mod tests {
     }
 
     #[test]
-    fn add_sibling_before_to_selected_inserts_in_front() {
+    fn insert_node_at_position_inserts_sibling_before() {
         let mut state = make_tree();
         state.selected = 4; // "B"
-        state.add_sibling_before_to_selected("X".to_string(), Vec::new());
+        let node = Node::new("X");
+        let id = state
+            .insert_node_at_position(AddPosition::SiblingBefore, node)
+            .expect("sibling slot available");
         assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "X", "B"]);
+        assert_eq!(state.visible[state.selected].id, id);
     }
 
     #[test]
-    fn add_sibling_before_is_noop_for_root() {
+    fn insert_node_at_position_is_noop_for_root_sibling() {
         let mut state = make_tree();
         state.selected = 0;
-        state.add_sibling_before_to_selected("X".to_string(), Vec::new());
+        let node = Node::new("X");
+        let err = state.insert_node_at_position(AddPosition::SiblingBefore, node);
+        assert!(err.is_err());
         assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "B"]);
     }
 }

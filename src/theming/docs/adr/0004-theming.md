@@ -65,29 +65,30 @@ through matched rows only.
 | Keys | Action |
 |------|--------|
 | `j`/`k` | Navigate rows (a node's extra fields) |
-| `Enter` | Copy selected row to clipboard → "Copied!" alert |
-| `o` | Edit this node |
+| `c` | Copy selected row to clipboard → "Copied!" alert |
+| `i` / `Enter` | Edit this node |
 | `Esc` | Close overlay |
 
 ### Add/Edit form
 
-The form has two levels: **Nav** (focus movement, form actions) and **Input**
-(editing the focused field's text). It opens in Nav; `i` enters Input, `Esc`
-returns to Nav.
+The form is a **live editor**: leaving the Input level commits the field's
+text straight into the node. It has two levels: **Nav** (focus movement, form
+actions) and **Input** (editing the focused field's text). It opens in Nav;
+`i`/`Enter` enter Input, `Enter`/`Esc` commit and return to Nav.
 
 | Level | Keys | Action |
 |-------|------|--------|
 | Nav | `j`/`k` / `Up` / `Down` / `Tab` / `Shift+Tab` | Switch field |
-| Nav | `i` | Enter Input level (edit focused field) |
-| Nav | `Enter` | Save (or open field-type picker on the "+ Add Field" row) |
-| Nav | `Delete` (on extra field row) | Confirm-delete popup |
+| Nav | `i` / `Enter` | Enter Input level (or open the field-type picker on "+ Add Field") |
+| Nav | `u` / `r` | Undo / redo a committed change (Edit sessions only) |
+| Nav | `Delete` (on extra field row) | Confirm-delete popup (deletion commits immediately) |
 | Nav | `d` then `d` | Cut the focused extra field (mode `CUT`) |
 | Nav | `p` then `p` / `P` | Paste the cut field after / before the focused field (mode `PASTE`) |
-| Nav | `Esc` | Cancel (confirmation if data changed) |
+| Nav | `Esc` | Close (Edit → Detail; empty Add → Normal) |
 | Input | Printable chars | Edit the focused field's text |
 | Input | `Left` / `Right` / `Home` / `End` | Cursor movement |
 | Input | `Backspace` / `Delete` | Delete character |
-| Input | `Enter` / `Esc` | Return to Nav level |
+| Input | `Enter` / `Esc` | Commit the field and return to Nav |
 
 ### Home screen
 

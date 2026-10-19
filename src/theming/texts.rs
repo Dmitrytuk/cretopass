@@ -9,7 +9,6 @@ pub const OVERLAY_EDIT_NODE: &str = "Edit Node";
 pub const OVERLAY_SELECT_FIELD_TYPE: &str = " Select Field Type ";
 pub const OVERLAY_CUSTOM_FIELD_NAME: &str = " Custom Field Name ";
 pub const OVERLAY_CONFIRM_DELETE: &str = " Confirm Delete ";
-pub const OVERLAY_UNSAVED_CHANGES: &str = " Unsaved Changes ";
 pub const OVERLAY_COPIED: &str = " Copied ";
 pub const OVERLAY_HELP: &str = " Help ";
 
@@ -69,7 +68,6 @@ pub const MODE_ADD: &str = "ADD";
 pub const MODE_FIELD_TYPE: &str = "FIELD TYPE";
 pub const MODE_CUSTOM_NAME: &str = "CUSTOM NAME";
 pub const MODE_CONFIRM: &str = "CONFIRM";
-pub const MODE_DISCARD: &str = "DISCARD?";
 pub const MODE_HELP: &str = "HELP";
 
 pub const STATUS_LOADING: &str = "Loading...";
@@ -81,19 +79,18 @@ pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
 pub const HINT_PENDING_CUT: &str = "d:cut  Esc:cancel";
 pub const HINT_PASTE: &str = "p:after  P:before  l/→:child  Esc:cancel";
 pub const HINT_PENDING_ADD: &str = "a:after  A:before  l/→:child  Esc:cancel";
-pub const HINT_DETAIL: &str = "j/k:navigate  Enter:copy  o:edit  Esc:close";
+pub const HINT_DETAIL: &str = "j/k:navigate  c:copy  i/Enter:edit  Esc:close";
 pub const HINT_DETAIL_ALERT: &str = "Press any key to continue";
-pub const HINT_FORM: &str = "j/k:field  i:edit  Enter:save  Esc:cancel";
+pub const HINT_FORM: &str = "j/k:field  i/Enter:edit  u/r:undo/redo  Esc:close";
 pub const HINT_FORM_EXTRA: &str =
-    "j/k:field  i:edit  dd:cut  p:paste  Del:delete  Enter:save  Esc:cancel";
+    "j/k:field  i/Enter:edit  dd:cut  p:paste  Del:delete  u/r:undo/redo  Esc:close";
 pub const HINT_FORM_ADD: &str = "Enter:add field  Esc:cancel";
-pub const HINT_FORM_INPUT: &str = "Type to edit  Enter/Esc:back";
+pub const HINT_FORM_INPUT: &str = "Type to edit  Enter/Esc:done";
 pub const HINT_FIELD_CUT: &str = "d:cut field  Esc:cancel";
 pub const HINT_FIELD_PASTE: &str = "p:after  P:before  Esc:cancel";
 pub const HINT_SELECT_FIELD_TYPE: &str = "j/k:nav  1-9:select  Enter:choose  Esc:cancel";
 pub const HINT_CUSTOM_FIELD_NAME: &str = "Type name  Enter:done  Esc:cancel";
 pub const HINT_CONFIRM_DELETE: &str = "y:delete  n/Esc:cancel";
-pub const HINT_DISCARD: &str = "Enter/y:discard  n/Esc:continue editing";
 pub const HINT_HOME: &str = "j/k:navigate  Enter:select  d:<delete path> q:quit";
 pub const HINT_CONFIG: &str = "Space:toggle  Enter:save  Esc:cancel";
 pub const HINT_DELETE_CONFIRM: &str = "y/Enter:confirm  any key:cancel";
@@ -127,7 +124,6 @@ pub const PROMPT_DELETE_RECENT_START: &str = "Remove '";
 pub const PROMPT_DELETE_RECENT_END: &str = "' from recent files?";
 pub const PROMPT_CHANGE_PW: &str = "Are you sure you want to change the password?";
 pub const PROMPT_NO_PASSPHRASE: &str = "You are creating the secret file without password?";
-pub const PROMPT_DISCARD: &str = "Discard changes?";
 
 pub const OVERLAY_EXPORT_NODE: &str = " Export Node ";
 pub const OVERLAY_EXPORT_FORMAT: &str = " Select Export Format ";

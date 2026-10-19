@@ -35,16 +35,21 @@ _Avoid_: Tree view, Tree app, Workspace
 **Detail**: Overlay listing a selected Node's ExtraFields. Rows can be navigated and copied to the system clipboard.
 _Avoid_: Info panel, View mode
 
-**Edit**: Inline two-level form for modifying an existing Node's name and ExtraFields. Nav level moves fields and triggers actions; Input level edits text.
+**Edit**: Live inline form for modifying an existing Node's name and ExtraFields. Nav level moves fields and triggers actions; Input level edits text. Leaving the Input level commits the edited field straight into the Node.
 _Avoid_: Editing mode
 
-**Add**: Inline two-level form for creating a new Node. Starts with the Name row alone; Description and ExtraFields are added via `+ Add Field`. Empty name defaults to "Untitled".
+**Add**: Live inline form for creating a new Node. Starts with the Name row alone; Description and ExtraFields are added via `+ Add Field`. The first committed change creates the Node at the pending position, after which the session behaves as Edit. An empty name defaults to "Untitled".
 _Avoid_: Adding mode
 
-**Form**: The shared Add/Edit state (`FormState`). Holds the node data being edited, the ordered row list (`FormRow`), the focused row, the Nav/Input level, and the field cut buffer.
+**Form**: The shared Add/Edit state (`FormState`). Holds the Node being edited (or the Add draft), the ordered row list (`FormRow`), the focused row, the Nav/Input level, the field cut buffer, and the undo history.
+
+**Draft**: The form-local Node holding an Add session's data before its first commit inserts it into the Tree. Discarded if the Add is cancelled; unused by Edit.
 
 **Field cut buffer**: The form-local slot (`FormState::field_cut_buffer`) holding an ExtraField removed with `dd`, ready to be pasted with `p`/`P`. Reorders fields without touching the node until the form is saved; discarded with the form.
 _Avoid_: Clipboard, Yank buffer
+
+**Undo history**: The form-local record of a Node's successive committed states during one Edit session, capped by a redo tail. Cleared when the session ends. Distinct from the system clipboard and the Cut buffer.
+_Avoid_: Change log, Version history
 
 **Expand**: Revealing a Branch Node's children in the Tree view. Collapse hides them again.
 _Avoid_: Open

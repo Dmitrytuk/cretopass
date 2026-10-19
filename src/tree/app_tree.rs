@@ -8,7 +8,7 @@ use crate::cursor::{
 use crate::file_handling::save_tree;
 use crate::theming::Action;
 use crate::theming::{ElementStyle, Icon, texts};
-use crate::tree::node::{ExtraField, FieldType};
+use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{
     AddPosition, FormFocus, FormPending, FormRow, FormState, InputMode, TreeState, TreeWidget,
 };
@@ -43,7 +43,6 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) ->
                 InputMode::SelectFieldType { .. } => handle_select_field_type(key, state),
                 InputMode::CustomFieldName { .. } => handle_custom_field_name(key, state),
                 InputMode::ConfirmDeleteField { .. } => handle_confirm_delete(key, state),
-                InputMode::ConfirmDiscardChanges { .. } => handle_confirm_discard(key, state),
                 InputMode::Detail { .. } => handle_detail(key, state),
                 InputMode::ExportNodeSelect { .. } => handle_export_node_select(key, state),
                 InputMode::ExportNodeFormat { .. } => handle_export_node_format(key, state),
@@ -236,16 +235,63 @@ impl PickerItem {
     }
 }
 
-/// Applies the given edit to the form's focused text and updates the cursor.
-fn form_edit<F>(form: &mut FormState, edit: F)
+/// Applies an edit to the form's scratch text while at the Input level.
+fn scratch_edit<F>(form: &mut FormState, edit: F)
 where
     F: FnOnce(&mut String, &mut usize),
 {
-    let mut cursor = form.cursor;
-    if let Some(text) = form.active_text_mut() {
-        edit(text, &mut cursor);
+    if let Some(scratch) = form.scratch.as_mut() {
+        edit(&mut scratch.text, &mut scratch.cursor);
     }
-    form.cursor = cursor;
+}
+
+/// Records a committed change on the form's node.
+///
+/// On the Add form's first commit this inserts the draft into the tree at
+/// [`TreeState::add_position`], switches the form to editing that node, and
+/// seeds the undo history. In all cases the resulting node state is pushed onto
+/// the history and the tree is marked dirty (triggering autosave).
+fn commit_form_change(state: &mut TreeState, form: &mut FormState) {
+    if form.is_adding() {
+        let placeholder = Node::new(String::new());
+        let mut draft = std::mem::replace(&mut form.draft, placeholder);
+        if draft.name.is_empty() {
+            draft.name = texts::DEFAULT_NAME.to_string();
+        }
+        match state.insert_node_at_position(state.add_position, draft) {
+            Ok(id) => {
+                form.node_id = Some(id);
+                // The creating commit defines the baseline; it is not itself
+                // undoable.
+                form.seed_history(&state.root);
+            }
+            // The position is unavailable (e.g. a sibling slot for the root);
+            // keep the draft so the user can keep editing.
+            Err(node) => {
+                form.draft = node;
+                return;
+            }
+        }
+    } else {
+        form.push_history(&state.root);
+    }
+    state.modified = true;
+}
+
+/// Returns the mode to enter when the Edit/Add form is closed.
+///
+/// An Edit session (including an Add session whose first commit created its
+/// node) returns to the node's Detail overlay; an empty Add session cancels
+/// back to Normal.
+fn close_form(form: &FormState) -> InputMode {
+    if form.is_adding() {
+        InputMode::Normal
+    } else {
+        InputMode::Detail {
+            selected: 0,
+            alert: None,
+        }
+    }
 }
 
 fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
@@ -257,8 +303,8 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
         }
     };
 
-    form.clamp_selection();
-    let row = form.current_row();
+    form.clamp_selection(&state.root);
+    let row = form.current_row(&state.root);
 
     let action = match form.pending {
         FormPending::Cut => Action::from_form_pending(&key, false),
@@ -283,7 +329,9 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
             }
         }
         Action::Cut => {
-            form.cut_focused_field();
+            if form.cut_focused_field(&mut state.root) {
+                commit_form_change(state, &mut form);
+            }
             form.pending = FormPending::None;
         }
         Action::PasteStart => {
@@ -292,84 +340,42 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
             }
         }
         Action::PasteSibling => {
-            form.paste_field_after();
+            if form.paste_field_after(&mut state.root) {
+                commit_form_change(state, &mut form);
+            }
             form.pending = FormPending::None;
         }
         Action::PasteBefore => {
-            form.paste_field_before();
+            if form.paste_field_before(&mut state.root) {
+                commit_form_change(state, &mut form);
+            }
             form.pending = FormPending::None;
         }
-        Action::BeginInput => {
-            if row != FormRow::AddButton {
-                form.focus = FormFocus::Input;
-            }
-        }
-        Action::ExitInput => {
-            form.focus = FormFocus::Nav;
-        }
-        // Delete on an extra-field row opens the confirm-delete popup.
-        Action::DeleteChar if row == FormRow::AddButton => {}
-        Action::DeleteChar if row == FormRow::Name && form.focus == FormFocus::Nav => {}
-        Action::Confirm if row == FormRow::AddButton => {
+        Action::BeginInput if row == FormRow::AddButton => {
             state.mode = InputMode::SelectFieldType { form, selected: 0 };
             return;
         }
-        Action::Confirm => {
-            save_form(state, form);
-            return;
+        Action::BeginInput => {
+            form.begin_input(&state.root);
         }
-        Action::Cancel => {
-            let has_changes = if form.is_adding() {
-                adding_has_changes(&form)
-            } else {
-                editing_has_changes(state, &form)
-            };
-            if has_changes {
-                state.mode = InputMode::ConfirmDiscardChanges(form);
-            } else if form.is_adding() {
-                state.mode = InputMode::Normal;
-            } else {
-                state.mode = InputMode::Detail {
-                    selected: 0,
-                    alert: None,
-                };
-            }
-            return;
-        }
-        Action::NextField => {
-            let len = form.rows().len();
-            let next = (form.selected_row + 1) % len;
-            form.select_row(next);
-        }
-        Action::PrevField => {
-            let len = form.rows().len();
-            let prev = (form.selected_row + len - 1) % len;
-            form.select_row(prev);
-        }
-        Action::CursorLeft => {
-            form_edit(&mut form, |text, cursor| {
-                *cursor = cursor_left(text, *cursor)
-            });
-        }
-        Action::CursorRight => {
-            form_edit(&mut form, |text, cursor| {
-                *cursor = cursor_right(text, *cursor)
-            });
-        }
-        Action::CursorHome => {
-            form_edit(&mut form, |_, cursor| *cursor = 0);
-        }
-        Action::CursorEnd => {
-            let len = form.active_len();
-            form_edit(&mut form, |_, cursor| *cursor = len);
-        }
-        Action::Backspace => {
-            if form.cursor > 0 {
-                form_edit(&mut form, |text, cursor| {
-                    *cursor = backspace_at(text, *cursor);
-                });
+        Action::ExitInput => {
+            if form.commit_input(&mut state.root) {
+                commit_form_change(state, &mut form);
             }
         }
+        Action::Undo => {
+            if form.undo(&mut state.root) {
+                state.modified = true;
+            }
+        }
+        Action::Redo => {
+            if form.redo(&mut state.root) {
+                state.modified = true;
+            }
+        }
+        // Delete on a Name row or the add button has no meaning in Nav.
+        Action::DeleteChar if row == FormRow::AddButton => {}
+        Action::DeleteChar if row == FormRow::Name && form.focus == FormFocus::Nav => {}
         Action::DeleteChar => {
             if let FormRow::Extra(i) = row
                 && form.focus == FormFocus::Nav
@@ -380,40 +386,50 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
                 };
                 return;
             }
-            if form.focus == FormFocus::Input {
-                form_edit(&mut form, |text, cursor| delete_at(text, *cursor));
-            }
+            scratch_edit(&mut form, |text, cursor| delete_at(text, *cursor));
+        }
+        Action::Cancel => {
+            state.mode = close_form(&form);
+            return;
+        }
+        Action::NextField => {
+            let len = form.rows(&state.root).len();
+            let next = (form.selected_row + 1) % len;
+            form.select_row(&state.root, next);
+        }
+        Action::PrevField => {
+            let len = form.rows(&state.root).len();
+            let prev = (form.selected_row + len - 1) % len;
+            form.select_row(&state.root, prev);
+        }
+        Action::CursorLeft => {
+            scratch_edit(&mut form, |text, cursor| {
+                *cursor = cursor_left(text, *cursor)
+            });
+        }
+        Action::CursorRight => {
+            scratch_edit(&mut form, |text, cursor| {
+                *cursor = cursor_right(text, *cursor)
+            });
+        }
+        Action::CursorHome => {
+            scratch_edit(&mut form, |_, cursor| *cursor = 0);
+        }
+        Action::CursorEnd => {
+            scratch_edit(&mut form, |text, cursor| *cursor = text.len());
+        }
+        Action::Backspace => {
+            scratch_edit(&mut form, |text, cursor| {
+                *cursor = backspace_at(text, *cursor);
+            });
         }
         Action::InsertChar(c) => {
-            form_edit(&mut form, |text, cursor| insert_char_at(text, cursor, c));
+            scratch_edit(&mut form, |text, cursor| insert_char_at(text, cursor, c));
         }
         _ => {}
     }
 
     state.mode = InputMode::Form(form);
-}
-
-fn save_form(state: &mut TreeState, form: FormState) {
-    if form.is_adding() {
-        match state.add_position {
-            AddPosition::SiblingAfter => {
-                state.add_sibling_to_selected(form.name, form.extra_fields);
-            }
-            AddPosition::SiblingBefore => {
-                state.add_sibling_before_to_selected(form.name, form.extra_fields);
-            }
-            AddPosition::Child => {
-                state.add_child_to_selected(form.name, form.extra_fields);
-            }
-        }
-        state.mode = InputMode::Normal;
-    } else {
-        state.update_node(form.node_id.unwrap(), form.name, form.extra_fields);
-        state.mode = InputMode::Detail {
-            selected: 0,
-            alert: None,
-        };
-    }
 }
 
 fn handle_select_field_type(key: event::KeyEvent, state: &mut TreeState) {
@@ -455,23 +471,27 @@ fn handle_select_field_type(key: event::KeyEvent, state: &mut TreeState) {
         }
         Action::Confirm => match items[selected] {
             PickerItem::Login => {
-                form.extra_fields.push(ExtraField {
-                    field_type: FieldType::Login,
-                    value: String::new(),
-                });
-                form.selected_row = form.rows().len() - 2; // the new field, before AddButton
-                form.focus = FormFocus::Input;
-                form.cursor = 0;
+                let index = form.push_field(
+                    &mut state.root,
+                    ExtraField {
+                        field_type: FieldType::Login,
+                        value: String::new(),
+                    },
+                );
+                form.focus_new_field(&state.root, index);
+                commit_form_change(state, &mut form);
                 state.mode = InputMode::Form(form);
             }
             PickerItem::Password => {
-                form.extra_fields.push(ExtraField {
-                    field_type: FieldType::Password,
-                    value: String::new(),
-                });
-                form.selected_row = form.rows().len() - 2;
-                form.focus = FormFocus::Input;
-                form.cursor = 0;
+                let index = form.push_field(
+                    &mut state.root,
+                    ExtraField {
+                        field_type: FieldType::Password,
+                        value: String::new(),
+                    },
+                );
+                form.focus_new_field(&state.root, index);
+                commit_form_change(state, &mut form);
                 state.mode = InputMode::Form(form);
             }
             PickerItem::Custom => {
@@ -481,11 +501,10 @@ fn handle_select_field_type(key: event::KeyEvent, state: &mut TreeState) {
                 };
             }
             PickerItem::Desc => {
-                form.extra_fields
-                    .push(ExtraField::description(String::new()));
-                form.selected_row = form.rows().len() - 2; // the new field, before AddButton
-                form.focus = FormFocus::Input;
-                form.cursor = 0;
+                let index =
+                    form.push_field(&mut state.root, ExtraField::description(String::new()));
+                form.focus_new_field(&state.root, index);
+                commit_form_change(state, &mut form);
                 state.mode = InputMode::Form(form);
             }
         },
@@ -524,13 +543,15 @@ fn handle_custom_field_name(key: event::KeyEvent, state: &mut TreeState) {
             } else {
                 input
             };
-            form.extra_fields.push(ExtraField {
-                field_type: FieldType::Custom(label),
-                value: String::new(),
-            });
-            form.selected_row = form.rows().len() - 2;
-            form.focus = FormFocus::Input;
-            form.cursor = 0;
+            let index = form.push_field(
+                &mut state.root,
+                ExtraField {
+                    field_type: FieldType::Custom(label),
+                    value: String::new(),
+                },
+            );
+            form.focus_new_field(&state.root, index);
+            commit_form_change(state, &mut form);
             state.mode = InputMode::Form(form);
         }
         Action::Backspace => {
@@ -564,79 +585,16 @@ fn handle_confirm_delete(key: event::KeyEvent, state: &mut TreeState) {
         }
     };
 
-    if Action::from_confirm(&key) == Action::Yes {
-        if target_index < form.extra_fields.len() {
-            form.extra_fields.remove(target_index);
-        }
+    if Action::from_confirm(&key) == Action::Yes && form.remove_field(&mut state.root, target_index)
+    {
         form.focus = FormFocus::Nav;
-        form.clamp_selection();
-        form.cursor = form.active_len();
+        form.clamp_selection(&state.root);
+        form.cursor = form.active_len(&state.root);
+        commit_form_change(state, &mut form);
     }
     state.mode = InputMode::Form(form);
 }
 
-fn editing_has_changes(state: &TreeState, form: &FormState) -> bool {
-    let Some(node_id) = form.node_id else {
-        return false;
-    };
-    let original = state.root.find(node_id);
-    match original {
-        None => false,
-        Some(n) => {
-            if form.name != n.name {
-                return true;
-            }
-            if form.extra_fields.len() != n.extra_fields.len() {
-                return true;
-            }
-            for (a, b) in form.extra_fields.iter().zip(n.extra_fields.iter()) {
-                if a.value != b.value {
-                    return true;
-                }
-                match (&a.field_type, &b.field_type) {
-                    (FieldType::Login, FieldType::Login)
-                    | (FieldType::Password, FieldType::Password) => {}
-                    (FieldType::Custom(an), FieldType::Custom(bn)) if an == bn => {}
-                    _ => return true,
-                }
-            }
-            false
-        }
-    }
-}
-
-fn adding_has_changes(form: &FormState) -> bool {
-    !form.name.is_empty() || !form.extra_fields.is_empty()
-}
-
-fn handle_confirm_discard(key: event::KeyEvent, state: &mut TreeState) {
-    let form = match std::mem::replace(&mut state.mode, InputMode::Normal) {
-        InputMode::ConfirmDiscardChanges(form) => form,
-        other => {
-            state.mode = other;
-            return;
-        }
-    };
-
-    match Action::from_confirm(&key) {
-        Action::Yes => {
-            if form.node_id.is_some() {
-                state.mode = InputMode::Detail {
-                    selected: 0,
-                    alert: None,
-                };
-            } else {
-                state.mode = InputMode::Normal;
-            }
-        }
-        Action::No => {
-            state.mode = InputMode::Form(form);
-        }
-        _ => {
-            state.mode = InputMode::ConfirmDiscardChanges(form);
-        }
-    }
-}
 fn copy_to_clipboard(text: &str) {
     let cmds: &[&[&str]] = if cfg!(target_os = "macos") {
         &[&["pbcopy"]]
@@ -920,12 +878,11 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
             } else {
                 texts::OVERLAY_EDIT_NODE
             };
-            render_edit_overlay(frame, area, form, title);
+            render_edit_overlay(frame, area, form, &state.root, title);
         }
         InputMode::SelectFieldType { .. } => render_select_field_type_overlay(frame, area, state),
         InputMode::CustomFieldName { .. } => render_custom_field_name_overlay(frame, area, state),
         InputMode::ConfirmDeleteField { .. } => render_confirm_delete_overlay(frame, area, state),
-        InputMode::ConfirmDiscardChanges(_) => render_confirm_discard_overlay(frame, area, state),
         InputMode::Detail { .. } => {
             render_detail_overlay(frame, area, state);
             if matches!(state.mode, InputMode::Detail { ref alert, .. } if alert.is_some()) {
@@ -983,9 +940,6 @@ fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         InputMode::ConfirmDeleteField { .. } => {
             (texts::MODE_CONFIRM, ElementStyle::ModeConfirmDelete.style())
         }
-        InputMode::ConfirmDiscardChanges { .. } => {
-            (texts::MODE_DISCARD, ElementStyle::ModeDiscard.style())
-        }
         InputMode::ExportNodeSelect { .. } => (
             texts::MODE_EXPORT_SELECT,
             ElementStyle::ModeFieldType.style(),
@@ -1037,11 +991,10 @@ fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         InputMode::PendingAdd => texts::HINT_PENDING_ADD,
         InputMode::Detail { alert, .. } if alert.is_some() => texts::HINT_DETAIL_ALERT,
         InputMode::Detail { .. } => texts::HINT_DETAIL,
-        InputMode::Form(form) => form_hint(form),
+        InputMode::Form(form) => form_hint(form, &state.root),
         InputMode::SelectFieldType { .. } => texts::HINT_SELECT_FIELD_TYPE,
         InputMode::CustomFieldName { .. } => texts::HINT_CUSTOM_FIELD_NAME,
         InputMode::ConfirmDeleteField { .. } => texts::HINT_CONFIRM_DELETE,
-        InputMode::ConfirmDiscardChanges { .. } => texts::HINT_DISCARD,
         InputMode::ExportNodeSelect { .. } => texts::HINT_EXPORT_NODE_SELECT,
         InputMode::ExportNodeFormat { .. } => texts::HINT_EXPORT_NODE_FORMAT,
         InputMode::Alert { .. } => texts::HINT_DETAIL_ALERT,
@@ -1267,26 +1220,43 @@ fn form_row_line(
 /// actively being edited (`Input` level).
 fn render_extra_field_line(
     ef: &ExtraField,
-    is_focused: bool,
+    text: &str,
     cursor: usize,
+    is_focused: bool,
     is_editing: bool,
 ) -> Line<'static> {
     let revealed = is_focused && is_editing;
     let display_val = if revealed {
-        Cow::Borrowed(ef.value.as_str())
+        Cow::Borrowed(text)
     } else {
-        ef.field_type.display_value(&ef.value)
+        ef.field_type.display_value(text)
     };
     let label = format!("{}: ", ef.field_type.label());
     form_row_line(&label, &display_val, cursor, is_focused, is_editing)
 }
 
-fn render_edit_overlay(frame: &mut Frame, area: Rect, form: &FormState, title: &str) {
-    let rows = form.rows();
+/// Resolves the text and cursor to render for a field row.
+///
+/// The focused row at the Input level shows the scratch buffer; every other
+/// row shows the node's stored value.
+fn field_display<'a>(form: &'a FormState, value: &'a str, focused: bool) -> (Cow<'a, str>, usize) {
+    match form
+        .scratch
+        .as_ref()
+        .filter(|_| focused && form.focus == FormFocus::Input)
+    {
+        Some(scratch) => (Cow::Borrowed(scratch.text.as_str()), scratch.cursor),
+        None => (Cow::Borrowed(value), form.cursor),
+    }
+}
+
+fn render_edit_overlay(frame: &mut Frame, area: Rect, form: &FormState, root: &Node, title: &str) {
+    let node = form.node(root);
+    let rows = form.rows(root);
     let current = form.selected_row.min(rows.len() - 1);
     let is_editing = form.focus == FormFocus::Input;
 
-    let overlay_area = make_overlay_area(area, form.extra_fields.len(), 5);
+    let overlay_area = make_overlay_area(area, node.extra_fields.len(), 5);
 
     let block = Block::default()
         .title(format!(" {} ", title))
@@ -1299,20 +1269,21 @@ fn render_edit_overlay(frame: &mut Frame, area: Rect, form: &FormState, title: &
     for (i, row) in rows.iter().enumerate() {
         let focused = i == current;
         match row {
-            FormRow::Name => lines.push(form_row_line(
-                texts::LABEL_NAME,
-                &form.name,
-                form.cursor,
-                focused,
-                is_editing,
-            )),
+            FormRow::Name => {
+                let (text, cursor) = field_display(form, &node.name, focused);
+                lines.push(form_row_line(
+                    texts::LABEL_NAME,
+                    &text,
+                    cursor,
+                    focused,
+                    is_editing,
+                ));
+            }
             FormRow::Extra(idx) => {
-                if let Some(ef) = form.extra_fields.get(*idx) {
+                if let Some(ef) = node.extra_fields.get(*idx) {
+                    let (text, cursor) = field_display(form, &ef.value, focused);
                     lines.push(render_extra_field_line(
-                        ef,
-                        focused,
-                        form.cursor,
-                        is_editing,
+                        ef, &text, cursor, focused, is_editing,
                     ));
                 }
             }
@@ -1337,7 +1308,7 @@ fn render_edit_overlay(frame: &mut Frame, area: Rect, form: &FormState, title: &
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        form_hint(form),
+        form_hint(form, root),
         ElementStyle::GrayHint.style(),
     )));
 
@@ -1347,7 +1318,7 @@ fn render_edit_overlay(frame: &mut Frame, area: Rect, form: &FormState, title: &
 }
 
 /// Selects the help-bar hint for the Add/Edit form.
-fn form_hint(form: &FormState) -> &'static str {
+fn form_hint(form: &FormState, root: &Node) -> &'static str {
     match form.pending {
         FormPending::Cut => return texts::HINT_FIELD_CUT,
         FormPending::Paste => return texts::HINT_FIELD_PASTE,
@@ -1356,7 +1327,7 @@ fn form_hint(form: &FormState) -> &'static str {
     if form.focus == FormFocus::Input {
         return texts::HINT_FORM_INPUT;
     }
-    match form.current_row() {
+    match form.current_row(root) {
         FormRow::AddButton => texts::HINT_FORM_ADD,
         FormRow::Extra(_) => texts::HINT_FORM_EXTRA,
         FormRow::Name => texts::HINT_FORM,
@@ -1442,6 +1413,7 @@ fn render_custom_field_name_overlay(frame: &mut Frame, area: Rect, state: &TreeS
 fn render_confirm_delete_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
     let label = match &state.mode {
         InputMode::ConfirmDeleteField { form, target_index } => form
+            .node(&state.root)
             .extra_fields
             .get(*target_index)
             .map(|ef| ef.field_type.label())
@@ -1516,38 +1488,6 @@ fn render_copy_alert_overlay(frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-fn render_confirm_discard_overlay(frame: &mut Frame, area: Rect, _state: &TreeState) {
-    let overlay_area = Rect {
-        x: area.width / 4,
-        y: area.height / 2 - 2,
-        width: area.width / 2,
-        height: 5,
-    };
-
-    let block = Block::default()
-        .title(texts::OVERLAY_UNSAVED_CHANGES)
-        .borders(Borders::ALL)
-        .style(ElementStyle::DiscardBlock.style());
-
-    let inner = block.inner(overlay_area);
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            texts::PROMPT_DISCARD,
-            ElementStyle::ConfirmMessage.style(),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            texts::HINT_DISCARD,
-            ElementStyle::DismissHint.style(),
-        )),
-    ];
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
 fn render_detail_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
     let node = match state.current_node_ref() {
         Some(n) => n,
@@ -1592,7 +1532,6 @@ fn render_detail_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::node::Node;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -1607,10 +1546,49 @@ mod tests {
         state
     }
 
+    fn editing_state_with_fields() -> TreeState {
+        let mut node = Node::new("Root");
+        for value in ["a", "b", "c"] {
+            node.extra_fields.push(ExtraField {
+                field_type: FieldType::Login,
+                value: value.to_string(),
+            });
+        }
+        let mut state = TreeState::new(node);
+        let node = state.root.clone();
+        state.mode = InputMode::Form(FormState::new_edit(&node));
+        state
+    }
+
     fn form_of(state: &TreeState) -> &FormState {
         match &state.mode {
             InputMode::Form(form) => form,
             other => panic!("expected Form mode, got {other:?}"),
+        }
+    }
+
+    fn form_node(state: &TreeState) -> &Node {
+        form_of(state).node(&state.root)
+    }
+
+    fn values(state: &TreeState) -> Vec<&str> {
+        form_node(state)
+            .extra_fields
+            .iter()
+            .map(|f| f.value.as_str())
+            .collect()
+    }
+
+    fn select_row(state: &mut TreeState, index: usize) {
+        let InputMode::Form(form) = &mut state.mode else {
+            panic!("expected Form mode");
+        };
+        form.select_row(&state.root, index);
+    }
+
+    fn type_text(state: &mut TreeState, text: &str) {
+        for c in text.chars() {
+            handle_form(key(KeyCode::Char(c)), state);
         }
     }
 
@@ -1623,57 +1601,106 @@ mod tests {
     }
 
     #[test]
-    fn form_nav_j_moves_row_to_extra_or_add_button() {
-        let mut node = Node::new("Root");
-        node.extra_fields.push(ExtraField {
-            field_type: FieldType::Login,
-            value: "x".to_string(),
-        });
-        let mut state = TreeState::new(node.clone());
-        state.mode = InputMode::Form(FormState::new_edit(&node));
-        handle_form(key(KeyCode::Char('j')), &mut state);
-        let form = form_of(&state);
-        assert_eq!(form.name, "Root");
-        assert_eq!(form.selected_row, 1); // moved to Extra(0)
-        assert_eq!(form.current_row(), FormRow::Extra(0));
+    fn form_nav_enter_also_enters_input() {
+        let mut state = editing_state();
+        handle_form(key(KeyCode::Enter), &mut state);
+        assert_eq!(form_of(&state).focus, FormFocus::Input);
     }
 
     #[test]
-    fn form_input_esc_returns_to_nav() {
+    fn form_nav_j_moves_row_to_extra_or_add_button() {
+        let mut state = editing_state_with_fields();
+        handle_form(key(KeyCode::Char('j')), &mut state);
+        let form = form_of(&state);
+        assert_eq!(form.selected_row, 1); // moved to Extra(0)
+        assert_eq!(form.current_row(&state.root), FormRow::Extra(0));
+    }
+
+    #[test]
+    fn form_nav_esc_closes_to_detail() {
         let mut state = editing_state();
-        if let InputMode::Form(ref mut form) = state.mode {
-            form.focus = FormFocus::Input;
-        }
         handle_form(key(KeyCode::Esc), &mut state);
+        assert!(matches!(state.mode, InputMode::Detail { .. }));
+    }
+
+    #[test]
+    fn empty_add_form_esc_cancels_to_normal() {
+        let mut state = TreeState::new(Node::new("Root"));
+        state.mode = InputMode::Form(FormState::new_add());
+        handle_form(key(KeyCode::Esc), &mut state);
+        assert!(matches!(state.mode, InputMode::Normal));
+    }
+
+    #[test]
+    fn typing_is_committed_on_input_exit() {
+        let mut state = editing_state();
+        handle_form(key(KeyCode::Char('i')), &mut state);
+        type_text(&mut state, "!");
+        // The node is untouched while typing.
+        assert_eq!(form_node(&state).name, "Root");
+        handle_form(key(KeyCode::Enter), &mut state);
+        assert_eq!(form_node(&state).name, "Root!");
         assert_eq!(form_of(&state).focus, FormFocus::Nav);
+        assert!(state.modified);
+    }
+
+    #[test]
+    fn leaving_input_unchanged_does_not_commit() {
+        let mut state = editing_state();
+        handle_form(key(KeyCode::Char('i')), &mut state);
+        handle_form(key(KeyCode::Esc), &mut state);
+        assert_eq!(form_node(&state).name, "Root");
+        assert!(!state.modified);
+        assert_eq!(form_of(&state).history.len(), 1);
+    }
+
+    #[test]
+    fn undo_and_redo_restore_previous_state() {
+        let mut state = editing_state();
+        handle_form(key(KeyCode::Char('i')), &mut state);
+        type_text(&mut state, "!");
+        handle_form(key(KeyCode::Enter), &mut state);
+        assert_eq!(form_node(&state).name, "Root!");
+
+        handle_form(key(KeyCode::Char('u')), &mut state);
+        assert_eq!(form_node(&state).name, "Root");
+        handle_form(key(KeyCode::Char('r')), &mut state);
+        assert_eq!(form_node(&state).name, "Root!");
+    }
+
+    #[test]
+    fn undo_without_history_is_noop() {
+        let mut state = editing_state();
+        handle_form(key(KeyCode::Char('u')), &mut state);
+        assert_eq!(form_node(&state).name, "Root");
         assert!(matches!(state.mode, InputMode::Form(_)));
     }
 
     #[test]
-    fn form_nav_esc_with_changes_asks_to_discard() {
+    fn new_edit_after_undo_truncates_redo_tail() {
         let mut state = editing_state();
-        if let InputMode::Form(ref mut form) = state.mode {
-            form.name = "changed".to_string();
-        }
-        handle_form(key(KeyCode::Esc), &mut state);
-        assert!(matches!(state.mode, InputMode::ConfirmDiscardChanges(_)));
-    }
+        handle_form(key(KeyCode::Char('i')), &mut state);
+        type_text(&mut state, "1");
+        handle_form(key(KeyCode::Enter), &mut state);
+        handle_form(key(KeyCode::Char('u')), &mut state);
+        assert!(form_of(&state).can_redo());
 
-    #[test]
-    fn form_input_typing_inserts_char() {
-        let mut state = editing_state();
-        if let InputMode::Form(ref mut form) = state.mode {
-            form.focus = FormFocus::Input;
-            form.cursor = form.name.len();
-        }
-        handle_form(key(KeyCode::Char('j')), &mut state);
-        assert_eq!(form_of(&state).name, "Rootj");
+        // A new commit discards the redo tail.
+        handle_form(key(KeyCode::Char('i')), &mut state);
+        type_text(&mut state, "2");
+        handle_form(key(KeyCode::Enter), &mut state);
+        assert_eq!(form_node(&state).name, "Root2");
+        assert!(!form_of(&state).can_redo());
     }
 
     #[test]
     fn add_form_starts_with_only_name_and_add_button() {
+        let state = TreeState::new(Node::new("Root"));
         let form = FormState::new_add();
-        assert_eq!(form.rows(), vec![FormRow::Name, FormRow::AddButton]);
+        assert_eq!(
+            form.rows(&state.root),
+            vec![FormRow::Name, FormRow::AddButton]
+        );
     }
 
     #[test]
@@ -1683,48 +1710,69 @@ mod tests {
             field_type: FieldType::Login,
             value: String::new(),
         });
-        let form = FormState::new_edit(&node);
+        let state = TreeState::new(node);
+        let form = FormState::new_edit(&state.root);
         assert_eq!(
-            form.rows(),
+            form.rows(&state.root),
             vec![FormRow::Name, FormRow::Extra(0), FormRow::AddButton]
         );
     }
 
     #[test]
-    fn adding_desc_appends_a_description_field_in_input() {
+    fn add_form_first_commit_creates_the_node() {
         let mut state = TreeState::new(Node::new("Root"));
         state.add_position = AddPosition::Child;
         state.mode = InputMode::Form(FormState::new_add());
-        // Position the selection on the add button and open the picker.
-        if let InputMode::Form(ref mut form) = state.mode {
-            form.select_row(1);
-        }
+        assert!(form_of(&state).is_adding());
+
+        handle_form(key(KeyCode::Char('i')), &mut state);
+        type_text(&mut state, "Child");
+        handle_form(key(KeyCode::Enter), &mut state);
+
+        let form = form_of(&state);
+        assert!(!form.is_adding());
+        let id = form.node_id.expect("node created");
+        let created = state.root.find(id).expect("node in tree");
+        assert_eq!(created.name, "Child");
+        assert_eq!(state.visible[state.selected].id, id);
+        assert!(state.modified);
+    }
+
+    #[test]
+    fn adding_field_via_picker_creates_node_and_enters_input() {
+        let mut state = TreeState::new(Node::new("Root"));
+        state.add_position = AddPosition::Child;
+        state.mode = InputMode::Form(FormState::new_add());
+        select_row(&mut state, 1); // the + Add Field row
+
         handle_form(key(KeyCode::Enter), &mut state);
         assert!(matches!(state.mode, InputMode::SelectFieldType { .. }));
 
-        // Description is offered last for a new node.
+        // Description is offered last.
         let items = match &state.mode {
             InputMode::SelectFieldType { form, .. } => picker_items(form),
             _ => unreachable!(),
         };
         assert_eq!(items.last(), Some(&PickerItem::Desc));
 
-        // Choose it and verify the field appears focused for input.
         let desc_index = items.len() - 1;
-        let mut state2 = state;
         if let InputMode::SelectFieldType {
             ref mut selected, ..
-        } = state2.mode
+        } = state.mode
         {
             *selected = desc_index;
         }
-        handle_select_field_type(key(KeyCode::Enter), &mut state2);
-        let form = form_of(&state2);
+        handle_select_field_type(key(KeyCode::Enter), &mut state);
+
+        let form = form_of(&state);
+        assert!(!form.is_adding()); // the first commit created the node
         assert_eq!(form.focus, FormFocus::Input);
-        assert_eq!(form.current_row(), FormRow::Extra(0));
-        assert_eq!(form.extra_fields.len(), 1);
-        assert_eq!(form.extra_fields[0].field_type.label(), "Description");
-        assert_eq!(form.extra_fields[0].value, "");
+        assert_eq!(form.current_row(&state.root), FormRow::Extra(0));
+        let node = form_node(&state);
+        assert_eq!(node.extra_fields.len(), 1);
+        assert_eq!(node.extra_fields[0].field_type.label(), "Description");
+        assert_eq!(node.extra_fields[0].value, "");
+        assert!(state.modified);
     }
 
     #[test]
@@ -1734,157 +1782,107 @@ mod tests {
             value: "secret".to_string(),
         };
         // Nav: masked.
-        let line = render_extra_field_line(&ef, true, 0, false);
+        let line = render_extra_field_line(&ef, &ef.value, 0, true, false);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(!text.contains("secret"));
         assert!(text.contains(texts::PASSWORD_MASK));
 
         // Input: revealed.
-        let line = render_extra_field_line(&ef, true, 0, true);
+        let line = render_extra_field_line(&ef, &ef.value, 0, true, true);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("secret"));
     }
 
-    fn form_with_fields() -> FormState {
-        let mut node = Node::new("n");
-        for value in ["a", "b", "c"] {
-            node.extra_fields.push(ExtraField {
-                field_type: FieldType::Login,
-                value: value.to_string(),
-            });
-        }
-        FormState::new_edit(&node)
-    }
-
-    fn values(form: &FormState) -> Vec<&str> {
-        form.extra_fields.iter().map(|f| f.value.as_str()).collect()
-    }
-
-    fn select_extra(form: &mut FormState, extra_index: usize) {
-        // rows: Name, Extra(0..), AddButton
-        form.select_row(1 + extra_index);
-    }
-
     #[test]
-    fn field_cut_requires_two_d_presses() {
-        let mut state = TreeState::new(Node::new("Root"));
-        let mut form = form_with_fields();
-        select_extra(&mut form, 1);
-        state.mode = InputMode::Form(form);
+    fn field_cut_requires_two_d_presses_and_is_live() {
+        let mut state = editing_state_with_fields();
+        select_row(&mut state, 1); // "a"
 
         handle_form(key(KeyCode::Char('d')), &mut state);
         assert_eq!(form_of(&state).pending, FormPending::Cut);
-        assert_eq!(form_of(&state).extra_fields.len(), 3);
+        assert_eq!(values(&state).len(), 3); // not removed yet
 
         handle_form(key(KeyCode::Char('d')), &mut state);
         let form = form_of(&state);
         assert_eq!(form.pending, FormPending::None);
-        assert_eq!(values(form), vec!["a", "c"]);
-        assert_eq!(form.field_cut_buffer.as_ref().unwrap().value, "b");
+        assert_eq!(values(&state), vec!["b", "c"]);
+        assert_eq!(form.field_cut_buffer.as_ref().unwrap().value, "a");
     }
 
     #[test]
     fn field_cut_is_cancelled_by_other_keys() {
-        let mut state = TreeState::new(Node::new("Root"));
-        let mut form = form_with_fields();
-        select_extra(&mut form, 0);
-        state.mode = InputMode::Form(form);
+        let mut state = editing_state_with_fields();
+        select_row(&mut state, 1);
 
         handle_form(key(KeyCode::Char('d')), &mut state);
         handle_form(key(KeyCode::Esc), &mut state);
         let form = form_of(&state);
         assert_eq!(form.pending, FormPending::None);
-        assert_eq!(form.extra_fields.len(), 3);
+        assert_eq!(values(&state).len(), 3);
         assert!(matches!(state.mode, InputMode::Form(_)));
     }
 
     #[test]
     fn field_cut_is_noop_on_name_row() {
-        let mut state = TreeState::new(Node::new("Root"));
-        let mut form = form_with_fields();
-        form.select_row(0);
-        state.mode = InputMode::Form(form);
-
+        let mut state = editing_state_with_fields();
+        select_row(&mut state, 0);
         handle_form(key(KeyCode::Char('d')), &mut state);
         assert_eq!(form_of(&state).pending, FormPending::None);
     }
 
     #[test]
     fn field_paste_after_moves_field_down() {
-        let mut state = TreeState::new(Node::new("Root"));
-        let mut form = form_with_fields();
-        select_extra(&mut form, 0); // "a"
-        state.mode = InputMode::Form(form);
+        let mut state = editing_state_with_fields();
+        select_row(&mut state, 1); // "a"
 
-        // Cut "a", then select "c" and paste after it.
+        // Cut "a", then select "b" and paste after it.
         handle_form(key(KeyCode::Char('d')), &mut state);
         handle_form(key(KeyCode::Char('d')), &mut state);
-        if let InputMode::Form(ref mut form) = state.mode {
-            select_extra(form, 1); // "c" now at index 1
-        }
+        select_row(&mut state, 1); // "b"
         handle_form(key(KeyCode::Char('p')), &mut state);
         assert_eq!(form_of(&state).pending, FormPending::Paste);
         handle_form(key(KeyCode::Char('p')), &mut state);
 
         let form = form_of(&state);
-        assert_eq!(values(form), vec!["b", "c", "a"]);
+        assert_eq!(values(&state), vec!["b", "a", "c"]);
         assert!(form.field_cut_buffer.is_none());
-        assert_eq!(form.current_row(), FormRow::Extra(2));
     }
 
     #[test]
-    fn field_paste_before_moves_field_up() {
-        let mut state = TreeState::new(Node::new("Root"));
-        let mut form = form_with_fields();
-        select_extra(&mut form, 2); // "c"
-        state.mode = InputMode::Form(form);
-
+    fn undo_clears_the_field_cut_buffer() {
+        let mut state = editing_state_with_fields();
+        select_row(&mut state, 1);
         handle_form(key(KeyCode::Char('d')), &mut state);
         handle_form(key(KeyCode::Char('d')), &mut state);
-        if let InputMode::Form(ref mut form) = state.mode {
-            select_extra(form, 0); // "a"
-        }
-        handle_form(key(KeyCode::Char('p')), &mut state);
-        handle_form(key(KeyCode::Char('P')), &mut state);
+        assert!(form_of(&state).field_cut_buffer.is_some());
 
-        let form = form_of(&state);
-        assert_eq!(values(form), vec!["c", "a", "b"]);
-        assert_eq!(form.current_row(), FormRow::Extra(0));
+        handle_form(key(KeyCode::Char('u')), &mut state);
+        assert!(form_of(&state).field_cut_buffer.is_none());
+        assert_eq!(values(&state), vec!["a", "b", "c"]);
     }
 
     #[test]
     fn paste_without_buffer_does_nothing() {
-        let mut state = TreeState::new(Node::new("Root"));
-        let mut form = form_with_fields();
-        select_extra(&mut form, 0);
-        state.mode = InputMode::Form(form);
-
+        let mut state = editing_state_with_fields();
+        select_row(&mut state, 1);
         handle_form(key(KeyCode::Char('p')), &mut state);
         assert_eq!(form_of(&state).pending, FormPending::None);
-        assert_eq!(form_of(&state).extra_fields.len(), 3);
+        assert_eq!(values(&state).len(), 3);
     }
 
     #[test]
     fn confirm_delete_removes_the_field_and_clamps_selection() {
-        let mut node = Node::new("n");
-        node.extra_fields.push(ExtraField {
-            field_type: FieldType::Login,
-            value: "a".to_string(),
-        });
-        node.extra_fields.push(ExtraField {
-            field_type: FieldType::Login,
-            value: "b".to_string(),
-        });
-        let mut initial = FormState::new_edit(&node);
-        initial.select_row(2); // second extra field
-        let mut state = TreeState::new(Node::new("Root"));
-        state.mode = InputMode::ConfirmDeleteField {
-            form: initial,
-            target_index: 1,
+        let mut state = editing_state_with_fields();
+        select_row(&mut state, 2); // second extra field
+        state.mode = match std::mem::replace(&mut state.mode, InputMode::Normal) {
+            InputMode::Form(form) => InputMode::ConfirmDeleteField {
+                form,
+                target_index: 1,
+            },
+            _ => unreachable!(),
         };
         handle_confirm_delete(key(KeyCode::Char('y')), &mut state);
-        let updated = form_of(&state);
-        assert_eq!(updated.extra_fields.len(), 1);
-        assert!(updated.selected_row < updated.rows().len());
+        assert_eq!(values(&state), vec!["a", "c"]);
+        assert!(form_of(&state).selected_row < form_of(&state).rows(&state.root).len());
     }
 }

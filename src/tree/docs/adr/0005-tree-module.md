@@ -17,7 +17,7 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 | File | Responsibility |
 |------|---------------|
 | `node.rs` | `Node` struct (id, name, children, extra_fields), `ExtraField`, `FieldType` enum, legacy-`description` migration, recursive `find`/`find_mut`/`contains`, wire-label helpers for import/export |
-| `widget.rs` | `TreeState` (root, expanded set, selected index, visible list, mode, vault path/passphrase, modified flag, cut buffer, search state), `VisibleNode`, `InputMode` enum (16 variants), `TreeWidget::render()` DFS flat-list, all tree mutation operations |
+| `widget.rs` | `TreeState` (root, expanded set, selected index, visible list, mode, vault path/passphrase, modified flag, cut buffer, search state), `VisibleNode`, `InputMode` enum, `FormState` + undo/redo history, `TreeWidget::render()` DFS flat-list, all tree mutation operations |
 | `app_tree.rs` | `run_app()` event loop, key handlers per `InputMode`, overlay rendering (search bar, detail, edit/add forms, help, export, confirm dialogs, alerts, status bar), clipboard integration |
 
 ## Data model
@@ -50,20 +50,20 @@ their descriptions. Once a migrated vault is saved, the legacy key is gone.
 
 ## InputMode state machine
 
-13 variants: `Normal`, `Search`, `PendingCut`, `PendingPaste`, `PendingAdd`,
+12 variants: `Normal`, `Search`, `PendingCut`, `PendingPaste`, `PendingAdd`,
 `Detail{selected, alert}`,
 `Form(FormState)`, `SelectFieldType{form, selected}`,
 `CustomFieldName{form, input}`, `ConfirmDeleteField{form, target_index}`,
-`ConfirmDiscardChanges(FormState)`, `ExportNodeSelect{...}`,
+`ExportNodeSelect{...}`,
 `ExportNodeFormat{...}`, `Alert{message}`, `Help`.
 
 Each variant carries its transient state inline. Key handlers dispatch on the
 current variant, transform state, and return the next mode.
 
-All Add/Edit form state lives in a single `FormState` (`node_id`, `name`,
-`extra_fields`, `selected_row`, `cursor`, `focus`, `pending`,
-`field_cut_buffer`), which the four popup variants carry as `form`. This
-replaces the earlier duplication of the same six fields in every variant.
+All Add/Edit form state lives in a single `FormState` (`node_id`, `draft`,
+`selected_row`, `cursor`, `focus`, `pending`, `field_cut_buffer`, `scratch`,
+`history`, `history_cursor`), which the three popup variants carry as `form`.
+This replaces the earlier duplication of the same fields in every variant.
 
 ## Prefix modes
 
@@ -83,9 +83,12 @@ parent row (`collapse_or_select_parent`).
 
 - Add and Edit share one form model: `FormState`. Add is `node_id == None`;
   Edit is `node_id == Some(id)`.
-- Row order is derived, not hard-coded: `FormState::rows()` returns
+- The form is a **live editor** reading and writing the node directly, the
+  single source of truth. Edit holds no copy of the node's data; Add keeps a
+  pre-creation `draft` node until the first commit inserts it into the tree.
+- Row order is derived, not hard-coded: `FormState::rows(root)` returns
   `Name`, one `Extra(i)` per field, then `AddButton`.
-  `selected_row` indexes that list, and `clamp_selection()` keeps it valid
+  `selected_row` indexes that list, and `clamp_selection(root)` keeps it valid
   after the list changes.
 - A new node starts with **only the Name row**; a Node's description is added
   the same way as any other field, through `+ Add Field` → `Description` (a
@@ -93,29 +96,51 @@ parent row (`collapse_or_select_parent`).
   Editing an existing node mirrors this: existing fields (including a migrated
   Description) show up as ordinary `Extra(i)` rows.
 - The form is two-level, tracked by `FormState::focus` (`FormFocus::Nav` /
-  `FormFocus::Input`). It opens in `Nav`; `i` enters `Input`, `Esc` and `Enter`
-  return to `Nav`. Popups (field-type picker, custom name, delete/discard
-  confirms) are only reachable from `Nav` and return to `Nav`. Save only happens
-  via `Enter` in `Nav`.
-- `Nav`: `j`/`k`/arrows/`Tab`/`Shift+Tab` move between rows, `Enter` saves (or
-  opens the field-type picker on the `+ Add Field` row), `Delete` on an extra
-  field row opens the confirm-delete popup.
-- `Input`: printable keys edit the focused row's text; the cursor is shown only
-  at this level. `Enter` and `Esc` both exit to `Nav` without saving. In `Nav`
-  the focused row uses the same highlight as Detail
-  (`▸ ` + `FormRowFocused`).
-- Empty name defaults to `"Untitled"` on save.
+  `FormFocus::Input`). It opens in `Nav`; `i` and `Enter` enter `Input`.
+- **Commit on Input exit:** while in `Input`, typing edits `FormState::scratch`
+  and leaves the node untouched. `Enter` and `Esc` both leave `Input` and, when
+  the scratch text differs, write it into the node, autosave, and push a history
+  entry. Leaving with no change is a no-op.
+- **Add becomes Edit:** the first committed change in the Add form (a changed
+  field *or* a structural change) inserts the draft at `add_position`, expands
+  the parent, selects the new node, switches `node_id` to that node, and seeds
+  the undo history. From then on the session is an Edit session. `Esc` before
+  any commit cancels the Add. An empty name defaults to `"Untitled"` on
+  creation.
+- `Nav`: `j`/`k`/arrows/`Tab`/`Shift+Tab` move between rows, `i`/`Enter` enter
+  `Input` (or open the field-type picker on the `+ Add Field` row), `u`/`r`
+  undo/redo, `Esc` closes the form. `Delete` on an extra field row opens the
+  confirm-delete popup.
+- Closing the form: an Edit session (including a created Add session) returns to
+  the node's `Detail` overlay; an empty Add session returns to `Normal`. There
+  is no discard prompt — every change is already committed.
 - Password values render as `*****` at every level except an actively edited
   (`Input`) row.
 - Delete on extra field: `Delete` key → `ConfirmDeleteField` popup → `y`
-  confirms, any other key cancels.
+  confirms, any other key cancels. A confirmed deletion commits immediately.
 - Field reordering: `dd` moves the focused extra field into
   `FormState::field_cut_buffer`; `p` / `P` paste it after / before the focused
   field. The prefix state is `FormState::pending` (`FormPending`), so no new
   `InputMode` is introduced; any other key cancels the prefix. `Name` and
   `AddButton` are never movable, and paste is only allowed with an
-  `Extra(i)` row focused. The buffer lives and dies with the form, so `Esc`
-  discards all unsaved reordering.
+  `Extra(i)` row focused. Each cut/paste is a live commit.
+
+## Undo / redo
+
+- The Edit form keeps an undo history: `FormState::history` is a `Vec<Snapshot>`
+  (`Snapshot` = a node's `name` + `extra_fields`) with a `history_cursor`.
+  `history[history_cursor]` is the current state.
+- The baseline is seeded when the session opens (or, for a created Add session,
+  at creation). Each committed change pushes a new snapshot after the cursor,
+  discarding any redo tail.
+- `u` moves the cursor back one and applies the previous snapshot; `r` moves it
+  forward and re-applies the next. Both write straight into the node
+  (autosave), clamp the selection, and **clear `field_cut_buffer`** (it may
+  reference fields the restored state no longer has). Both are no-ops at the
+  ends of the history.
+- `u`/`r` are bound only at the `Nav` level and exist only for Edit sessions
+  (Add has no history until its first commit creates the node).
+- The history is discarded when the form is closed.
 
 ## Search
 

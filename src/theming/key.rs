@@ -38,6 +38,10 @@ pub enum Action {
     InsertChar(char),
     Backspace,
     DeleteChar,
+    /// Reverts the form's node to the previous history snapshot.
+    Undo,
+    /// Re-applies the next history snapshot after an undo.
+    Redo,
     /// Selects the item at the given index in a numbered list.
     SelectIndex(usize),
     ConfigDelete,
@@ -120,13 +124,15 @@ impl Action {
     }
 
     /// Dispatch for the form's navigation level. Text is not editable here;
-    /// `i`/`Enter` enter the input level, `j`/`k`/arrows/Tab move between fields.
+    /// `i`/`Enter` enter the input level, `j`/`k`/arrows/Tab move between
+    /// fields, `u`/`r` undo/redo, `Esc` closes the form.
     pub fn from_form_nav(key: &KeyEvent) -> Self {
         match key.code {
             KeyCode::Char('j') | KeyCode::Down | KeyCode::Tab => Self::NextField,
             KeyCode::Char('k') | KeyCode::Up | KeyCode::BackTab => Self::PrevField,
-            KeyCode::Char('i') => Self::BeginInput,
-            KeyCode::Enter => Self::Confirm,
+            KeyCode::Char('i') | KeyCode::Enter => Self::BeginInput,
+            KeyCode::Char('u') => Self::Undo,
+            KeyCode::Char('r') => Self::Redo,
             KeyCode::Delete => Self::DeleteChar,
             KeyCode::Char('d') => Self::Cut,
             KeyCode::Char('p') => Self::PasteStart,
@@ -147,7 +153,8 @@ impl Action {
     }
 
     /// Dispatch for the form's input level. Printable keys edit the active
-    /// field; `Esc` returns to the navigation level; `Enter` exits to Nav.
+    /// field; both `Enter` and `Esc` return to the navigation level, committing
+    /// the field's text.
     pub fn from_form_input(key: &KeyEvent) -> Self {
         match key.code {
             KeyCode::Left => Self::CursorLeft,
@@ -167,8 +174,9 @@ impl Action {
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => Self::NavDown,
             KeyCode::Char('k') | KeyCode::Up => Self::NavUp,
-            KeyCode::Enter => Self::CopyField,
-            KeyCode::Char('o') => Self::EditNode,
+            KeyCode::Enter => Self::EditNode,
+            KeyCode::Char('i') => Self::EditNode,
+            KeyCode::Char('c') => Self::CopyField,
             KeyCode::Esc => Self::Cancel,
             _ => Self::None,
         }
@@ -332,13 +340,16 @@ mod tests {
     }
 
     #[test]
-    fn from_detail_o_edits_and_i_is_unbound() {
+    fn from_detail_i_and_enter_edit_and_c_copies() {
         assert_eq!(
-            Action::from_detail(&key(KeyCode::Char('o'))),
+            Action::from_detail(&key(KeyCode::Char('i'))),
             Action::EditNode
         );
-        assert_eq!(Action::from_detail(&key(KeyCode::Char('i'))), Action::None);
-        assert_eq!(Action::from_detail(&key(KeyCode::Char('I'))), Action::None);
+        assert_eq!(Action::from_detail(&key(KeyCode::Enter)), Action::EditNode);
+        assert_eq!(
+            Action::from_detail(&key(KeyCode::Char('c'))),
+            Action::CopyField
+        );
     }
 
     #[test]
@@ -348,12 +359,13 @@ mod tests {
     }
 
     #[test]
-    fn from_detail_enter_copies() {
-        assert_eq!(Action::from_detail(&key(KeyCode::Enter)), Action::CopyField);
+    fn from_detail_o_is_unbound() {
+        assert_eq!(Action::from_detail(&key(KeyCode::Char('o'))), Action::None);
+        assert_eq!(Action::from_detail(&key(KeyCode::Char('O'))), Action::None);
     }
 
     #[test]
-    fn from_form_nav_jk_move_fields_and_i_enters_input() {
+    fn from_form_nav_jk_move_fields_and_i_enter_begin_input() {
         assert_eq!(
             Action::from_form_nav(&key(KeyCode::Char('j'))),
             Action::NextField
@@ -376,8 +388,23 @@ mod tests {
             Action::from_form_nav(&key(KeyCode::Char('i'))),
             Action::BeginInput
         );
-        assert_eq!(Action::from_form_nav(&key(KeyCode::Enter)), Action::Confirm);
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Enter)),
+            Action::BeginInput
+        );
         assert_eq!(Action::from_form_nav(&key(KeyCode::Esc)), Action::Cancel);
+    }
+
+    #[test]
+    fn from_form_nav_binds_undo_and_redo() {
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('u'))),
+            Action::Undo
+        );
+        assert_eq!(
+            Action::from_form_nav(&key(KeyCode::Char('r'))),
+            Action::Redo
+        );
     }
 
     #[test]
