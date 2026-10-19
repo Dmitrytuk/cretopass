@@ -96,7 +96,7 @@ actions) and **Input** (editing the focused field's text). It opens in Nav;
 | Keys | Action |
 |------|--------|
 | `j`/`k` | Navigate menu |
-| `Enter` | Select |
+| `Enter` / `l` / `→` | Select |
 | `q` / `Esc` | Quit |
 | `e` | Export active file |
 | `c` / `Ctrl+C` | Change master password |

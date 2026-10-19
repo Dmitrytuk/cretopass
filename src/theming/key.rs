@@ -220,7 +220,7 @@ impl Action {
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => Self::NavDown,
             KeyCode::Char('k') | KeyCode::Up => Self::NavUp,
-            KeyCode::Enter => Self::Confirm,
+            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Self::Confirm,
             KeyCode::Char('q') | KeyCode::Char('Q') => Self::Quit,
             KeyCode::Esc => Self::Back,
             KeyCode::Char('d') | KeyCode::Delete => Self::ConfigDelete,
@@ -508,5 +508,12 @@ mod tests {
         assert_eq!(Action::from_form_input(&key(KeyCode::Tab)), Action::None);
         assert_eq!(Action::from_form_input(&key(KeyCode::Down)), Action::None);
         assert_eq!(Action::from_form_input(&key(KeyCode::Up)), Action::None);
+    }
+
+    #[test]
+    fn from_home_l_and_right_open_selected_item() {
+        assert_eq!(Action::from_home(&key(KeyCode::Char('l'))), Action::Confirm);
+        assert_eq!(Action::from_home(&key(KeyCode::Right)), Action::Confirm);
+        assert_eq!(Action::from_home(&key(KeyCode::Enter)), Action::Confirm);
     }
 }
