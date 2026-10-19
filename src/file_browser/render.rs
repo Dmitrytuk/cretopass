@@ -9,6 +9,10 @@ use crate::theming::{ElementStyle, Icon, texts};
 
 const DEFAULT_HEIGHT: u16 = 18;
 
+/// Context lines kept visible above/below the selection while scrolling,
+/// similar to Vim/Neovim's `scrolloff`. Capped on short viewports.
+const SCROLL_OFFSET: usize = 3;
+
 /// Renders the file browser modal over the given screen area.
 pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     let overlay_area = make_overlay(area);
@@ -93,6 +97,24 @@ fn render_path_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     frame.render_widget(Paragraph::new(text), area);
 }
 
+/// Returns the first visible item for a selection at `selected_pos`.
+///
+/// Keeps up to [`SCROLL_OFFSET`] rows of context below the cursor while
+/// scrolling down (and above it while scrolling up). At the end of the list
+/// the last item is allowed to reach the bottom row, so the margin is clamped
+/// to `item_count - viewport_height`; short lists never scroll.
+fn scroll_start(selected_pos: usize, item_count: usize, viewport_height: usize) -> usize {
+    if viewport_height == 0 {
+        return 0;
+    }
+
+    let margin = SCROLL_OFFSET.min(viewport_height.saturating_sub(1) / 2);
+    let max_row = viewport_height.saturating_sub(1).saturating_sub(margin);
+    let max_scroll = item_count.saturating_sub(viewport_height);
+
+    selected_pos.saturating_sub(max_row).min(max_scroll)
+}
+
 fn render_file_list(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     let indices = state.filtered_indices();
     let list_height = area.height as usize;
@@ -103,13 +125,7 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
         .position(|&i| i == state.selected)
         .unwrap_or(0);
 
-    let scroll = if sel_pos >= list_height.saturating_sub(1) {
-        sel_pos.saturating_sub(list_height.saturating_sub(1))
-    } else {
-        0
-    };
-    // Sync browser state scroll
-    let scroll = scroll.min(indices.len().saturating_sub(1));
+    let scroll = scroll_start(sel_pos, indices.len(), list_height);
 
     let visible: Vec<Line> = indices
         .iter()
@@ -264,11 +280,7 @@ fn render_locations_popup(frame: &mut Frame, area: Rect, state: &FileBrowserStat
     let layout = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
     let list_height = layout[0].height as usize;
 
-    let scroll = if state.location_selected >= list_height {
-        state.location_selected + 1 - list_height
-    } else {
-        0
-    };
+    let scroll = scroll_start(state.location_selected, state.locations.len(), list_height);
 
     let label_width = state
         .locations
@@ -859,6 +871,114 @@ mod tests {
         assert!(
             text.contains("Locations"),
             "overlay should still render:\n{text}"
+        );
+    }
+
+    // ── Scroll margin (scrolloff) ──
+
+    #[test]
+    fn test_scroll_start_keeps_top_context() {
+        // Height 10 with a 3-row margin: the cursor may sit on row 6 before
+        // the viewport starts following it.
+        assert_eq!(scroll_start(0, 100, 10), 0);
+        assert_eq!(scroll_start(6, 100, 10), 0);
+        assert_eq!(scroll_start(7, 100, 10), 1);
+        assert_eq!(scroll_start(8, 100, 10), 2);
+    }
+
+    #[test]
+    fn test_scroll_start_keeps_three_rows_below_cursor() {
+        let height = 10;
+        let selected = 50;
+        let scroll = scroll_start(selected, 100, height);
+
+        assert_eq!(scroll, 44);
+        assert_eq!(
+            selected - scroll,
+            6,
+            "cursor should stay 3 rows above the bottom"
+        );
+    }
+
+    #[test]
+    fn test_scroll_start_clamps_at_end_of_list() {
+        // Last item sits on the bottom row instead of leaving blank rows.
+        assert_eq!(scroll_start(99, 100, 10), 90);
+        assert_eq!(scroll_start(98, 100, 10), 90);
+        assert_eq!(scroll_start(97, 100, 10), 90);
+        assert_eq!(scroll_start(96, 100, 10), 90);
+        assert_eq!(scroll_start(95, 100, 10), 89);
+    }
+
+    #[test]
+    fn test_scroll_start_short_list_never_scrolls() {
+        assert_eq!(scroll_start(4, 5, 10), 0);
+        assert_eq!(scroll_start(0, 0, 10), 0);
+    }
+
+    #[test]
+    fn test_scroll_start_tiny_viewport_keeps_cursor_visible() {
+        assert_eq!(scroll_start(0, 100, 0), 0);
+        // Height 1: the cursor is the only row.
+        assert_eq!(scroll_start(5, 100, 1), 5);
+        // Height 2–3: margin collapses to 0, cursor stays on the last row.
+        assert_eq!(scroll_start(5, 100, 2), 4);
+        assert_eq!(scroll_start(5, 100, 3), 4);
+        // Height 4: margin caps at 1, cursor stays one row above the bottom.
+        assert_eq!(scroll_start(5, 100, 4), 3);
+    }
+
+    #[test]
+    fn test_render_file_list_keeps_scroll_margin() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..30 {
+            std::fs::write(dir.path().join(format!("file{i:02}.txt")), b"x").unwrap();
+        }
+
+        let mut state = new_state(FileBrowserMode::OpenFile);
+        state.current_dir = dir.path().to_path_buf();
+        state.entries = file_handling::list_dir(dir.path()).unwrap();
+        state.selected = 12;
+
+        let text = render_to_text(&state);
+
+        // The 13-row list keeps rows 13–15 visible below the cursor.
+        assert!(
+            text.contains("file13.txt") && text.contains("file15.txt"),
+            "entries below the cursor should remain visible:\n{text}"
+        );
+        assert!(
+            !text.contains("file16.txt"),
+            "only the 3-row margin should be visible below the cursor:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_locations_keeps_scroll_margin() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = new_state(FileBrowserMode::OpenFile);
+        state.current_dir = dir.path().to_path_buf();
+        state.entries.clear();
+        state.locations = (0..30)
+            .map(|i| Location {
+                label: format!("loc-{i:02}"),
+                path: std::path::PathBuf::from(format!("/mnt/loc-{i:02}")),
+                detail: String::new(),
+                is_home: false,
+            })
+            .collect();
+        state.location_selected = 20;
+        state.focus = FocusTarget::Locations;
+
+        let text = render_to_text(&state);
+
+        assert!(
+            text.contains("loc-20") && text.contains("loc-23"),
+            "locations below the cursor should remain visible:\n{text}"
+        );
+        assert!(
+            !text.contains("loc-24"),
+            "only the 3-row margin should be visible below the cursor:\n{text}"
         );
     }
 }

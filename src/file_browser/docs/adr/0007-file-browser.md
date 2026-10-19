@@ -31,6 +31,7 @@ file listing UX to vault-specific modal logic, preventing reuse.
 - The name input, rename input, delete confirmation, and errors render as centered popups stacked over the browser; an error popup sits on top of any active dialog and is dismissed by the next key.
 - The Locations overlay pins `Home` first, then lists mounted disks returned by `file_handling::list_disks()`. It preselects the location with the longest path that is an ancestor of `current_dir`, falling back to the first row. Enter on an unreadable location keeps the overlay open and shows the error popup on top.
 - Hidden entries are names starting with `.`; nothing else is treated as hidden. `list_dir` excludes them and `list_dir_including_hidden` includes them.
+- The file list and Locations overlay keep a fixed 3-row scroll margin (`SCROLL_OFFSET`) around the selection, clamped on short viewports. At the end of the list the last item may sit on the bottom row, matching Vim/Neovim `scrolloff` behavior.
 - All I/O (list_dir, list_disks, delete_file, rename, create_dir, probe writability) goes through `file_handling`.
 - Re-exports `FileEntry` from `file_handling` so consumers don't need to import it separately.
 
