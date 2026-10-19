@@ -174,7 +174,7 @@ pub fn run_app<B: Backend>(
 
                     let flush = tokio::time::timeout(
                         SAVE_TIMEOUT,
-                        wait_for_save(&mut save_rx, state, &mut saved, target),
+                        wait_for_save(&mut save_rx, &mut saved, target),
                     )
                     .await;
                     match flush {
@@ -305,7 +305,7 @@ fn park_blocked(state: &mut TreeState, error: SaveError) {
 fn start_autosave(
     target: Option<SaveTarget>,
     events: mpsc::UnboundedSender<SaveEvent>,
-) -> io::Result<Option<Autosave>> {
+) -> io::Result<Option<Autosave<Node>>> {
     let Some(SaveTarget { path, passphrase }) = target else {
         return Ok(None);
     };
@@ -321,31 +321,24 @@ fn start_autosave(
 }
 
 /// Waits until the snapshot with `target` generation has been attempted.
+///
+/// Returns the result of that attempt. The caller owns the `SaveState`
+/// transition: on success the exit path is finished, so there is nothing left to
+/// update.
 async fn wait_for_save(
     save_rx: &mut mpsc::UnboundedReceiver<SaveEvent>,
-    state: &mut TreeState,
     saved: &mut u64,
     target: u64,
 ) -> Result<(), SaveError> {
-    loop {
-        match save_rx.recv().await {
-            Some(event) => {
-                if event.result.is_ok() {
-                    *saved = (*saved).max(event.generation);
-                }
-                if event.generation == target {
-                    return match event.result {
-                        Ok(()) => {
-                            state.save_state = SaveState::Idle;
-                            Ok(())
-                        }
-                        Err(error) => Err(error),
-                    };
-                }
-            }
-            None => return Err(SaveError::WorkerStopped),
+    while let Some(event) = save_rx.recv().await {
+        if event.result.is_ok() {
+            *saved = (*saved).max(event.generation);
+        }
+        if event.generation == target {
+            return event.result;
         }
     }
+    Err(SaveError::WorkerStopped)
 }
 
 /// Dispatches a key event to the handler for the current input mode.
@@ -2515,8 +2508,6 @@ mod tests {
     #[tokio::test]
     async fn wait_for_save_reports_the_target_generation() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut state = TreeState::new(Node::new("Root"));
-        state.save_state = SaveState::Saving;
         let mut saved = 0;
 
         tx.send(SaveEvent {
@@ -2530,17 +2521,15 @@ mod tests {
         })
         .unwrap();
 
-        let result = wait_for_save(&mut rx, &mut state, &mut saved, 3).await;
+        let result = wait_for_save(&mut rx, &mut saved, 3).await;
 
         assert!(result.is_ok());
         assert_eq!(saved, 3);
-        assert!(matches!(state.save_state, SaveState::Idle));
     }
 
     #[tokio::test]
     async fn wait_for_save_keeps_the_last_successful_generation_on_error() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut state = TreeState::new(Node::new("Root"));
         let mut saved = 0;
 
         tx.send(SaveEvent {
@@ -2554,7 +2543,7 @@ mod tests {
         })
         .unwrap();
 
-        let result = wait_for_save(&mut rx, &mut state, &mut saved, 2).await;
+        let result = wait_for_save(&mut rx, &mut saved, 2).await;
 
         assert!(matches!(result, Err(SaveError::Failed(_))));
         assert_eq!(saved, 1);
@@ -2564,10 +2553,9 @@ mod tests {
     async fn wait_for_save_detects_a_stopped_worker() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         drop(tx);
-        let mut state = TreeState::new(Node::new("Root"));
         let mut saved = 0;
 
-        let result = wait_for_save(&mut rx, &mut state, &mut saved, 1).await;
+        let result = wait_for_save(&mut rx, &mut saved, 1).await;
 
         assert!(matches!(result, Err(SaveError::WorkerStopped)));
     }

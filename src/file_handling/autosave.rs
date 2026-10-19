@@ -23,7 +23,6 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::file_handling::error::FileHandlingError;
-use crate::tree::node::Node;
 
 /// Bound on waiting for the save worker to finish.
 ///
@@ -79,41 +78,43 @@ pub struct SaveEvent {
     pub result: SaveResult,
 }
 
-struct Job {
+struct Job<T> {
     generation: u64,
-    root: Node,
+    root: T,
 }
 
-struct State {
-    slot: Option<Job>,
+struct State<T> {
+    slot: Option<Job<T>>,
     shutdown: bool,
 }
 
-struct Shared {
-    state: Mutex<State>,
+struct Shared<T> {
+    state: Mutex<State<T>>,
     available: Condvar,
 }
 
 /// Owns the single background writer thread.
 ///
-/// Call [`Autosave::shutdown`] to stop the worker with a bounded wait; the
-/// returned error reports only a join timeout. [`Autosave::detach`] stops
-/// without waiting, for a force-quit while a save is stuck. [`Drop`] repeats a
-/// best-effort bounded join as a fallback for callers that forget.
+/// Generic over the snapshot type `T`; the worker treats it as opaque and only
+/// hands it to the save function. Call [`Autosave::shutdown`] to stop the worker
+/// with a bounded wait; the returned error reports only a join timeout.
+/// [`Autosave::detach`] stops without waiting, for a force-quit while a save is
+/// stuck. [`Drop`] repeats a best-effort bounded join as a fallback for callers
+/// that forget.
 ///
 /// Any snapshot still waiting in the slot is written before the thread exits;
 /// on timeout the thread is detached and left to be reaped at process exit.
-pub struct Autosave {
-    shared: Arc<Shared>,
+pub struct Autosave<T> {
+    shared: Arc<Shared<T>>,
     handle: Option<JoinHandle<()>>,
     next_generation: u64,
 }
 
-impl Autosave {
+impl<T: Send + 'static> Autosave<T> {
     /// Starts the writer thread.
     ///
-    /// `save` is called on the writer thread with the latest submitted root; a
-    /// panic in `save` is caught and reported as [`SaveError::Panicked`].
+    /// `save` is called on the writer thread with the latest submitted snapshot;
+    /// a panic in `save` is caught and reported as [`SaveError::Panicked`].
     /// `on_event` receives one event per attempted snapshot; it must be cheap
     /// and must not panic. A panic in `on_event` stops the worker and closes the
     /// event channel, which the application surfaces as
@@ -124,7 +125,7 @@ impl Autosave {
     /// Returns an error when the writer thread cannot be spawned.
     pub fn spawn<F, G>(save: F, on_event: G) -> std::io::Result<Self>
     where
-        F: Fn(&Node) -> SaveResult + Send + 'static,
+        F: Fn(&T) -> SaveResult + Send + 'static,
         G: Fn(SaveEvent) + Send + 'static,
     {
         let shared = Arc::new(Shared {
@@ -151,17 +152,23 @@ impl Autosave {
     ///
     /// If an older snapshot is still waiting, it is replaced: the new snapshot
     /// already contains every earlier change.
-    pub fn submit(&mut self, root: Node) -> u64 {
+    pub fn submit(&mut self, root: T) -> u64 {
         self.next_generation += 1;
         let generation = self.next_generation;
 
         let mut state = lock(&self.shared.state);
-        state.slot = Some(Job { generation, root });
+        let replaced = state.slot.replace(Job { generation, root });
+        drop(state);
+        // Drop the replaced snapshot outside the lock: releasing a large tree
+        // can be expensive and must not block the worker.
+        drop(replaced);
         self.shared.available.notify_one();
 
         generation
     }
+}
 
+impl<T> Autosave<T> {
     /// Stops the worker, waiting up to `timeout` for it to finish.
     ///
     /// Any snapshot still waiting in the slot is written first. When the thread
@@ -193,7 +200,7 @@ impl Autosave {
     }
 }
 
-impl Drop for Autosave {
+impl<T> Drop for Autosave<T> {
     fn drop(&mut self) {
         self.request_stop();
 
@@ -227,9 +234,9 @@ fn join_bounded(handle: JoinHandle<()>, timeout: Duration) -> Result<(), SaveErr
 }
 
 /// Runs the writer loop until shutdown is requested and the slot is empty.
-fn run_worker<F, G>(shared: &Shared, save: &F, on_event: &G)
+fn run_worker<T, F, G>(shared: &Shared<T>, save: &F, on_event: &G)
 where
-    F: Fn(&Node) -> SaveResult,
+    F: Fn(&T) -> SaveResult,
     G: Fn(SaveEvent),
 {
     loop {
@@ -277,6 +284,8 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    use crate::tree::node::Node;
 
     const TIMEOUT: Duration = Duration::from_secs(5);
 
