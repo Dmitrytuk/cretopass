@@ -176,6 +176,8 @@ fn start_autosave(
         save_tree(root, &path, &passphrase).map_err(|e| SaveError::Failed(e.to_string()))
     };
     let on_event = move |event| {
+        // The receiver is dropped when the tree screen closes; a late save
+        // notification is then expected and intentionally ignored.
         let _ = events.send(event);
     };
 
@@ -1360,11 +1362,17 @@ fn render_alert_overlay(frame: &mut Frame, area: Rect, message: &str) {
 }
 
 fn render_save_error_overlay(frame: &mut Frame, area: Rect, message: &str) {
-    let width = (area.width * 2 / 3).max(1);
+    let width = (area.width.saturating_mul(2) / 3).max(1);
     let inner_width = width.saturating_sub(2).max(1) as usize;
-    // Count the leading space rendered before the message.
-    let message_rows = (message.chars().count() + 1).div_ceil(inner_width).max(1) as u16;
-    let height = (message_rows + 4).min(area.height).max(1);
+    // Approximate display width: non-ASCII characters are counted as two
+    // cells, covering CJK and most emoji. Include the leading space.
+    let display_width = message
+        .chars()
+        .map(|c| if c.is_ascii() { 1 } else { 2 })
+        .sum::<usize>()
+        .saturating_add(1);
+    let message_rows = display_width.div_ceil(inner_width).max(1) as u16;
+    let height = message_rows.saturating_add(4).min(area.height).max(1);
 
     let overlay_area = Rect {
         x: area.width.saturating_sub(width) / 2,

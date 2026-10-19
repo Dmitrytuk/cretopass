@@ -130,6 +130,9 @@ impl Drop for Autosave {
         }
 
         if let Some(handle) = self.handle.take() {
+            // A worker panic is reported through its save event when possible;
+            // a panic in `on_event` has no receiver left to report to, so the
+            // join result adds no actionable information here.
             let _ = handle.join();
         }
     }
@@ -208,7 +211,11 @@ mod tests {
         let (release_tx, release_rx) = mpsc::channel::<()>();
         let save = move |root: &Node| {
             started_tx.send(root.name.clone()).unwrap();
-            release_rx.recv().unwrap();
+            // Bounded wait so a failed assertion cannot leave the worker (and
+            // therefore `Autosave::drop`'s join) blocked forever.
+            release_rx
+                .recv_timeout(TIMEOUT)
+                .map_err(|_| SaveError::Failed("test release timed out".to_string()))?;
             Ok(())
         };
 

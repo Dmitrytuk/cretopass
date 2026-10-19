@@ -42,8 +42,10 @@ required for blocking filesystem and cryptography work.
 ## Writer contract
 
 - `Autosave::spawn(save, on_event)` starts one named thread (`vault-save`).
-- `Autosave::submit(root) -> u64` clones the root, replaces any waiting job, and
-  returns a monotonically increasing generation.
+- `Autosave::submit(root) -> u64` takes ownership of the snapshot, replaces any
+  waiting job, and returns a monotonically increasing generation. The event loop
+  clones the live root once per commit; this full-tree clone is deliberate and
+  cheaper than another scrypt derivation.
 - The worker takes the slot, calls `save(&root)`, and sends
   `SaveEvent { generation, result }`. A panicking `save` is caught and reported
   as `SaveError::Panicked`, so the thread survives.

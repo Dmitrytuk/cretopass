@@ -335,16 +335,18 @@ fn run_tree<B: Backend>(
     mut tree_state: crate::tree::widget::TreeState,
     passphrase: Option<Zeroizing<Vec<u8>>>,
 ) -> io::Result<()> {
-    crate::tree::app_tree::run_app(terminal, &mut tree_state, passphrase)?;
+    let result = crate::tree::app_tree::run_app(terminal, &mut tree_state, passphrase);
 
+    // Sync even on error: a later retry from Home must not start from a stale
+    // copy that could overwrite edits already written by the autosave worker.
     let return_to_menu = tree_state.return_to_menu;
     if let Some(active) = state.active_vault.as_mut() {
         active.node = Some(tree_state.root);
     }
-    if !return_to_menu {
+    if result.is_ok() && !return_to_menu {
         state.quit = true;
     }
-    Ok(())
+    result
 }
 
 // ── File browser key handling ──
