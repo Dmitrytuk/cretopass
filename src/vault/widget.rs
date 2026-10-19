@@ -3,10 +3,10 @@ use std::path::PathBuf;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{Frame, Terminal, backend::Backend};
+use zeroize::Zeroizing;
 
 use crate::cursor::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
 use crate::file_browser::{
@@ -256,14 +256,11 @@ fn handle_home_key<B: Backend>(
                         && active_vault.path.as_deref() == Some(&file_path)
                         && let Some(ref node) = active_vault.node
                     {
+                        let passphrase = active_vault.passphrase.clone();
                         let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
                         tree_state.active_vault_path = Some(file_path);
-                        tree_state.active_vault_master_password = active_vault.passphrase.clone();
                         tree_state.display_full_path = state.config.display_full_path;
-                        crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
-                        if !tree_state.return_to_menu {
-                            state.quit = true;
-                        }
+                        run_tree(state, terminal, tree_state, Some(passphrase))?;
                         return Ok(());
                     }
 
@@ -317,14 +314,35 @@ fn reopen_tree<B: Backend>(state: &mut HomeState, terminal: &mut Terminal<B>) ->
     if let Some(ref active_vault) = state.active_vault
         && let Some(ref node) = active_vault.node
     {
+        let passphrase = active_vault.passphrase.clone();
         let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
         tree_state.active_vault_path = active_vault.path.clone();
-        tree_state.active_vault_master_password = active_vault.passphrase.clone();
         tree_state.display_full_path = state.config.display_full_path;
-        crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
-        if !tree_state.return_to_menu {
-            state.quit = true;
-        }
+        run_tree(state, terminal, tree_state, Some(passphrase))?;
+    }
+    Ok(())
+}
+
+/// Runs the tree and hands its final root back to the active vault.
+///
+/// The autosave worker may have written a newer root to disk than the one
+/// `HomeState` originally decrypted. Keeping the in-memory home copy in sync
+/// prevents later home operations (change password, import) from overwriting
+/// those edits with stale data.
+fn run_tree<B: Backend>(
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+    mut tree_state: crate::tree::widget::TreeState,
+    passphrase: Option<Zeroizing<Vec<u8>>>,
+) -> io::Result<()> {
+    crate::tree::app_tree::run_app(terminal, &mut tree_state, passphrase)?;
+
+    let return_to_menu = tree_state.return_to_menu;
+    if let Some(active) = state.active_vault.as_mut() {
+        active.node = Some(tree_state.root);
+    }
+    if !return_to_menu {
+        state.quit = true;
     }
     Ok(())
 }
@@ -820,12 +838,8 @@ fn handle_change_pw_input_key<B: Backend>(
                                 new_pass_bytes.clone();
                             let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
                             tree_state.active_vault_path = Some(path.clone());
-                            tree_state.active_vault_master_password = new_pass_bytes;
                             tree_state.display_full_path = state.config.display_full_path;
-                            crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
-                            if !tree_state.return_to_menu {
-                                state.quit = true;
-                            }
+                            run_tree(state, terminal, tree_state, Some(new_pass_bytes))?;
                         }
                     }
                 }
@@ -871,13 +885,8 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
 
                     let mut tree_state = crate::tree::widget::TreeState::new(node);
                     tree_state.active_vault_path = Some(file_path);
-                    tree_state.active_vault_master_password = pp_bytes;
                     tree_state.display_full_path = state.config.display_full_path;
-                    crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
-
-                    if !tree_state.return_to_menu {
-                        state.quit = true;
-                    }
+                    run_tree(state, terminal, tree_state, Some(pp_bytes))?;
                 }
             }
         }
@@ -1176,13 +1185,8 @@ fn handle_passphrase_key<B: Backend>(
 
                         let mut tree_state = crate::tree::widget::TreeState::new(node);
                         tree_state.active_vault_path = Some(file_path);
-                        tree_state.active_vault_master_password = pp_bytes;
                         tree_state.display_full_path = state.config.display_full_path;
-                        crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
-
-                        if !tree_state.return_to_menu {
-                            state.quit = true;
-                        }
+                        run_tree(state, terminal, tree_state, Some(pp_bytes))?;
                     }
                 }
             }
@@ -1418,13 +1422,8 @@ fn handle_create_secret_file_key<B: Backend>(
 
                     let mut tree_state = crate::tree::widget::TreeState::new(node);
                     tree_state.active_vault_path = Some(file_path);
-                    tree_state.active_vault_master_password = pp_bytes;
                     tree_state.display_full_path = state.config.display_full_path;
-                    crate::tree::app_tree::run_app(terminal, &mut tree_state)?;
-
-                    if !tree_state.return_to_menu {
-                        state.quit = true;
-                    }
+                    run_tree(state, terminal, tree_state, Some(pp_bytes))?;
                 }
             }
         }

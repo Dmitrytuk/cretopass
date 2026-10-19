@@ -11,6 +11,7 @@ pub const OVERLAY_CUSTOM_FIELD_NAME: &str = " Custom Field Name ";
 pub const OVERLAY_CONFIRM_DELETE: &str = " Confirm Delete ";
 pub const OVERLAY_COPIED: &str = " Copied ";
 pub const OVERLAY_HELP: &str = " Help ";
+pub const OVERLAY_SAVE_ERROR: &str = " Save Error ";
 
 pub const CONFIG_TITLE: &str = " Configuration ";
 pub const HOME_CHANGE_PASSWORD: &str = " Change Password ";
@@ -81,6 +82,7 @@ pub const MODE_HELP: &str = "HELP";
 
 pub const STATUS_LOADING: &str = "Loading...";
 pub const STATUS_SAVING: &str = "Saving...";
+pub const STATUS_SAVE_FAILED: &str = "Save failed";
 pub const STATUS_HOME_LABEL: &str = " HOME ";
 
 pub const HINT_TREE: &str = "H:home  /:search  ?:help  q:quit";

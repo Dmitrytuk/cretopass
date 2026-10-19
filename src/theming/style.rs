@@ -41,6 +41,7 @@ pub enum ElementStyle {
     GrayHint,
     StatusLoading,
     StatusSaving,
+    StatusSaveFailed,
     StatusInfo,
     FbPathBar,
     FbDirName,
@@ -151,6 +152,7 @@ impl ElementStyle {
             Self::GrayHint => Style::default().fg(Color::DarkGray),
             Self::StatusLoading => Style::default().fg(Color::Green),
             Self::StatusSaving => Style::default().fg(Color::Red),
+            Self::StatusSaveFailed => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             Self::StatusInfo => Style::default().fg(Color::White),
             Self::FbPathBar => Style::default()
                 .fg(Color::White)

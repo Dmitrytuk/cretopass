@@ -5,63 +5,228 @@ use crate::cursor::{
     backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
     selected_span,
 };
-use crate::file_handling::save_tree;
+use crate::file_handling::{Autosave, SaveError, SaveEvent, save_tree};
 use crate::theming::Action;
 use crate::theming::{ElementStyle, Icon, texts};
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{
     AddPosition, FormFocus, FormPending, FormRow, FormState, InputMode, TreeState, TreeWidget,
 };
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, Event, EventStream, KeyEventKind};
+use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::{Terminal, backend::Backend};
+use tokio::sync::mpsc;
+use zeroize::Zeroizing;
 
-pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TreeState) -> io::Result<()> {
-    loop {
-        if state.quit {
-            break Ok(());
-        }
+/// Runs the tree screen until the user quits or returns to the home screen.
+///
+/// Committed changes are handed to a background save worker; `passphrase`
+/// supplies the vault credential for that worker. On exit the function waits
+/// for the latest snapshot to be written, so `Ok(())` means the vault is up to
+/// date.
+///
+/// # Errors
+///
+/// Returns an I/O error when the terminal or event stream fails, or when the
+/// save worker cannot be started.
+pub fn run_app<B: Backend>(
+    terminal: &mut Terminal<B>,
+    state: &mut TreeState,
+    passphrase: Option<Zeroizing<Vec<u8>>>,
+) -> io::Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+    let (save_tx, mut save_rx) = mpsc::unbounded_channel::<SaveEvent>();
+    let mut autosave = start_autosave(state, passphrase, save_tx)?;
+    let has_worker = autosave.is_some();
 
+    let mut submitted: u64 = 0;
+    let mut saved: u64 = 0;
+    let mut save_open = has_worker;
+
+    runtime.block_on(async {
+        let mut events = EventStream::new();
         terminal.draw(|f| ui(f, state))?;
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
+        loop {
+            tokio::select! {
+                maybe_event = events.next() => {
+                    match maybe_event {
+                        Some(Ok(Event::Key(key))) => {
+                            if key.kind != KeyEventKind::Press {
+                                continue;
+                            }
+                            if state.save_error.take().is_some() {
+                                terminal.draw(|f| ui(f, state))?;
+                                continue;
+                            }
 
-            match &state.mode {
-                InputMode::Normal => handle_normal(key, state),
-                InputMode::Search => handle_search(key, state),
-                InputMode::PendingCut => handle_pending_cut(key, state),
-                InputMode::PendingPaste => handle_pending_paste(key, state),
-                InputMode::PendingAdd => handle_pending_add(key, state),
-                InputMode::Form(_) => handle_form(key, state),
-                InputMode::SelectFieldType { .. } => handle_select_field_type(key, state),
-                InputMode::CustomFieldName { .. } => handle_custom_field_name(key, state),
-                InputMode::ConfirmDeleteField { .. } => handle_confirm_delete(key, state),
-                InputMode::Detail { .. } => handle_detail(key, state),
-                InputMode::ExportNodeSelect { .. } => handle_export_node_select(key, state),
-                InputMode::ExportNodeFormat { .. } => handle_export_node_format(key, state),
-                InputMode::Alert { .. } => handle_alert(key, state),
-                InputMode::Help => handle_help(key, state),
-            }
+                            dispatch_key(key, state);
 
-            if state.modified {
-                state.status = Some(texts::STATUS_SAVING);
-                terminal.draw(|f| ui(f, state))?;
-                if let Some(ref p) = state.active_vault_path {
-                    state.modified = false;
-                    if let Err(e) = save_tree(&state.root, p, &state.active_vault_master_password) {
-                        eprintln!("Save failed: {e}");
+                            if state.modified {
+                                state.modified = false;
+                                if let Some(ref mut worker) = autosave {
+                                    submitted = worker.submit(state.root.clone());
+                                    state.status = Some(texts::STATUS_SAVING);
+                                }
+                            }
+                        }
+                        Some(Ok(Event::Resize(_, _))) => {}
+                        Some(Ok(_)) => continue,
+                        Some(Err(e)) => return Err(e),
+                        None => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::UnexpectedEof,
+                                "terminal event stream ended",
+                            ));
+                        }
                     }
                 }
-                state.status = None;
+                event = save_rx.recv(), if save_open => {
+                    match event {
+                        Some(event) => {
+                            if event.result.is_ok() {
+                                saved = saved.max(event.generation);
+                            }
+                            if event.generation == submitted {
+                                match event.result {
+                                    Ok(()) => {
+                                        state.status = None;
+                                        state.save_error = None;
+                                    }
+                                    Err(error) => {
+                                        state.status = Some(texts::STATUS_SAVE_FAILED);
+                                        state.save_error =
+                                            Some(format!("{}{}", texts::MSG_SAVE_FAILED, error));
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            save_open = false;
+                            if saved < submitted {
+                                state.status = Some(texts::STATUS_SAVE_FAILED);
+                                state.save_error = Some(format!(
+                                    "{}{}",
+                                    texts::MSG_SAVE_FAILED,
+                                    SaveError::WorkerStopped
+                                ));
+                            }
+                        }
+                    }
+                }
             }
+
+            if state.quit || state.return_to_menu {
+                if let Some(ref mut worker) = autosave {
+                    let retry = state.modified || state.status == Some(texts::STATUS_SAVE_FAILED);
+                    if retry {
+                        state.modified = false;
+                        submitted = worker.submit(state.root.clone());
+                    }
+
+                    if saved < submitted {
+                        state.status = Some(texts::STATUS_SAVING);
+                        terminal.draw(|f| ui(f, state))?;
+
+                        match wait_for_save(&mut save_rx, state, &mut saved, submitted).await {
+                            Ok(()) => return Ok(()),
+                            Err(error) => {
+                                state.quit = false;
+                                state.return_to_menu = false;
+                                state.status = Some(texts::STATUS_SAVE_FAILED);
+                                state.save_error =
+                                    Some(format!("{}{}", texts::MSG_SAVE_FAILED, error));
+                            }
+                        }
+                    } else {
+                        return Ok(());
+                    }
+                } else {
+                    return Ok(());
+                }
+            }
+
+            terminal.draw(|f| ui(f, state))?;
         }
+    })
+}
+
+/// Builds the background writer when the tree has a vault to save to.
+fn start_autosave(
+    state: &TreeState,
+    passphrase: Option<Zeroizing<Vec<u8>>>,
+    events: mpsc::UnboundedSender<SaveEvent>,
+) -> io::Result<Option<Autosave>> {
+    let Some(path) = state.active_vault_path.clone() else {
+        return Ok(None);
+    };
+    let Some(passphrase) = passphrase else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "autosave requires a vault passphrase",
+        ));
+    };
+
+    let save = move |root: &Node| {
+        save_tree(root, &path, &passphrase).map_err(|e| SaveError::Failed(e.to_string()))
+    };
+    let on_event = move |event| {
+        let _ = events.send(event);
+    };
+
+    Autosave::spawn(save, on_event).map(Some)
+}
+
+/// Waits until the snapshot with `target` generation has been attempted.
+async fn wait_for_save(
+    save_rx: &mut mpsc::UnboundedReceiver<SaveEvent>,
+    state: &mut TreeState,
+    saved: &mut u64,
+    target: u64,
+) -> Result<(), SaveError> {
+    loop {
+        match save_rx.recv().await {
+            Some(event) => {
+                if event.result.is_ok() {
+                    *saved = (*saved).max(event.generation);
+                }
+                if event.generation == target {
+                    return match event.result {
+                        Ok(()) => {
+                            state.status = None;
+                            Ok(())
+                        }
+                        Err(error) => Err(error),
+                    };
+                }
+            }
+            None => return Err(SaveError::WorkerStopped),
+        }
+    }
+}
+
+/// Dispatches a key event to the handler for the current input mode.
+fn dispatch_key(key: event::KeyEvent, state: &mut TreeState) {
+    match &state.mode {
+        InputMode::Normal => handle_normal(key, state),
+        InputMode::Search => handle_search(key, state),
+        InputMode::PendingCut => handle_pending_cut(key, state),
+        InputMode::PendingPaste => handle_pending_paste(key, state),
+        InputMode::PendingAdd => handle_pending_add(key, state),
+        InputMode::Form(_) => handle_form(key, state),
+        InputMode::SelectFieldType { .. } => handle_select_field_type(key, state),
+        InputMode::CustomFieldName { .. } => handle_custom_field_name(key, state),
+        InputMode::ConfirmDeleteField { .. } => handle_confirm_delete(key, state),
+        InputMode::Detail { .. } => handle_detail(key, state),
+        InputMode::ExportNodeSelect { .. } => handle_export_node_select(key, state),
+        InputMode::ExportNodeFormat { .. } => handle_export_node_format(key, state),
+        InputMode::Alert { .. } => handle_alert(key, state),
+        InputMode::Help => handle_help(key, state),
     }
 }
 
@@ -921,6 +1086,10 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
         }
         _ => {}
     }
+
+    if let Some(message) = state.save_error.as_deref() {
+        render_save_error_overlay(frame, area, message);
+    }
 }
 
 fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
@@ -1188,6 +1357,46 @@ fn render_alert_overlay(frame: &mut Frame, area: Rect, message: &str) {
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(&block, overlay_area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+fn render_save_error_overlay(frame: &mut Frame, area: Rect, message: &str) {
+    let width = (area.width * 2 / 3).max(1);
+    let inner_width = width.saturating_sub(2).max(1) as usize;
+    // Count the leading space rendered before the message.
+    let message_rows = (message.chars().count() + 1).div_ceil(inner_width).max(1) as u16;
+    let height = (message_rows + 4).min(area.height).max(1);
+
+    let overlay_area = Rect {
+        x: area.width.saturating_sub(width) / 2,
+        y: area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+
+    let block = Block::default()
+        .title(texts::OVERLAY_SAVE_ERROR)
+        .borders(Borders::ALL)
+        .style(ElementStyle::ConfirmDeleteBlock.style());
+
+    let lines = vec![
+        Line::from(Span::styled(
+            format!(" {}", message),
+            ElementStyle::ConfirmMessage.style(),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            texts::HINT_DETAIL_ALERT,
+            ElementStyle::DismissHint.style(),
+        )),
+    ];
+
+    let inner = block.inner(overlay_area);
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(&block, overlay_area);
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        inner,
+    );
 }
 
 fn make_overlay_area(area: Rect, extra_fields_len: usize, base_content: u16) -> Rect {
@@ -2004,5 +2213,65 @@ mod tests {
             }
             other => panic!("expected Detail mode, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn wait_for_save_reports_the_target_generation() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut state = TreeState::new(Node::new("Root"));
+        state.status = Some(texts::STATUS_SAVING);
+        let mut saved = 0;
+
+        tx.send(SaveEvent {
+            generation: 1,
+            result: Ok(()),
+        })
+        .unwrap();
+        tx.send(SaveEvent {
+            generation: 3,
+            result: Ok(()),
+        })
+        .unwrap();
+
+        let result = wait_for_save(&mut rx, &mut state, &mut saved, 3).await;
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(saved, 3);
+        assert_eq!(state.status, None);
+    }
+
+    #[tokio::test]
+    async fn wait_for_save_keeps_the_last_successful_generation_on_error() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut state = TreeState::new(Node::new("Root"));
+        let mut saved = 0;
+
+        tx.send(SaveEvent {
+            generation: 1,
+            result: Ok(()),
+        })
+        .unwrap();
+        tx.send(SaveEvent {
+            generation: 2,
+            result: Err(SaveError::Failed("disk full".to_string())),
+        })
+        .unwrap();
+
+        let result = wait_for_save(&mut rx, &mut state, &mut saved, 2).await;
+
+        assert_eq!(result, Err(SaveError::Failed("disk full".to_string())));
+        assert_eq!(saved, 1);
+    }
+
+    #[tokio::test]
+    async fn wait_for_save_detects_a_stopped_worker() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        drop(tx);
+        let mut state = TreeState::new(Node::new("Root"));
+        let mut saved = 0;
+
+        let result = wait_for_save(&mut rx, &mut state, &mut saved, 1).await;
+
+        assert_eq!(result, Err(SaveError::WorkerStopped));
     }
 }

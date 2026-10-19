@@ -1,9 +1,11 @@
+pub mod autosave;
 pub mod disks;
 pub mod error;
 pub mod export;
 pub mod file_process;
 pub mod import;
 
+pub use autosave::{Autosave, SaveError, SaveEvent};
 pub use disks::{DiskInfo, list_disks};
 pub use error::FileHandlingError;
 pub use file_process::{

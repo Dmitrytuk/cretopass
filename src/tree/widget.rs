@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use zeroize::Zeroizing;
-
 use ratatui::{
     Frame,
     layout::Rect,
@@ -547,10 +545,11 @@ pub struct TreeState {
     pub return_to_menu: bool,
     /// Path of the currently opened secret file, if any.
     pub active_vault_path: Option<String>,
-    /// Master password for the open vault (provided by user), zeroized on drop.
-    pub active_vault_master_password: Zeroizing<Vec<u8>>,
-    /// Set to `true` when the tree has unsaved changes; cleared after auto-save.
+    /// Set to `true` when a commit has not yet been submitted to autosave.
+    /// Cleared as soon as the snapshot is handed to the save worker.
     pub modified: bool,
+    /// Full text of the last failed save attempt, shown as an overlay.
+    pub save_error: Option<String>,
     /// If `true`, window title shows the full path; otherwise just the filename.
     pub display_full_path: bool,
     /// Status indicator shown in the window title bar (e.g. "Loading..." or "Saving...").
@@ -574,8 +573,8 @@ impl TreeState {
             quit: false,
             return_to_menu: false,
             active_vault_path: None,
-            active_vault_master_password: Zeroizing::new(Vec::new()),
             modified: false,
+            save_error: None,
             display_full_path: true,
             status: None,
         };
@@ -1045,6 +1044,7 @@ impl TreeWidget {
             let el = match s {
                 texts::STATUS_LOADING => ElementStyle::StatusLoading,
                 texts::STATUS_SAVING => ElementStyle::StatusSaving,
+                texts::STATUS_SAVE_FAILED => ElementStyle::StatusSaveFailed,
                 _ => ElementStyle::StatusInfo,
             };
             title_spans.push(Span::styled(format!(" {}  ", s), el.style()));

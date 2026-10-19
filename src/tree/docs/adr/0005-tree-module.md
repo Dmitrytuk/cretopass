@@ -17,14 +17,14 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 | File | Responsibility |
 |------|---------------|
 | `node.rs` | `Node` struct (id, name, children, extra_fields), `ExtraField`, `FieldType` enum, legacy-`description` migration, recursive `find`/`find_mut`/`contains`, wire-label helpers for import/export |
-| `widget.rs` | `TreeState` (root, expanded set, selected index, visible list, mode, vault path/passphrase, modified flag, cut buffer, search state), `VisibleNode`, `InputMode` enum, `FormState` + undo/redo history, `TreeWidget::render()` DFS flat-list, all tree mutation operations |
-| `app_tree.rs` | `run_app()` event loop, key handlers per `InputMode`, overlay rendering (search bar, detail, edit/add forms, help, export, confirm dialogs, alerts, status bar), clipboard integration |
+| `widget.rs` | `TreeState` (root, expanded set, selected index, visible list, mode, vault path, modified flag, save error, cut buffer, search state), `VisibleNode`, `InputMode` enum, `FormState` + undo/redo history, `TreeWidget::render()` DFS flat-list, all tree mutation operations |
+| `app_tree.rs` | `run_app()` async event loop (`EventStream` + `tokio::select!`), key handlers per `InputMode`, autosave submission and exit flush, overlay rendering (search bar, detail, edit/add forms, help, export, confirm dialogs, save errors, status bar), clipboard integration |
 
 ## Data model
 
 - **Node**: `{id: Uuid, name, extra_fields: Vec<ExtraField>, children: Vec<Node>}`
 - **ExtraField**: `{field_type: Login | Password | Custom(String), value: String}`
-- **TreeState**: owns root `Node`, `expanded: HashSet<Uuid>`, `selected: usize` (flat-list index), `cut_buffer: Option<Node>`, `mode: InputMode`, `active_vault_path`, `active_vault_master_password` (Zeroizing), `modified: bool`
+- **TreeState**: owns root `Node`, `expanded: HashSet<Uuid>`, `selected: usize` (flat-list index), `cut_buffer: Option<Node>`, `mode: InputMode`, `active_vault_path`, `modified: bool`, `save_error: Option<String>`
 
 ### Description as an ordinary ExtraField
 
@@ -161,10 +161,29 @@ parent row (`collapse_or_select_parent`).
 
 ## Autosave flow
 
-1. Mutation (add/edit/cut/paste) sets `TreeState.modified = true`.
-2. Next event-loop tick: if `active_vault_path.is_some()`, call `file_handling::save_tree()`.
-3. Status bar shows "Saving..." during the save.
-4. Quit (`q`) or return-to-home (`H`) does explicit save before transitioning.
+1. A mutation (add/edit/cut/paste/undo/redo) commits directly into the root and
+   sets `TreeState.modified = true`.
+2. Before the next draw, the event loop clones the root and submits it to the
+   `file_handling::Autosave` worker, receiving a generation number. `modified`
+   is then cleared: it means "not yet submitted", not "not yet written".
+3. The worker serializes saves on one thread. A submission made while a save is
+   running replaces any still-waiting snapshot; the newest root therefore wins
+   and a burst of edits costs at most one extra save.
+4. The status bar shows "Saving..." from submission until the event for the
+   latest generation arrives. On failure it shows "Save failed"; the full text
+   is stored in `TreeState.save_error` and drawn as an overlay. Any key
+   dismisses the overlay.
+5. On quit (`q`) or return-to-home (`H`), the loop retries the final snapshot if
+   the last attempt failed or `modified` is set, then waits for the latest
+   generation. A failed final save cancels the transition and leaves the user in
+   the Tree with the error overlay; the caller only leaves the Tree after the
+   vault is up to date.
+
+The master passphrase is owned by the worker closure, not by `TreeState`.
+`run_app()` accepts it as an `Option<Zeroizing<Vec<u8>>>`; the library demo runs
+without one and therefore without a worker. See
+[ADR 0010 — Asynchronous tree autosave](../../../../docs/adr/0010-async-tree-autosave.md)
+for the worker contract and the latest-wins rationale.
 
 ## Edge cases
 
@@ -177,7 +196,8 @@ parent row (`collapse_or_select_parent`).
 
 - `uuid` 1.0 — node identity
 - `serde` 1 + `serde_json` 1 — serialization
-- `zeroize` — master passphrase in TreeState
-- `file_handling` — autosave, export
+- `zeroize` — passphrase ownership at the vault/tree boundary
+- `tokio` 1 (`rt`, `sync`, `macros`) + `futures-util` 0.3 — async input stream and save-event channel
+- `file_handling` — autosave worker, export
 - `cursor` — text editing helpers
 - `theming` — Action dispatch, strings, styles
