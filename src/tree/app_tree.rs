@@ -24,12 +24,34 @@ use ratatui::{Terminal, backend::Backend};
 use tokio::sync::mpsc;
 use zeroize::Zeroizing;
 
+/// The vault location and credential the autosave worker needs to persist a
+/// tree.
+///
+/// `path` and `passphrase` are always supplied together, so "path present,
+/// passphrase absent" cannot be represented. A tree without a save target (the
+/// read-only library demo) runs without autosave.
+pub struct SaveTarget {
+    /// Path of the secret file to write.
+    pub path: String,
+    /// Master password used to encrypt the file.
+    pub passphrase: Zeroizing<Vec<u8>>,
+}
+
+impl std::fmt::Debug for SaveTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SaveTarget")
+            .field("path", &self.path)
+            .field("passphrase", &"<redacted>")
+            .finish()
+    }
+}
+
 /// Runs the tree screen until the user quits or returns to the home screen.
 ///
-/// Committed changes are handed to a background save worker; `passphrase`
-/// supplies the vault credential for that worker. On exit the function waits
-/// for the latest snapshot to be written, so `Ok(())` means the vault is up to
-/// date.
+/// Committed changes are handed to a background save worker built from
+/// `target`; `None` means a read-only tree (the library demo) with no autosave.
+/// On exit the function waits for the latest snapshot to be written, so
+/// `Ok(())` means the vault is up to date.
 ///
 /// # Errors
 ///
@@ -38,11 +60,11 @@ use zeroize::Zeroizing;
 pub fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
     state: &mut TreeState,
-    passphrase: Option<Zeroizing<Vec<u8>>>,
+    target: Option<SaveTarget>,
 ) -> io::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread().build()?;
     let (save_tx, mut save_rx) = mpsc::unbounded_channel::<SaveEvent>();
-    let mut autosave = start_autosave(state, passphrase, save_tx)?;
+    let mut autosave = start_autosave(target, save_tx)?;
     let has_worker = autosave.is_some();
 
     let mut submitted: u64 = 0;
@@ -153,20 +175,13 @@ pub fn run_app<B: Backend>(
     })
 }
 
-/// Builds the background writer when the tree has a vault to save to.
+/// Builds the background writer when the tree has a save target.
 fn start_autosave(
-    state: &TreeState,
-    passphrase: Option<Zeroizing<Vec<u8>>>,
+    target: Option<SaveTarget>,
     events: mpsc::UnboundedSender<SaveEvent>,
 ) -> io::Result<Option<Autosave>> {
-    let Some(path) = state.active_vault_path.clone() else {
+    let Some(SaveTarget { path, passphrase }) = target else {
         return Ok(None);
-    };
-    let Some(passphrase) = passphrase else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "autosave requires a vault passphrase",
-        ));
     };
 
     let save = move |root: &Node| save_tree(root, &path, &passphrase).map_err(SaveError::Failed);
@@ -2223,6 +2238,12 @@ mod tests {
             }
             other => panic!("expected Detail mode, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn start_autosave_without_a_target_returns_none() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        assert!(start_autosave(None, tx).unwrap().is_none());
     }
 
     #[tokio::test]
