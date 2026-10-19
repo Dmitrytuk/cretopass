@@ -47,6 +47,8 @@ pub enum Action {
     ConfigDelete,
     ToggleSetting,
     SaveConfig,
+    /// Toggles plaintext display of a password field.
+    ToggleShowPassword,
     Yes,
     No,
     ExportNode,
@@ -241,9 +243,41 @@ impl Action {
     }
 
     pub fn from_change_pw_input(key: &KeyEvent) -> Self {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return match key.code {
+                KeyCode::Char('s') => Self::ToggleShowPassword,
+                _ => Self::None,
+            };
+        }
         match key.code {
-            KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => Self::NextField,
-            KeyCode::Up | KeyCode::Char('k') => Self::PrevField,
+            KeyCode::Tab | KeyCode::Down => Self::NextField,
+            KeyCode::BackTab | KeyCode::Up => Self::PrevField,
+            KeyCode::Enter => Self::Confirm,
+            KeyCode::Esc => Self::Cancel,
+            KeyCode::Backspace => Self::Backspace,
+            KeyCode::Delete => Self::DeleteChar,
+            KeyCode::Left => Self::CursorLeft,
+            KeyCode::Right => Self::CursorRight,
+            KeyCode::Home => Self::CursorHome,
+            KeyCode::End => Self::CursorEnd,
+            KeyCode::Char(c) => Self::InsertChar(c),
+            _ => Self::None,
+        }
+    }
+
+    /// Dispatch for the dedicated "create new secret file" dialog. Password
+    /// fields are focused, so `j`/`k` are typed as text and field navigation
+    /// uses `Tab`/arrows. `Ctrl+S` reveals the passwords.
+    pub fn from_create_secret_file(key: &KeyEvent) -> Self {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return match key.code {
+                KeyCode::Char('s') => Self::ToggleShowPassword,
+                _ => Self::None,
+            };
+        }
+        match key.code {
+            KeyCode::Tab | KeyCode::Down => Self::NextField,
+            KeyCode::BackTab | KeyCode::Up => Self::PrevField,
             KeyCode::Enter => Self::Confirm,
             KeyCode::Esc => Self::Cancel,
             KeyCode::Backspace => Self::Backspace,
@@ -258,6 +292,12 @@ impl Action {
     }
 
     pub fn from_passphrase_input(key: &KeyEvent) -> Self {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return match key.code {
+                KeyCode::Char('s') => Self::ToggleShowPassword,
+                _ => Self::None,
+            };
+        }
         match key.code {
             KeyCode::Esc => Self::Cancel,
             KeyCode::Enter => Self::Confirm,
@@ -515,5 +555,89 @@ mod tests {
         assert_eq!(Action::from_home(&key(KeyCode::Char('l'))), Action::Confirm);
         assert_eq!(Action::from_home(&key(KeyCode::Right)), Action::Confirm);
         assert_eq!(Action::from_home(&key(KeyCode::Enter)), Action::Confirm);
+    }
+
+    fn ctrl(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn ctrl_s_toggles_show_password() {
+        assert_eq!(
+            Action::from_passphrase_input(&ctrl(KeyCode::Char('s'))),
+            Action::ToggleShowPassword
+        );
+        assert_eq!(
+            Action::from_change_pw_input(&ctrl(KeyCode::Char('s'))),
+            Action::ToggleShowPassword
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&ctrl(KeyCode::Char('s'))),
+            Action::ToggleShowPassword
+        );
+    }
+
+    #[test]
+    fn create_secret_file_navigates_with_tab_and_arrows() {
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Tab)),
+            Action::NextField
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::BackTab)),
+            Action::PrevField
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Down)),
+            Action::NextField
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Up)),
+            Action::PrevField
+        );
+    }
+
+    #[test]
+    fn create_secret_file_typing_j_k_inserts_text() {
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Char('j'))),
+            Action::InsertChar('j')
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Char('k'))),
+            Action::InsertChar('k')
+        );
+    }
+
+    #[test]
+    fn create_secret_file_enter_confirms_and_esc_cancels() {
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Enter)),
+            Action::Confirm
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Esc)),
+            Action::Cancel
+        );
+    }
+
+    #[test]
+    fn change_pw_input_typing_j_k_inserts_text() {
+        assert_eq!(
+            Action::from_change_pw_input(&key(KeyCode::Char('j'))),
+            Action::InsertChar('j')
+        );
+        assert_eq!(
+            Action::from_change_pw_input(&key(KeyCode::Char('k'))),
+            Action::InsertChar('k')
+        );
+        assert_eq!(
+            Action::from_change_pw_input(&key(KeyCode::Tab)),
+            Action::NextField
+        );
+        assert_eq!(
+            Action::from_change_pw_input(&key(KeyCode::BackTab)),
+            Action::PrevField
+        );
     }
 }

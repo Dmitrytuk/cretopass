@@ -14,6 +14,7 @@ pub const OVERLAY_HELP: &str = " Help ";
 
 pub const CONFIG_TITLE: &str = " Configuration ";
 pub const HOME_CHANGE_PASSWORD: &str = " Change Password ";
+pub const HOME_CREATE_SECRET: &str = " Create Secret File ";
 pub const HOME_NO_PASSPHRASE: &str = " No Passphrase ";
 pub const HOME_ENTER_PASSPHRASE: &str = " Enter Passphrase ";
 pub const HOME_ALERT: &str = " Alert ";
@@ -50,10 +51,12 @@ pub const PROMPT_EXPORT_CONFIRM_END: &str = "?";
 
 pub const LABEL_NAME: &str = "Name: ";
 pub const LABEL_PASSPHRASE: &str = "Passphrase: ";
+pub const LABEL_PASSPHRASE_FIELD: &str = "Passphrase";
 pub const LABEL_FILE: &str = "File: ";
 pub const LABEL_CURRENT_PW: &str = "Current password";
 pub const LABEL_NEW_PW: &str = "New password";
 pub const LABEL_CONFIRM_PW: &str = "Confirm new password";
+pub const LABEL_PASSPHRASE_CONFIRM: &str = "Confirm passphrase";
 pub const LABEL_RENAME: &str = " Rename: ";
 pub const LABEL_NAME_INLINE: &str = " Name: ";
 
@@ -95,9 +98,10 @@ pub const HINT_HOME: &str = "j/k:navigate  Enter/l:select  d:<delete path>  q:qu
 pub const HINT_CONFIG: &str = "Space:toggle  Enter:save  Esc:cancel";
 pub const HINT_DELETE_CONFIRM: &str = "y/Enter:confirm  any key:cancel";
 pub const HINT_CHANGE_PW_CONFIRM: &str = "y/Enter:yes  any key:no";
-pub const HINT_CHANGE_PW_INPUT: &str = "Tab/↑/↓:switch  Enter:apply  Esc:cancel";
+pub const HINT_CHANGE_PW_INPUT: &str = "Tab/↑/↓:switch  Ctrl+S:show  Enter:apply  Esc:cancel";
 pub const HINT_NO_PASSPHRASE: &str = "y/Enter:yes  any key:no";
-pub const HINT_PASSPHRASE: &str = "Enter:confirm  Esc:cancel";
+pub const HINT_PASSPHRASE: &str = "Enter:confirm  Ctrl+S:show  Esc:cancel";
+pub const HINT_CREATE_SECRET: &str = "Tab/↑/↓:switch  Ctrl+S:show  Enter:create  Esc:cancel";
 pub const HINT_ALERT: &str = "Press any key to dismiss";
 pub const HINT_HELP: &str = "Press any key to close";
 
