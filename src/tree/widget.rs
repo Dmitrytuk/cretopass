@@ -571,6 +571,11 @@ pub struct GeneratorModal {
     pub params: PasswordParams,
     /// Raw length digits as typed; may be empty or out of range.
     pub length_input: String,
+    /// Caret byte-offset inside [`GeneratorModal::length_input`].
+    pub length_cursor: usize,
+    /// `true` until the user edits the length: the first digit (or
+    /// `Backspace`/`Delete`) replaces the seeded value instead of appending.
+    pub length_fresh: bool,
     /// Why the current `length_input` cannot be used, set by Generate.
     pub error: Option<PasswordLengthError>,
     /// Focused row in the modal, or focused symbol index in the checklist.

@@ -705,9 +705,13 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
             // `from_form_nav` only yields this at the Nav level, and only when
             // the focused row carries a generator (today: a Password field).
             if FieldGenerator::for_field(form.focused_field_type(&state.root)).is_some() {
+                let length_input = state.generator.length.value().to_string();
+                let length_cursor = length_input.len();
                 state.mode = InputMode::GeneratePassword(GeneratorModal {
                     params: state.generator,
-                    length_input: state.generator.length.value().to_string(),
+                    length_input,
+                    length_cursor,
+                    length_fresh: true,
                     error: None,
                     selected: GENERATOR_ROW_LENGTH,
                     form,
@@ -970,9 +974,11 @@ fn handle_custom_field_name(key: event::KeyEvent, state: &mut TreeState) {
 
 /// Keys for the password-generator parameter modal.
 ///
-/// `Ctrl+G` opened this from the Add/Edit form. Generating writes the value
-/// into the focused field, commits it (undo entry + autosave) and returns to
-/// the form. `Esc` returns without touching the field.
+/// `Ctrl+G` opened this from the Add/Edit form. On the length row, the first
+/// digit replaces the seeded value and the caret can then be moved with
+/// `Left`/`Right`/`Home`/`End`, inserting/removing at most three digits.
+/// Generating writes the value into the focused field, commits it (undo entry +
+/// autosave) and returns to the form. `Esc` returns without touching the field.
 fn handle_generate_password(key: event::KeyEvent, state: &mut TreeState) {
     let mut modal = match std::mem::replace(&mut state.mode, InputMode::Normal) {
         InputMode::GeneratePassword(modal) => modal,
@@ -1000,16 +1006,62 @@ fn handle_generate_password(key: event::KeyEvent, state: &mut TreeState) {
             }
             state.mode = InputMode::GeneratePassword(modal);
         }
+        Action::CursorLeft if modal.selected == GENERATOR_ROW_LENGTH => {
+            modal.length_fresh = false;
+            modal.length_cursor = cursor_left(&modal.length_input, modal.length_cursor);
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::CursorRight if modal.selected == GENERATOR_ROW_LENGTH => {
+            modal.length_fresh = false;
+            modal.length_cursor = cursor_right(&modal.length_input, modal.length_cursor);
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::CursorHome if modal.selected == GENERATOR_ROW_LENGTH => {
+            modal.length_fresh = false;
+            modal.length_cursor = 0;
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::CursorEnd if modal.selected == GENERATOR_ROW_LENGTH => {
+            modal.length_fresh = false;
+            modal.length_cursor = modal.length_input.len();
+            state.mode = InputMode::GeneratePassword(modal);
+        }
         Action::InsertChar(c) if modal.selected == GENERATOR_ROW_LENGTH && c.is_ascii_digit() => {
-            if modal.length_input.len() < 3 {
-                modal.length_input.push(c);
-                modal.error = None;
+            if modal.length_fresh {
+                modal.length_input.clear();
+                modal.length_cursor = 0;
+                modal.length_fresh = false;
             }
+            if modal.length_input.len() < 3 {
+                insert_char_at(&mut modal.length_input, &mut modal.length_cursor, c);
+            }
+            modal.error = None;
             state.mode = InputMode::GeneratePassword(modal);
         }
         Action::Backspace if modal.selected == GENERATOR_ROW_LENGTH => {
-            modal.length_input.pop();
+            if modal.length_fresh {
+                modal.length_input.clear();
+                modal.length_cursor = 0;
+                modal.length_fresh = false;
+            } else {
+                modal.length_cursor = backspace_at(&mut modal.length_input, modal.length_cursor);
+            }
             modal.error = None;
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::DeleteChar if modal.selected == GENERATOR_ROW_LENGTH => {
+            if modal.length_fresh {
+                modal.length_input.clear();
+                modal.length_cursor = 0;
+                modal.length_fresh = false;
+            } else {
+                delete_at(&mut modal.length_input, modal.length_cursor);
+            }
+            modal.error = None;
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::Confirm if modal.selected == GENERATOR_ROW_LENGTH => {
+            modal.selected = GENERATOR_ROW_SYMBOLS;
             state.mode = InputMode::GeneratePassword(modal);
         }
         Action::Confirm if modal.selected == GENERATOR_ROW_SYMBOLS => {
@@ -2081,11 +2133,19 @@ fn render_generate_password_overlay(frame: &mut Frame, area: Rect, modal: &Gener
     let inner = block.inner(overlay_area);
 
     let mut lines: Vec<Line> = Vec::new();
-    let length_label = format!("{}{}", texts::LABEL_GENERATOR_LENGTH, modal.length_input);
-    lines.push(Line::from(selected_span(
-        &length_label,
-        modal.selected == GENERATOR_ROW_LENGTH,
-    )));
+    if modal.selected == GENERATOR_ROW_LENGTH {
+        let mut spans = vec![Span::raw(Icon::SelectionArrow.as_str().to_string())];
+        spans.extend(cursor_field_spans(
+            texts::LABEL_GENERATOR_LENGTH,
+            &modal.length_input,
+            modal.length_cursor,
+            true,
+        ));
+        lines.push(Line::from(spans));
+    } else {
+        let length_label = format!("{}{}", texts::LABEL_GENERATOR_LENGTH, modal.length_input);
+        lines.push(Line::from(selected_span(&length_label, false)));
+    }
 
     let selected = modal.params.symbols.len();
     let total = generator::SYMBOLS.len();
@@ -3024,19 +3084,77 @@ mod tests {
     }
 
     #[test]
-    fn generator_digits_only_edit_the_length_row() {
+    fn generator_digits_replace_the_seed_and_edit_at_the_caret() {
         let mut state = editing_state_with_password("old");
         open_generator(&mut state);
 
-        move_generator_to(&mut state, GENERATOR_ROW_GENERATE);
-        dispatch_key(key(KeyCode::Char('5')), &mut state);
-        assert_eq!(generator_modal(&state).length_input, "10");
-        dispatch_key(key(KeyCode::Backspace), &mut state);
-        assert_eq!(generator_modal(&state).length_input, "10");
+        // The seeded "10" is replaced by the first digits typed.
+        dispatch_key(key(KeyCode::Char('1')), &mut state);
+        dispatch_key(key(KeyCode::Char('2')), &mut state);
+        assert_eq!(generator_modal(&state).length_input, "12");
+        assert_eq!(generator_modal(&state).length_cursor, 2);
 
-        move_generator_to(&mut state, GENERATOR_ROW_LENGTH);
-        dispatch_key(key(KeyCode::Char('5')), &mut state);
-        assert_eq!(generator_modal(&state).length_input, "105");
+        // The caret can be moved and a digit inserted mid-string.
+        dispatch_key(key(KeyCode::Left), &mut state);
+        assert_eq!(generator_modal(&state).length_cursor, 1);
+        dispatch_key(key(KeyCode::Char('0')), &mut state);
+        assert_eq!(generator_modal(&state).length_input, "102");
+
+        // Home / End move to the edges; Delete removes at the caret.
+        dispatch_key(key(KeyCode::Home), &mut state);
+        assert_eq!(generator_modal(&state).length_cursor, 0);
+        dispatch_key(key(KeyCode::Delete), &mut state);
+        assert_eq!(generator_modal(&state).length_input, "02");
+        dispatch_key(key(KeyCode::End), &mut state);
+        assert_eq!(generator_modal(&state).length_cursor, 2);
+
+        // At most three digits are kept.
+        dispatch_key(key(KeyCode::Char('7')), &mut state);
+        dispatch_key(key(KeyCode::Char('8')), &mut state);
+        assert_eq!(generator_modal(&state).length_input, "027");
+    }
+
+    #[test]
+    fn generator_length_backspace_on_fresh_seed_clears_it() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+
+        dispatch_key(key(KeyCode::Backspace), &mut state);
+        assert_eq!(generator_modal(&state).length_input, "");
+        assert_eq!(generator_modal(&state).length_cursor, 0);
+
+        dispatch_key(key(KeyCode::Char('4')), &mut state);
+        dispatch_key(key(KeyCode::Char('2')), &mut state);
+        assert_eq!(generator_modal(&state).length_input, "42");
+    }
+
+    #[test]
+    fn generator_digits_and_caret_keys_only_edit_the_length_row() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        move_generator_to(&mut state, GENERATOR_ROW_GENERATE);
+
+        for code in [
+            KeyCode::Char('5'),
+            KeyCode::Backspace,
+            KeyCode::Delete,
+            KeyCode::Left,
+            KeyCode::Home,
+        ] {
+            dispatch_key(key(code), &mut state);
+        }
+        assert_eq!(generator_modal(&state).length_input, "10");
+        assert_eq!(generator_modal(&state).length_cursor, 2);
+    }
+
+    #[test]
+    fn generator_enter_on_length_moves_to_symbols_row() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        assert_eq!(generator_modal(&state).selected, GENERATOR_ROW_LENGTH);
+
+        dispatch_key(key(KeyCode::Enter), &mut state);
+        assert_eq!(generator_modal(&state).selected, GENERATOR_ROW_SYMBOLS);
     }
 
     #[test]

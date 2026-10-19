@@ -107,7 +107,7 @@ pub const HINT_FORM_INPUT: &str = "Type to edit  Enter/Esc:done";
 pub const HINT_FORM_PASSWORD_EXTRA: &str =
     "j/k:field  i/Enter:edit  ^G:generate  dd:cut  p:paste  Del:delete  u/r:undo/redo  Esc:close";
 pub const HINT_GENERATOR: &str =
-    "j/k:row  digits:length  Space:toggle all  Enter:select  Esc:cancel";
+    "j/k:row  digits:length  ←/→:cursor  Space:all  Enter:ok  Esc:cancel";
 pub const HINT_SYMBOLS: &str = "h/l/j/k:move  Space/Enter:toggle  Esc:done";
 pub const ERROR_GENERATOR_LENGTH: &str = "Length must be 4–128";
 pub const HINT_FIELD_CUT: &str = "d:cut field  Esc:cancel";

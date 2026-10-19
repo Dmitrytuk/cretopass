@@ -157,9 +157,10 @@ impl Action {
     /// Dispatch for the password-generator parameter modal.
     ///
     /// Rows are navigated with `j`/`k`/arrows/`Tab`; `Space` toggles all
-    /// symbols; `Enter` acts on the focused row; digits and `Backspace` edit the
-    /// length buffer (the handler ignores them unless the length row is
-    /// focused); `Esc` cancels.
+    /// symbols; `Enter` acts on the focused row (advancing off the length row);
+    /// digits edit the length and `Left`/`Right`/`Home`/`End`/`Delete` move its
+    /// caret (the handler ignores them unless the length row is focused);
+    /// `Esc` cancels.
     pub fn from_generator(key: &KeyEvent) -> Self {
         match key.code {
             KeyCode::Char('j') | KeyCode::Down | KeyCode::Tab => Self::NavDown,
@@ -167,7 +168,12 @@ impl Action {
             KeyCode::Char(' ') => Self::Toggle,
             KeyCode::Enter => Self::Confirm,
             KeyCode::Esc => Self::Cancel,
+            KeyCode::Left => Self::CursorLeft,
+            KeyCode::Right => Self::CursorRight,
+            KeyCode::Home => Self::CursorHome,
+            KeyCode::End => Self::CursorEnd,
             KeyCode::Backspace => Self::Backspace,
+            KeyCode::Delete => Self::DeleteChar,
             KeyCode::Char(c) => Self::InsertChar(c),
             _ => Self::None,
         }
@@ -768,6 +774,26 @@ mod tests {
         assert_eq!(
             Action::from_generator(&key(KeyCode::Backspace)),
             Action::Backspace
+        );
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::Left)),
+            Action::CursorLeft
+        );
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::Right)),
+            Action::CursorRight
+        );
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::Home)),
+            Action::CursorHome
+        );
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::End)),
+            Action::CursorEnd
+        );
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::Delete)),
+            Action::DeleteChar
         );
     }
 

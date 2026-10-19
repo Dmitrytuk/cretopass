@@ -88,18 +88,25 @@ symbol, and checking budgets per class is harder to explain).
 - `from_form_nav` checks **only** `Ctrl+G` before the plain-char matches, so
   `Ctrl+u/r/d/p/i/j` keep their existing meanings.
 - **Modal:** three flat rows — Length, Special characters, Generate. `j`/`k`,
-  arrows and `Tab`/`Shift+Tab` move; digits and `Backspace` edit the length only
-  while the Length row is focused; `Space` toggles all symbols on the summary
-  row; `Enter` on the summary row opens the checklist; `Enter` on Generate
-  validates and generates; `Esc` returns to the form without touching the value.
+  arrows and `Tab`/`Shift+Tab` move between rows; `Space` toggles all symbols on
+  the summary row; `Enter` on the length row advances to the summary row, on the
+  summary row opens the checklist, and on Generate validates and generates;
+  `Esc` returns to the form without touching the value.
 - **Length input:** the modal holds raw digits (at most three), so empty and
   out-of-range values are representable *in the UI* and show an inline
   `Length must be 4–128` error. Conversion happens only on Generate; the
   parameters themselves stay valid.
+- **Length editing:** the row opens with the last-used value seeded and a
+  "fresh" flag, so the first digit (or `Backspace`/`Delete`) replaces it instead
+  of appending — typing `12` over `10` yields `12`. From then on a visible caret
+  supports `Left`/`Right`/`Home`/`End`/`Delete` editing, and the buffer is
+  capped at three digits. Caret editing is only meaningful on the length row;
+  the other rows ignore these keys. The fresh flag is cleared by the first edit
+  or caret move.
 - **Checklist:** the 17 symbols are a three-column grid with `[X]`/`[ ]` cells.
   `h`/`l` move one cell, `j`/`k` move one row; `Space`/`Enter` toggle; `Esc`
-  returns to the summary row. The raw length buffer survives the round trip
-  because both modes carry the same `GeneratorModal`.
+  returns to the summary row. The raw length buffer, its caret, and the fresh
+  flag survive the round trip because both modes carry the same `GeneratorModal`.
 - **Result:** generating writes the value into the focused field, pushes a form
   undo entry, marks the tree modified (autosave persists it), remembers the
   params, and returns to the form at Nav. `u` reverts the generated value.
@@ -137,5 +144,5 @@ filling.
   `g` at Input, and both new dispatchers.
 - `tree::app_tree` tests: the modal opens only on a `Password` row, generation
   writes/commits/undoes, `Esc` leaves the value alone, invalid length errors,
-  digit scoping, toggle-all, checklist navigation, and the password-specific
-  hint.
+  length replacement and caret editing, toggle-all, checklist navigation, and
+  the password-specific hint.
