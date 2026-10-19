@@ -1,5 +1,6 @@
 use std::io;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -13,7 +14,7 @@ use crate::file_browser::{
 };
 use crate::file_handling;
 use crate::theming::Action;
-use crate::theming::{ElementStyle, Icon, texts};
+use crate::theming::{ElementStyle, Icon, SPINNER_TICK, Spinner, Status, texts};
 use crate::tree::app_tree::SaveTarget;
 use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils::{self, Configuration};
@@ -76,7 +77,10 @@ pub struct HomeState {
     pub quit: bool,
     pub active_vault: Option<ActiveVaultState>,
     modal: Option<HomeModal>,
-    pub status: Option<&'static str>,
+    /// Title-bar status of a blocking operation, if any.
+    pub status: Option<Status>,
+    /// Frame counter for the animated busy glyph shown next to [`HomeState::status`].
+    spinner: Spinner,
     /// In-memory memory shared by successive file browser openings.
     browser_session: FileBrowserSession,
 }
@@ -113,6 +117,7 @@ impl HomeState {
             active_vault: None,
             modal,
             status: None,
+            spinner: Spinner::default(),
             browser_session: FileBrowserSession::default(),
         }
     }
@@ -169,6 +174,55 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             }
         }
     }
+}
+
+// ── Blocking work with an animated title-bar status ──
+
+/// Runs `work` on a worker thread while an animated `status` shows in the title
+/// bar.
+///
+/// The UI thread keeps redrawing every [`SPINNER_TICK`] until the worker
+/// finishes, draining any input so a stray key cannot trigger a second action
+/// once the wait ends. If a draw fails mid-wait the worker keeps running: the
+/// save/decrypt is *not* cancelled.
+///
+/// The status is cleared on return (success or error) without a final draw; the
+/// caller sets the next modal and the outer loop's top-of-iteration draw renders
+/// the real result, avoiding a flash of the wrong screen.
+fn run_with_spinner<B, T, F>(
+    terminal: &mut Terminal<B>,
+    state: &mut HomeState,
+    status: Status,
+    work: F,
+) -> io::Result<T>
+where
+    B: Backend,
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    state.status = Some(status);
+    terminal.draw(|f| render(f, f.area(), state))?;
+
+    let handle = std::thread::Builder::new()
+        .spawn(work)
+        .map_err(io::Error::other)?;
+
+    while !handle.is_finished() {
+        state.spinner.advance();
+        terminal.draw(|f| render(f, f.area(), state))?;
+        if event::poll(SPINNER_TICK)? {
+            // Drain every pending event so none is reinterpreted afterwards.
+            while event::poll(Duration::ZERO)? {
+                let _ = event::read()?;
+            }
+        }
+    }
+
+    let result = handle
+        .join()
+        .map_err(|_| io::Error::other("blocking worker thread panicked"))?;
+    state.status = None;
+    Ok(result)
 }
 
 // ── Settings menu key handling (no modal active) ──
@@ -427,54 +481,60 @@ fn handle_file_browser_key<B: Backend>(
             if modal.mode == FileBrowserMode::ImportFile {
                 match file_handling::import::import_tree(&path) {
                     Ok(imported_node) => {
-                        if let Some(ref mut active_vault) = state.active_vault {
-                            if let Some(ref mut root) = active_vault.node {
-                                let filename = std::path::Path::new(&path)
-                                    .file_stem()
-                                    .map(|s| s.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| texts::IMPORT_NAME_FALLBACK.to_string());
-                                let date_time =
-                                    chrono::Local::now().format("%Y-%m-%d_%H%M%S").to_string();
-                                let mut wrapper = crate::tree::node::Node::new(format!(
-                                    "imported_{}_{}",
-                                    filename, date_time
-                                ));
-                                wrapper.children = vec![imported_node];
-                                root.add_child(wrapper);
+                        let save_target = if let Some(active_vault) = state.active_vault.as_mut() {
+                            match active_vault.node.as_mut() {
+                                Some(root) => {
+                                    let filename = std::path::Path::new(&path)
+                                        .file_stem()
+                                        .map(|s| s.to_string_lossy().to_string())
+                                        .unwrap_or_else(|| texts::IMPORT_NAME_FALLBACK.to_string());
+                                    let date_time =
+                                        chrono::Local::now().format("%Y-%m-%d_%H%M%S").to_string();
+                                    let mut wrapper = crate::tree::node::Node::new(format!(
+                                        "imported_{}_{}",
+                                        filename, date_time
+                                    ));
+                                    wrapper.children = vec![imported_node];
+                                    root.add_child(wrapper);
 
-                                let save_path = match active_vault.path.clone() {
-                                    Some(p) => p,
-                                    None => {
-                                        state.modal = Some(HomeModal::Alert {
-                                            message: texts::MSG_NO_FILE_PATH.to_string(),
-                                        });
-                                        return Ok(());
-                                    }
-                                };
-                                let save_pass = active_vault.passphrase.clone();
-                                let save_node = root.clone();
-
-                                state.status = Some(texts::STATUS_SAVING);
-                                terminal.draw(|f| render(f, f.area(), &mut *state))?;
-                                match file_handling::save_tree(&save_node, &save_path, &save_pass) {
-                                    Err(e) => {
-                                        state.status = None;
-                                        state.modal = Some(HomeModal::Alert {
-                                            message: format!("{}{}", texts::MSG_SAVE_FAILED, e),
-                                        });
-                                    }
-                                    Ok(()) => {
-                                        state.status = None;
-                                        state.modal = Some(HomeModal::Alert {
-                                            message: texts::MSG_IMPORT_SUCCESS.to_string(),
-                                        });
+                                    match active_vault.path.clone() {
+                                        Some(p) => {
+                                            Some((p, active_vault.passphrase.clone(), root.clone()))
+                                        }
+                                        None => {
+                                            state.modal = Some(HomeModal::Alert {
+                                                message: texts::MSG_NO_FILE_PATH.to_string(),
+                                            });
+                                            return Ok(());
+                                        }
                                     }
                                 }
+                                None => None,
                             }
                         } else {
                             state.modal = Some(HomeModal::Alert {
                                 message: texts::MSG_IMPORT_NO_OPEN_FILE.to_string(),
                             });
+                            return Ok(());
+                        };
+
+                        if let Some((save_path, save_pass, save_node)) = save_target {
+                            let outcome =
+                                run_with_spinner(terminal, state, Status::Saving, move || {
+                                    file_handling::save_tree(&save_node, &save_path, &save_pass)
+                                })?;
+                            match outcome {
+                                Err(e) => {
+                                    state.modal = Some(HomeModal::Alert {
+                                        message: format!("{}{}", texts::MSG_SAVE_FAILED, e),
+                                    });
+                                }
+                                Ok(()) => {
+                                    state.modal = Some(HomeModal::Alert {
+                                        message: texts::MSG_IMPORT_SUCCESS.to_string(),
+                                    });
+                                }
+                            }
                         }
                     }
                     Err(e) => {
@@ -847,15 +907,21 @@ fn handle_change_pw_input_key<B: Backend>(
                 state.modal = Some(modal);
             } else {
                 // Save with new passphrase and reopen
-                if let Some(ref active_vault) = state.active_vault.clone()
-                    && let (Some(path), Some(node)) = (&active_vault.path, &active_vault.node)
+                if let Some(active_vault) = state.active_vault.clone()
+                    && let (Some(path), Some(node)) =
+                        (active_vault.path.clone(), active_vault.node.clone())
                 {
                     let new_pass_bytes = zeroize::Zeroizing::new(new_pass.into_bytes());
-                    state.status = Some(texts::STATUS_SAVING);
-                    terminal.draw(|f| render(f, f.area(), &mut *state))?;
-                    match file_handling::save_tree(node, path, &new_pass_bytes) {
+                    let save_node = node.clone();
+                    let save_path = path.clone();
+                    let (outcome, new_pass_bytes) =
+                        run_with_spinner(terminal, state, Status::Saving, move || {
+                            let outcome =
+                                file_handling::save_tree(&save_node, &save_path, &new_pass_bytes);
+                            (outcome, new_pass_bytes)
+                        })?;
+                    match outcome {
                         Err(e) => {
-                            state.status = None;
                             state.modal = Some(HomeModal::ChangePwInput {
                                 current: String::new(),
                                 current_cursor: 0,
@@ -869,7 +935,6 @@ fn handle_change_pw_input_key<B: Backend>(
                             });
                         }
                         Ok(()) => {
-                            state.status = None;
                             state.active_vault.as_mut().unwrap().passphrase =
                                 new_pass_bytes.clone();
                             let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
@@ -904,17 +969,18 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
     };
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-            state.status = Some(texts::STATUS_SAVING);
-            terminal.draw(|f| render(f, f.area(), &mut *state))?;
-            match file_handling::create_secret_file(&file_path, "") {
+            let (outcome, file_path) =
+                run_with_spinner(terminal, state, Status::Saving, move || {
+                    let outcome = file_handling::create_secret_file(&file_path, "");
+                    (outcome, file_path)
+                })?;
+            match outcome {
                 Err(e) => {
-                    state.status = None;
                     state.modal = Some(HomeModal::Alert {
                         message: format!("{e}"),
                     });
                 }
                 Ok(node) => {
-                    state.status = None;
                     state.modal = None;
                     let pp_bytes = zeroize::Zeroizing::new(Vec::new());
                     let active_vault = ActiveVaultState {
@@ -1207,11 +1273,13 @@ fn handle_passphrase_key<B: Backend>(
                 show,
                 ..
             } => {
-                state.status = Some(texts::STATUS_LOADING);
-                terminal.draw(|f| render(f, f.area(), &mut *state))?;
-                match file_handling::decrypt_to_node(&file_data, &passphrase) {
+                let (outcome, file_data, passphrase) =
+                    run_with_spinner(terminal, state, Status::Loading, move || {
+                        let outcome = file_handling::decrypt_to_node(&file_data, &passphrase);
+                        (outcome, file_data, passphrase)
+                    })?;
+                match outcome {
                     Err(e) => {
-                        state.status = None;
                         state.modal = Some(HomeModal::PassphraseInput {
                             file_path,
                             file_data,
@@ -1222,7 +1290,6 @@ fn handle_passphrase_key<B: Backend>(
                         });
                     }
                     Ok(node) => {
-                        state.status = None;
                         let pp_bytes = zeroize::Zeroizing::new(passphrase.into_bytes());
                         let active_vault = ActiveVaultState {
                             path: Some(file_path.clone()),
@@ -1448,11 +1515,13 @@ fn handle_create_secret_file_key<B: Backend>(
                 return Ok(());
             }
 
-            state.status = Some(texts::STATUS_SAVING);
-            terminal.draw(|f| render(f, f.area(), &mut *state))?;
-            match file_handling::create_secret_file(&file_path, &passphrase) {
+            let (outcome, file_path, passphrase) =
+                run_with_spinner(terminal, state, Status::Saving, move || {
+                    let outcome = file_handling::create_secret_file(&file_path, &passphrase);
+                    (outcome, file_path, passphrase)
+                })?;
+            match outcome {
                 Err(e) => {
-                    state.status = None;
                     state.modal = Some(HomeModal::CreateSecretFile {
                         file_path,
                         passphrase,
@@ -1465,7 +1534,6 @@ fn handle_create_secret_file_key<B: Backend>(
                     });
                 }
                 Ok(node) => {
-                    state.status = None;
                     state.modal = None;
                     let pp_bytes = zeroize::Zeroizing::new(passphrase.into_bytes());
                     let active_vault = ActiveVaultState {
@@ -1558,14 +1626,14 @@ fn render_home_window(frame: &mut Frame, area: Rect, state: &HomeState) {
         .unwrap_or_else(|| texts::TITLE_HOME_DEFAULT.to_string());
 
     let mut title_spans: Vec<Span> = Vec::new();
-    if let Some(s) = state.status {
-        use crate::theming::texts::{STATUS_LOADING, STATUS_SAVING};
-        let el = match s {
-            STATUS_LOADING => ElementStyle::StatusLoading,
-            STATUS_SAVING => ElementStyle::StatusSaving,
-            _ => ElementStyle::StatusInfo,
-        };
-        title_spans.push(Span::styled(format!(" {}  ", s), el.style()));
+    if let Some(status) = state.status {
+        let mut text = String::new();
+        if status.spins() {
+            text.push_str(state.spinner.glyph());
+            text.push(' ');
+        }
+        text.push_str(status.label());
+        title_spans.push(Span::styled(format!(" {text}  "), status.style().style()));
     }
     title_spans.push(Span::raw(base_title));
 

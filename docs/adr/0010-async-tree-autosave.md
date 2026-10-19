@@ -92,15 +92,18 @@ cryptography work.
 - `TreeState.modified` means "changes not yet submitted to the worker". It is
   cleared immediately after `submit`, not after the write completes.
 - `TreeState.save_state: SaveState { Idle, Saving, Failed { error, acknowledged } }`
-  is the single source of truth for "saving" vs "failed"; the title bar and the
+  is the single source of truth for "saving" vs "failed"; `title_status` and the
   save-error overlay both derive from it, and no control flow compares UI strings.
 - A save event updates `save_state` only when its generation equals `submitted`;
   events for superseded generations are ignored for display but still advance
   `saved`.
-- `Saving...` (amber) is shown while the latest submission is outstanding;
-  `Save failed` (red) when the latest attempt fails. An unacknowledged failure
-  draws the overlay with the full error. Any key acknowledges it without touching
-  the current `InputMode` or form state.
+- The title bar shows `Saving` (amber) with an animated glyph while the latest
+  submission is outstanding, and `Save failed` (red) when the latest attempt
+  fails. `SaveState::title_status` maps the state to a `theming::Status`; an
+  interval tick advances the glyph only while a save is outstanding (see
+  [0011](0011-animated-status-spinner.md)). An unacknowledged failure draws the
+  overlay with the full error. Any key acknowledges it without touching the
+  current `InputMode` or form state.
 - On `q`, `H`, or `Ctrl-C` the loop decides via the pure `exit_plan` helper: if
   `modified` is set or the last attempt failed it re-submits, otherwise it waits
   for the outstanding generation. The flush is bounded by
@@ -122,7 +125,9 @@ cryptography work.
 The home screen keeps its blocking `event::read()` loop. Only the tree uses
 `EventStream`, and the two loops never run concurrently: switching screens
 replaces one with the other. Explicit home actions (import, change password,
-create) still save synchronously.
+create) run their scrypt work on a `std::thread` while the UI thread redraws the
+animated status at `SPINNER_TICK` and discards input until the work finishes
+(see [0011](0011-animated-status-spinner.md)).
 
 `run_tree` maps the tree result back onto `HomeState`:
 

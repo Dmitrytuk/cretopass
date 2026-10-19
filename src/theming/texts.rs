@@ -80,8 +80,8 @@ pub const MODE_CUSTOM_NAME: &str = "CUSTOM NAME";
 pub const MODE_CONFIRM: &str = "CONFIRM";
 pub const MODE_HELP: &str = "HELP";
 
-pub const STATUS_LOADING: &str = "Loading...";
-pub const STATUS_SAVING: &str = "Saving...";
+pub const STATUS_LOADING: &str = "Loading";
+pub const STATUS_SAVING: &str = "Saving";
 pub const STATUS_SAVE_FAILED: &str = "Save failed";
 pub const STATUS_HOME_LABEL: &str = " HOME ";
 

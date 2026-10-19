@@ -12,7 +12,7 @@ snapshot back to an age-encrypted JSON file.
 | `file_handling` | [0001](../src/file_handling/docs/adr/0001-io-gateway.md) | I/O gateway — the only module importing `std::fs`; background autosave worker ([0010](0010-async-tree-autosave.md)) |
 | `crypt` | [0002](../src/crypt/docs/adr/0002-crypt.md) | age-based encryption/decryption |
 | `cursor` | [0003](../src/cursor/docs/adr/0003-cursor.md) | UTF-8 byte-offset cursor editing + TUI span helpers |
-| `theming` | [0004](../src/theming/docs/adr/0004-theming.md) | Centralized keybindings, styles, icons, and UI strings |
+| `theming` | [0004](../src/theming/docs/adr/0004-theming.md) | Centralized keybindings, styles, icons, UI strings, and the title-bar `Status`/`Spinner` ([0011](0011-animated-status-spinner.md)) |
 | `tree` | [0005](../src/tree/docs/adr/0005-tree-module.md) | Tree data model, state machine, rendering, async event loop |
 | `vault` | [0006](../src/vault/docs/adr/0006-vault-module.md) | Home screen, active vault state, configuration persistence |
 | `file_browser` | [0007](../src/file_browser/docs/adr/0007-file-browser.md) | OS directory browser overlay with mounted-disk locations and hidden-entry toggle |
@@ -49,7 +49,7 @@ main.rs  ──▶  lib.rs  ──▶  vault::widget::run()   ──▶  tree::a
 |-------|---------|---------|
 | `ratatui` 0.28 | tree, vault, file_browser, cursor, theming | TUI rendering |
 | `crossterm` 0.28 (`event-stream`) | lib, tree, vault | terminal events, raw mode, async event stream |
-| `tokio` 1 (`rt`, `sync`, `macros`) | tree | current-thread runtime, `select!`, save-event channel |
+| `tokio` 1 (`rt`, `sync`, `macros`, `time`) | tree | current-thread runtime, `select!`, save-event channel, spinner `interval` and bounded `timeout` |
 | `futures-util` 0.3 | tree | `StreamExt::next` for `EventStream` |
 | `age` 0.11 | crypt | passphrase-based encryption |
 | `serde` / `serde_json` 1 | file_handling, node | JSON serialization of tree |
