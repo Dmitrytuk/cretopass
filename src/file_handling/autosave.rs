@@ -477,6 +477,50 @@ mod tests {
     }
 
     #[test]
+    fn drop_writes_the_latest_snapshot_while_one_is_in_flight() {
+        let (started_tx, started_rx) = mpsc::channel::<String>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let (saved_tx, saved_rx) = mpsc::channel::<String>();
+
+        let save = move |root: &Node| {
+            started_tx.send(root.name.clone()).unwrap();
+            // Only the first save blocks; the second (queued while the first
+            // runs) must complete on its own so the test can assert it.
+            if root.name == "first" {
+                release_rx
+                    .recv_timeout(TIMEOUT)
+                    .map_err(|_| failed("test release timed out"))?;
+            }
+            saved_tx.send(root.name.clone()).unwrap();
+            Ok(())
+        };
+
+        let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(save, move |event| {
+            let _ = events_tx.send(event);
+        })
+        .unwrap();
+
+        // The first save starts and blocks.
+        autosave.submit(node("first"));
+        assert_eq!(started_rx.recv_timeout(TIMEOUT).unwrap(), "first");
+
+        // A newer snapshot waits in the slot.
+        autosave.submit(node("second"));
+
+        // Drop on a separate thread so the join happens off the test thread; the
+        // worker is still blocked until we release it.
+        let joiner = std::thread::spawn(move || drop(autosave));
+
+        release_tx.send(()).unwrap();
+
+        // Both snapshots are written, newest last, and the join completes.
+        assert_eq!(saved_rx.recv_timeout(TIMEOUT).unwrap(), "first");
+        assert_eq!(saved_rx.recv_timeout(TIMEOUT).unwrap(), "second");
+        joiner.join().unwrap();
+    }
+
+    #[test]
     fn a_panicking_on_event_stops_the_worker() {
         let (events_tx, events_rx) = mpsc::channel::<SaveEvent>();
         let mut autosave = Autosave::spawn(
