@@ -9,13 +9,20 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 
+use crate::file_handling::error::FileHandlingError;
 use crate::tree::node::Node;
 
 /// Error reported by a background save attempt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// A save is fallible in three distinct ways, and callers can tell them apart
+/// without parsing a string: the save function reported a
+/// [`FileHandlingError`], it panicked, or the worker stopped before reporting
+/// the requested generation.
+#[non_exhaustive]
+#[derive(Debug)]
 pub enum SaveError {
-    /// The save function returned an error.
-    Failed(String),
+    /// The save function returned a [`FileHandlingError`].
+    Failed(FileHandlingError),
     /// The save function panicked; the worker caught it and stayed alive.
     Panicked,
     /// The save thread stopped before reporting the requested generation.
@@ -25,20 +32,27 @@ pub enum SaveError {
 impl std::fmt::Display for SaveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Failed(message) => f.write_str(message),
+            Self::Failed(error) => error.fmt(f),
             Self::Panicked => f.write_str("save worker panicked"),
             Self::WorkerStopped => f.write_str("save worker stopped"),
         }
     }
 }
 
-impl std::error::Error for SaveError {}
+impl std::error::Error for SaveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Failed(error) => Some(error),
+            Self::Panicked | Self::WorkerStopped => None,
+        }
+    }
+}
 
 /// Result of a single background save attempt.
 pub type SaveResult = Result<(), SaveError>;
 
 /// Notification emitted after a snapshot has been attempted.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct SaveEvent {
     /// Monotonic generation assigned by [`Autosave::submit`].
     pub generation: u64,
@@ -190,6 +204,11 @@ mod tests {
         Node::new(name)
     }
 
+    /// A synthetic file error for tests that need a `SaveError::Failed`.
+    fn failed(message: &str) -> SaveError {
+        SaveError::Failed(FileHandlingError::Io(std::io::Error::other(message)))
+    }
+
     #[test]
     fn submit_returns_increasing_generations() {
         let (events_tx, _events_rx) = mpsc::channel();
@@ -215,7 +234,7 @@ mod tests {
             // therefore `Autosave::drop`'s join) blocked forever.
             release_rx
                 .recv_timeout(TIMEOUT)
-                .map_err(|_| SaveError::Failed("test release timed out".to_string()))?;
+                .map_err(|_| failed("test release timed out"))?;
             Ok(())
         };
 
@@ -244,14 +263,14 @@ mod tests {
         assert_eq!(events[0].generation, first);
         assert_eq!(events[1].generation, third);
         assert!(events.iter().all(|event| event.generation != second));
-        assert!(events.iter().all(|event| event.result == Ok(())));
+        assert!(events.iter().all(|event| event.result.is_ok()));
     }
 
     #[test]
     fn failed_save_keeps_the_worker_alive() {
         let save = |root: &Node| {
             if root.name == "bad" {
-                Err(SaveError::Failed("disk full".to_string()))
+                Err(failed("disk full"))
             } else {
                 Ok(())
             }
@@ -265,15 +284,12 @@ mod tests {
         let bad = autosave.submit(node("bad"));
         let event = events_rx.recv_timeout(TIMEOUT).unwrap();
         assert_eq!(event.generation, bad);
-        assert_eq!(
-            event.result,
-            Err(SaveError::Failed("disk full".to_string()))
-        );
+        assert!(matches!(event.result, Err(SaveError::Failed(_))));
 
         let good = autosave.submit(node("good"));
         let event = events_rx.recv_timeout(TIMEOUT).unwrap();
         assert_eq!(event.generation, good);
-        assert_eq!(event.result, Ok(()));
+        assert!(event.result.is_ok());
     }
 
     #[test]
@@ -310,6 +326,6 @@ mod tests {
         let generation = autosave.submit(node("panic"));
         let event = events_rx.recv_timeout(TIMEOUT).unwrap();
         assert_eq!(event.generation, generation);
-        assert_eq!(event.result, Err(SaveError::Panicked));
+        assert!(matches!(event.result, Err(SaveError::Panicked)));
     }
 }

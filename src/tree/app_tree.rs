@@ -172,9 +172,7 @@ fn start_autosave(
         ));
     };
 
-    let save = move |root: &Node| {
-        save_tree(root, &path, &passphrase).map_err(|e| SaveError::Failed(e.to_string()))
-    };
+    let save = move |root: &Node| save_tree(root, &path, &passphrase).map_err(SaveError::Failed);
     let on_event = move |event| {
         // The receiver is dropped when the tree screen closes; a late save
         // notification is then expected and intentionally ignored.
@@ -1773,6 +1771,13 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
+    /// A synthetic file error for tests that need a `SaveError::Failed`.
+    fn failed(message: &str) -> SaveError {
+        SaveError::Failed(crate::file_handling::FileHandlingError::Io(
+            io::Error::other(message),
+        ))
+    }
+
     fn editing_state() -> TreeState {
         let root = Node::new("Root");
         let mut state = TreeState::new(root);
@@ -2243,7 +2248,7 @@ mod tests {
 
         let result = wait_for_save(&mut rx, &mut state, &mut saved, 3).await;
 
-        assert_eq!(result, Ok(()));
+        assert!(result.is_ok());
         assert_eq!(saved, 3);
         assert_eq!(state.status, None);
     }
@@ -2261,13 +2266,13 @@ mod tests {
         .unwrap();
         tx.send(SaveEvent {
             generation: 2,
-            result: Err(SaveError::Failed("disk full".to_string())),
+            result: Err(failed("disk full")),
         })
         .unwrap();
 
         let result = wait_for_save(&mut rx, &mut state, &mut saved, 2).await;
 
-        assert_eq!(result, Err(SaveError::Failed("disk full".to_string())));
+        assert!(matches!(result, Err(SaveError::Failed(_))));
         assert_eq!(saved, 1);
     }
 
@@ -2280,6 +2285,6 @@ mod tests {
 
         let result = wait_for_save(&mut rx, &mut state, &mut saved, 1).await;
 
-        assert_eq!(result, Err(SaveError::WorkerStopped));
+        assert!(matches!(result, Err(SaveError::WorkerStopped)));
     }
 }
