@@ -4,18 +4,43 @@
 //! Submitting a new snapshot replaces any snapshot that has not started yet
 //! ("latest wins"), so a burst of edits costs at most one extra save and the
 //! newest root always wins.
+//!
+//! # Failure handling
+//!
+//! A panic in the save function is caught and reported as [`SaveError::Panicked`]
+//! without stopping the worker. A panic in the caller-supplied `on_event`
+//! callback stops the worker and closes the event channel, which the application
+//! surfaces as [`SaveError::WorkerStopped`].
+//!
+//! Both caught panics are still printed to stderr by the default panic hook,
+//! which can briefly disturb the alternate screen. The hook is intentionally
+//! left untouched: it is process-wide state, so mutating it from here would
+//! affect unrelated threads and is not worth the risk.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
-use crate::tree::node::Node;
+use crate::file_handling::error::FileHandlingError;
+
+/// Bound on waiting for the save worker to finish.
+///
+/// Used for the exit flush and for stopping the worker. Long enough to tolerate
+/// a slow scrypt run, short enough to return control on a stalled filesystem.
+pub const SAVE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Error reported by a background save attempt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// A save is fallible in three distinct ways, and callers can tell them apart
+/// without parsing a string: the save function reported a
+/// [`FileHandlingError`], it panicked, or the worker stopped before reporting
+/// the requested generation.
+#[non_exhaustive]
+#[derive(Debug)]
 pub enum SaveError {
-    /// The save function returned an error.
-    Failed(String),
+    /// The save function returned a [`FileHandlingError`].
+    Failed(FileHandlingError),
     /// The save function panicked; the worker caught it and stayed alive.
     Panicked,
     /// The save thread stopped before reporting the requested generation.
@@ -25,20 +50,27 @@ pub enum SaveError {
 impl std::fmt::Display for SaveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Failed(message) => f.write_str(message),
+            Self::Failed(error) => error.fmt(f),
             Self::Panicked => f.write_str("save worker panicked"),
             Self::WorkerStopped => f.write_str("save worker stopped"),
         }
     }
 }
 
-impl std::error::Error for SaveError {}
+impl std::error::Error for SaveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Failed(error) => Some(error),
+            Self::Panicked | Self::WorkerStopped => None,
+        }
+    }
+}
 
 /// Result of a single background save attempt.
 pub type SaveResult = Result<(), SaveError>;
 
 /// Notification emitted after a snapshot has been attempted.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct SaveEvent {
     /// Monotonic generation assigned by [`Autosave::submit`].
     pub generation: u64,
@@ -46,43 +78,54 @@ pub struct SaveEvent {
     pub result: SaveResult,
 }
 
-struct Job {
+struct Job<T> {
     generation: u64,
-    root: Node,
+    root: T,
 }
 
-struct State {
-    slot: Option<Job>,
+struct State<T> {
+    slot: Option<Job<T>>,
     shutdown: bool,
 }
 
-struct Shared {
-    state: Mutex<State>,
+struct Shared<T> {
+    state: Mutex<State<T>>,
     available: Condvar,
 }
 
 /// Owns the single background writer thread.
 ///
-/// The worker is stopped and joined on drop. Any snapshot still waiting in the
-/// slot is written before the thread exits.
-pub struct Autosave {
-    shared: Arc<Shared>,
+/// Generic over the snapshot type `T`; the worker treats it as opaque and only
+/// hands it to the save function. Call [`Autosave::shutdown`] to stop the worker
+/// with a bounded wait; the returned error reports only a join timeout.
+/// [`Autosave::detach`] stops without waiting, for a force-quit while a save is
+/// stuck. [`Drop`] repeats a best-effort bounded join as a fallback for callers
+/// that forget.
+///
+/// Any snapshot still waiting in the slot is written before the thread exits;
+/// on timeout the thread is detached and left to be reaped at process exit.
+pub struct Autosave<T> {
+    shared: Arc<Shared<T>>,
     handle: Option<JoinHandle<()>>,
     next_generation: u64,
 }
 
-impl Autosave {
+impl<T: Send + 'static> Autosave<T> {
     /// Starts the writer thread.
     ///
-    /// `save` is called on the writer thread with the latest submitted root.
-    /// `on_event` receives one event per attempted snapshot.
+    /// `save` is called on the writer thread with the latest submitted snapshot;
+    /// a panic in `save` is caught and reported as [`SaveError::Panicked`].
+    /// `on_event` receives one event per attempted snapshot; it must be cheap
+    /// and must not panic. A panic in `on_event` stops the worker and closes the
+    /// event channel, which the application surfaces as
+    /// [`SaveError::WorkerStopped`].
     ///
     /// # Errors
     ///
     /// Returns an error when the writer thread cannot be spawned.
     pub fn spawn<F, G>(save: F, on_event: G) -> std::io::Result<Self>
     where
-        F: Fn(&Node) -> SaveResult + Send + 'static,
+        F: Fn(&T) -> SaveResult + Send + 'static,
         G: Fn(SaveEvent) + Send + 'static,
     {
         let shared = Arc::new(Shared {
@@ -109,39 +152,91 @@ impl Autosave {
     ///
     /// If an older snapshot is still waiting, it is replaced: the new snapshot
     /// already contains every earlier change.
-    pub fn submit(&mut self, root: Node) -> u64 {
+    pub fn submit(&mut self, root: T) -> u64 {
         self.next_generation += 1;
         let generation = self.next_generation;
 
         let mut state = lock(&self.shared.state);
-        state.slot = Some(Job { generation, root });
+        let replaced = state.slot.replace(Job { generation, root });
+        drop(state);
+        // Drop the replaced snapshot outside the lock: releasing a large tree
+        // can be expensive and must not block the worker.
+        drop(replaced);
         self.shared.available.notify_one();
 
         generation
     }
 }
 
-impl Drop for Autosave {
-    fn drop(&mut self) {
-        {
-            let mut state = lock(&self.shared.state);
-            state.shutdown = true;
-            self.shared.available.notify_one();
+impl<T> Autosave<T> {
+    /// Stops the worker, waiting up to `timeout` for it to finish.
+    ///
+    /// Any snapshot still waiting in the slot is written first. When the thread
+    /// does not stop within `timeout` it is detached and left to finish on its
+    /// own; the returned [`SaveError::WorkerStopped`] reports that timeout.
+    pub fn shutdown(mut self, timeout: Duration) -> Result<(), SaveError> {
+        self.request_stop();
+        match self.handle.take() {
+            Some(handle) => join_bounded(handle, timeout),
+            None => Ok(()),
         }
+    }
+
+    /// Stops the worker without waiting, detaching the thread.
+    ///
+    /// Used when the user force-quits while a save is stuck: the thread is left
+    /// to be reaped at process exit so the UI can return immediately.
+    pub fn detach(mut self) {
+        self.request_stop();
+        // Taking the handle detaches the thread; `Drop` then skips its join.
+        self.handle.take();
+    }
+
+    /// Signals the worker to exit once the slot is empty.
+    fn request_stop(&self) {
+        let mut state = lock(&self.shared.state);
+        state.shutdown = true;
+        self.shared.available.notify_one();
+    }
+}
+
+impl<T> Drop for Autosave<T> {
+    fn drop(&mut self) {
+        self.request_stop();
 
         if let Some(handle) = self.handle.take() {
-            // A worker panic is reported through its save event when possible;
-            // a panic in `on_event` has no receiver left to report to, so the
-            // join result adds no actionable information here.
-            let _ = handle.join();
+            // Best-effort bounded join. On timeout the worker is detached and
+            // reaped at process exit. A worker panic is reported through its
+            // save event when possible; a panic in `on_event` has no receiver
+            // left to report to, so the join result adds nothing here.
+            let _ = join_bounded(handle, SAVE_TIMEOUT);
         }
     }
 }
 
+/// Joins `handle`, giving up after `timeout`.
+///
+/// On timeout the handle is dropped (detaching the thread) and
+/// [`SaveError::WorkerStopped`] is returned. `is_finished` polling is used
+/// because `std::thread::JoinHandle` has no timed join. A worker panic is not
+/// reported here: it is surfaced through the closed event channel instead, so
+/// `shutdown` reports only the join timeout.
+fn join_bounded(handle: JoinHandle<()>, timeout: Duration) -> Result<(), SaveError> {
+    let deadline = Instant::now() + timeout;
+    while !handle.is_finished() {
+        if Instant::now() >= deadline {
+            return Err(SaveError::WorkerStopped);
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    let _ = handle.join();
+    Ok(())
+}
+
 /// Runs the writer loop until shutdown is requested and the slot is empty.
-fn run_worker<F, G>(shared: &Shared, save: &F, on_event: &G)
+fn run_worker<T, F, G>(shared: &Shared<T>, save: &F, on_event: &G)
 where
-    F: Fn(&Node) -> SaveResult,
+    F: Fn(&T) -> SaveResult,
     G: Fn(SaveEvent),
 {
     loop {
@@ -164,10 +259,16 @@ where
         let result =
             catch_unwind(AssertUnwindSafe(|| save(&job.root))).unwrap_or(Err(SaveError::Panicked));
 
-        on_event(SaveEvent {
+        let event = SaveEvent {
             generation: job.generation,
             result,
-        });
+        };
+        // A panicking `on_event` must not leave `submit` accepting jobs that are
+        // never attempted and never reported: stop the worker so the app sees a
+        // closed event channel (`save_rx.recv() -> None`).
+        if catch_unwind(AssertUnwindSafe(|| on_event(event))).is_err() {
+            return;
+        }
     }
 }
 
@@ -184,10 +285,17 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    use crate::tree::node::Node;
+
     const TIMEOUT: Duration = Duration::from_secs(5);
 
     fn node(name: &str) -> Node {
         Node::new(name)
+    }
+
+    /// A synthetic file error for tests that need a `SaveError::Failed`.
+    fn failed(message: &str) -> SaveError {
+        SaveError::Failed(FileHandlingError::Io(std::io::Error::other(message)))
     }
 
     #[test]
@@ -215,7 +323,7 @@ mod tests {
             // therefore `Autosave::drop`'s join) blocked forever.
             release_rx
                 .recv_timeout(TIMEOUT)
-                .map_err(|_| SaveError::Failed("test release timed out".to_string()))?;
+                .map_err(|_| failed("test release timed out"))?;
             Ok(())
         };
 
@@ -244,14 +352,14 @@ mod tests {
         assert_eq!(events[0].generation, first);
         assert_eq!(events[1].generation, third);
         assert!(events.iter().all(|event| event.generation != second));
-        assert!(events.iter().all(|event| event.result == Ok(())));
+        assert!(events.iter().all(|event| event.result.is_ok()));
     }
 
     #[test]
     fn failed_save_keeps_the_worker_alive() {
         let save = |root: &Node| {
             if root.name == "bad" {
-                Err(SaveError::Failed("disk full".to_string()))
+                Err(failed("disk full"))
             } else {
                 Ok(())
             }
@@ -265,15 +373,12 @@ mod tests {
         let bad = autosave.submit(node("bad"));
         let event = events_rx.recv_timeout(TIMEOUT).unwrap();
         assert_eq!(event.generation, bad);
-        assert_eq!(
-            event.result,
-            Err(SaveError::Failed("disk full".to_string()))
-        );
+        assert!(matches!(event.result, Err(SaveError::Failed(_))));
 
         let good = autosave.submit(node("good"));
         let event = events_rx.recv_timeout(TIMEOUT).unwrap();
         assert_eq!(event.generation, good);
-        assert_eq!(event.result, Ok(()));
+        assert!(event.result.is_ok());
     }
 
     #[test]
@@ -297,6 +402,64 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_joins_an_idle_worker() {
+        let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
+        let autosave = Autosave::spawn(
+            |_: &Node| Ok(()),
+            move |event| {
+                let _ = events_tx.send(event);
+            },
+        )
+        .unwrap();
+
+        assert!(autosave.shutdown(TIMEOUT).is_ok());
+    }
+
+    #[test]
+    fn shutdown_reports_a_stuck_worker_without_hanging() {
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let save = move |_: &Node| {
+            // Block until released; the test asserts the timeout fires first.
+            let _ = release_rx.recv_timeout(TIMEOUT);
+            Ok(())
+        };
+
+        let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(save, move |event| {
+            let _ = events_tx.send(event);
+        })
+        .unwrap();
+
+        autosave.submit(node("stuck"));
+        let result = autosave.shutdown(Duration::from_millis(50));
+
+        assert!(matches!(result, Err(SaveError::WorkerStopped)));
+        // Unblock the detached worker so it does not linger past the test.
+        let _ = release_tx.send(());
+    }
+
+    #[test]
+    fn detach_returns_while_a_save_is_stuck() {
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let save = move |_: &Node| {
+            let _ = release_rx.recv_timeout(TIMEOUT);
+            Ok(())
+        };
+
+        let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(save, move |event| {
+            let _ = events_tx.send(event);
+        })
+        .unwrap();
+
+        autosave.submit(node("stuck"));
+        autosave.detach();
+
+        // Unblock the detached worker so it does not linger past the test.
+        let _ = release_tx.send(());
+    }
+
+    #[test]
     fn a_panicking_save_is_reported_as_an_error() {
         let (events_tx, events_rx) = mpsc::channel::<SaveEvent>();
         let mut autosave = Autosave::spawn(
@@ -310,6 +473,75 @@ mod tests {
         let generation = autosave.submit(node("panic"));
         let event = events_rx.recv_timeout(TIMEOUT).unwrap();
         assert_eq!(event.generation, generation);
-        assert_eq!(event.result, Err(SaveError::Panicked));
+        assert!(matches!(event.result, Err(SaveError::Panicked)));
+    }
+
+    #[test]
+    fn drop_writes_the_latest_snapshot_while_one_is_in_flight() {
+        let (started_tx, started_rx) = mpsc::channel::<String>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let (saved_tx, saved_rx) = mpsc::channel::<String>();
+
+        let save = move |root: &Node| {
+            started_tx.send(root.name.clone()).unwrap();
+            // Only the first save blocks; the second (queued while the first
+            // runs) must complete on its own so the test can assert it.
+            if root.name == "first" {
+                release_rx
+                    .recv_timeout(TIMEOUT)
+                    .map_err(|_| failed("test release timed out"))?;
+            }
+            saved_tx.send(root.name.clone()).unwrap();
+            Ok(())
+        };
+
+        let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(save, move |event| {
+            let _ = events_tx.send(event);
+        })
+        .unwrap();
+
+        // The first save starts and blocks.
+        autosave.submit(node("first"));
+        assert_eq!(started_rx.recv_timeout(TIMEOUT).unwrap(), "first");
+
+        // A newer snapshot waits in the slot.
+        autosave.submit(node("second"));
+
+        // Drop on a separate thread so the join happens off the test thread; the
+        // worker is still blocked until we release it.
+        let joiner = std::thread::spawn(move || drop(autosave));
+
+        release_tx.send(()).unwrap();
+
+        // Both snapshots are written, newest last, and the join completes.
+        assert_eq!(saved_rx.recv_timeout(TIMEOUT).unwrap(), "first");
+        assert_eq!(saved_rx.recv_timeout(TIMEOUT).unwrap(), "second");
+        joiner.join().unwrap();
+    }
+
+    #[test]
+    fn a_panicking_on_event_stops_the_worker() {
+        let (events_tx, events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(
+            |_: &Node| Ok(()),
+            move |event| {
+                // Deliver the event, then panic so the worker stops.
+                let _ = events_tx.send(event);
+                panic!("on_event boom");
+            },
+        )
+        .unwrap();
+
+        let generation = autosave.submit(node("first"));
+        let event = events_rx.recv_timeout(TIMEOUT).unwrap();
+        assert_eq!(event.generation, generation);
+
+        // The worker stopped: the event channel is closed, so `submit` can no
+        // longer accept jobs with no reporter.
+        assert!(matches!(
+            events_rx.recv_timeout(TIMEOUT),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        ));
     }
 }

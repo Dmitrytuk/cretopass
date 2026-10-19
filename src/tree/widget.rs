@@ -9,6 +9,7 @@ use ratatui::{
 use uuid::Uuid;
 
 use super::node::{ExtraField, Node};
+use crate::file_handling::SaveError;
 use crate::theming::{ElementStyle, Icon, texts};
 
 /// A single visible row in the flattened tree display.
@@ -527,8 +528,89 @@ impl FormState {
     }
 }
 
+/// Persistence status of the Tree's background autosave.
+///
+/// Replaces the previous `status` / `save_error` pair, which could disagree. A
+/// failed save keeps its [`SaveError`] until the next attempt, and tracks
+/// whether the user has dismissed the error overlay.
+#[derive(Debug)]
+pub enum SaveState {
+    /// No save is outstanding; the last attempt (if any) succeeded.
+    Idle,
+    /// The latest submitted snapshot is being written.
+    Saving,
+    /// The latest save attempt failed.
+    Failed {
+        /// The error reported by the save function.
+        error: SaveError,
+        /// Whether the error overlay has been dismissed.
+        acknowledged: bool,
+    },
+}
+
+impl SaveState {
+    /// Title-bar label for this state, or `None` when there is nothing to show.
+    pub fn title_label(&self) -> Option<&'static str> {
+        match self {
+            Self::Idle => None,
+            Self::Saving => Some(texts::STATUS_SAVING),
+            Self::Failed { .. } => Some(texts::STATUS_SAVE_FAILED),
+        }
+    }
+
+    /// Title-bar style matching [`SaveState::title_label`].
+    pub fn title_style(&self) -> Option<ElementStyle> {
+        match self {
+            Self::Idle => None,
+            Self::Saving => Some(ElementStyle::StatusSaving),
+            Self::Failed { .. } => Some(ElementStyle::StatusSaveFailed),
+        }
+    }
+
+    /// Message for the save-error overlay, or `None` when it should not show.
+    ///
+    /// Returns `Some` only while a failure is unacknowledged; the first key
+    /// dismisses it via [`SaveState::acknowledge`].
+    pub fn overlay_message(&self) -> Option<String> {
+        match self {
+            Self::Failed {
+                error,
+                acknowledged: false,
+            } => Some(format!("{}{}", texts::MSG_SAVE_FAILED, error)),
+            Self::Idle | Self::Saving | Self::Failed { .. } => None,
+        }
+    }
+
+    /// Marks a failure as acknowledged so its overlay stops showing.
+    pub fn acknowledge(&mut self) {
+        if let Self::Failed { acknowledged, .. } = self {
+            *acknowledged = true;
+        }
+    }
+
+    /// Whether the latest save attempt failed.
+    pub fn has_failed(&self) -> bool {
+        matches!(self, Self::Failed { .. })
+    }
+}
+
+/// State of a requested exit that is waiting on the autosave worker.
+///
+/// A `q` / `H` / `Ctrl-C` request whose final flush fails parks here so the
+/// user can retry, quit without saving, or cancel — instead of being trapped in
+/// the Tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveExit {
+    /// No exit is parked; the flush branch may run.
+    None,
+    /// The exit flush failed; the overlay offers retry / quit-anyway / stay.
+    Blocked,
+    /// The user chose to quit without saving; awaiting confirmation.
+    ConfirmDiscard,
+}
+
 /// Central application state.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TreeState {
     pub root: Node,
     pub expanded: HashSet<Uuid>,
@@ -548,12 +630,13 @@ pub struct TreeState {
     /// Set to `true` when a commit has not yet been submitted to autosave.
     /// Cleared as soon as the snapshot is handed to the save worker.
     pub modified: bool,
-    /// Full text of the last failed save attempt, shown as an overlay.
-    pub save_error: Option<String>,
+    /// Persistence status of the autosave worker, shown in the title bar and as
+    /// the save-error overlay.
+    pub save_state: SaveState,
+    /// A requested exit that is parked waiting on the save worker.
+    pub save_exit: SaveExit,
     /// If `true`, window title shows the full path; otherwise just the filename.
     pub display_full_path: bool,
-    /// Status indicator shown in the window title bar (e.g. "Loading..." or "Saving...").
-    pub status: Option<&'static str>,
 }
 
 impl TreeState {
@@ -574,9 +657,9 @@ impl TreeState {
             return_to_menu: false,
             active_vault_path: None,
             modified: false,
-            save_error: None,
+            save_state: SaveState::Idle,
+            save_exit: SaveExit::None,
             display_full_path: true,
-            status: None,
         };
         state.update_visible();
         state
@@ -1040,14 +1123,11 @@ impl TreeWidget {
             .unwrap_or_else(|| crate::theming::texts::TITLE_TREE_DEFAULT.to_string());
 
         let mut title_spans: Vec<Span> = Vec::new();
-        if let Some(s) = state.status {
-            let el = match s {
-                texts::STATUS_LOADING => ElementStyle::StatusLoading,
-                texts::STATUS_SAVING => ElementStyle::StatusSaving,
-                texts::STATUS_SAVE_FAILED => ElementStyle::StatusSaveFailed,
-                _ => ElementStyle::StatusInfo,
-            };
-            title_spans.push(Span::styled(format!(" {}  ", s), el.style()));
+        if let (Some(label), Some(style)) = (
+            state.save_state.title_label(),
+            state.save_state.title_style(),
+        ) {
+            title_spans.push(Span::styled(format!(" {label}  "), style.style()));
         }
         title_spans.push(Span::raw(base_title));
 

@@ -6,7 +6,6 @@ use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{Frame, Terminal, backend::Backend};
-use zeroize::Zeroizing;
 
 use crate::cursor::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
 use crate::file_browser::{
@@ -15,6 +14,7 @@ use crate::file_browser::{
 use crate::file_handling;
 use crate::theming::Action;
 use crate::theming::{ElementStyle, Icon, texts};
+use crate::tree::app_tree::SaveTarget;
 use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils::{self, Configuration};
 
@@ -258,9 +258,16 @@ fn handle_home_key<B: Backend>(
                     {
                         let passphrase = active_vault.passphrase.clone();
                         let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
-                        tree_state.active_vault_path = Some(file_path);
                         tree_state.display_full_path = state.config.display_full_path;
-                        run_tree(state, terminal, tree_state, Some(passphrase))?;
+                        run_tree(
+                            state,
+                            terminal,
+                            tree_state,
+                            Some(SaveTarget {
+                                path: file_path,
+                                passphrase,
+                            }),
+                        )?;
                         return Ok(());
                     }
 
@@ -315,38 +322,65 @@ fn reopen_tree<B: Backend>(state: &mut HomeState, terminal: &mut Terminal<B>) ->
         && let Some(ref node) = active_vault.node
     {
         let passphrase = active_vault.passphrase.clone();
+        let target = active_vault
+            .path
+            .clone()
+            .map(|path| SaveTarget { path, passphrase });
         let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
-        tree_state.active_vault_path = active_vault.path.clone();
         tree_state.display_full_path = state.config.display_full_path;
-        run_tree(state, terminal, tree_state, Some(passphrase))?;
+        run_tree(state, terminal, tree_state, target)?;
     }
     Ok(())
 }
 
 /// Runs the tree and hands its final root back to the active vault.
 ///
-/// The autosave worker may have written a newer root to disk than the one
-/// `HomeState` originally decrypted. Keeping the in-memory home copy in sync
-/// prevents later home operations (change password, import) from overwriting
-/// those edits with stale data.
+/// On a normal exit the autosave worker may have written a newer root to disk
+/// than the one `HomeState` originally decrypted; keeping the in-memory home
+/// copy in sync prevents later home operations (change password, import) from
+/// overwriting those edits with stale data. A force-quit ([`ExitStatus::Unsaved`])
+/// instead drops the active vault, so no later home action can persist or
+/// overwrite with the discarded in-memory tree.
 fn run_tree<B: Backend>(
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
     mut tree_state: crate::tree::widget::TreeState,
-    passphrase: Option<Zeroizing<Vec<u8>>>,
+    target: Option<SaveTarget>,
 ) -> io::Result<()> {
-    let result = crate::tree::app_tree::run_app(terminal, &mut tree_state, passphrase);
+    use crate::tree::app_tree::ExitStatus;
 
-    // Sync even on error: a later retry from Home must not start from a stale
-    // copy that could overwrite edits already written by the autosave worker.
+    if let Some(target) = &target {
+        tree_state.active_vault_path = Some(target.path.clone());
+    }
+    let result = crate::tree::app_tree::run_app(terminal, &mut tree_state, target);
+
     let return_to_menu = tree_state.return_to_menu;
-    if let Some(active) = state.active_vault.as_mut() {
-        active.node = Some(tree_state.root);
+    match result {
+        Ok(ExitStatus::Saved) => {
+            if let Some(active) = state.active_vault.as_mut() {
+                active.node = Some(tree_state.root);
+            }
+            if !return_to_menu {
+                state.quit = true;
+            }
+            Ok(())
+        }
+        Ok(ExitStatus::Unsaved) => {
+            state.active_vault = None;
+            if !return_to_menu {
+                state.quit = true;
+            }
+            Ok(())
+        }
+        // Sync even on error: a later retry from Home must not start from a
+        // stale copy that could overwrite edits already written by the worker.
+        Err(error) => {
+            if let Some(active) = state.active_vault.as_mut() {
+                active.node = Some(tree_state.root);
+            }
+            Err(error)
+        }
     }
-    if result.is_ok() && !return_to_menu {
-        state.quit = true;
-    }
-    result
 }
 
 // ── File browser key handling ──
@@ -839,9 +873,16 @@ fn handle_change_pw_input_key<B: Backend>(
                             state.active_vault.as_mut().unwrap().passphrase =
                                 new_pass_bytes.clone();
                             let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
-                            tree_state.active_vault_path = Some(path.clone());
                             tree_state.display_full_path = state.config.display_full_path;
-                            run_tree(state, terminal, tree_state, Some(new_pass_bytes))?;
+                            run_tree(
+                                state,
+                                terminal,
+                                tree_state,
+                                Some(SaveTarget {
+                                    path: path.clone(),
+                                    passphrase: new_pass_bytes,
+                                }),
+                            )?;
                         }
                     }
                 }
@@ -886,9 +927,16 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
                     let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
 
                     let mut tree_state = crate::tree::widget::TreeState::new(node);
-                    tree_state.active_vault_path = Some(file_path);
                     tree_state.display_full_path = state.config.display_full_path;
-                    run_tree(state, terminal, tree_state, Some(pp_bytes))?;
+                    run_tree(
+                        state,
+                        terminal,
+                        tree_state,
+                        Some(SaveTarget {
+                            path: file_path,
+                            passphrase: pp_bytes,
+                        }),
+                    )?;
                 }
             }
         }
@@ -1186,9 +1234,16 @@ fn handle_passphrase_key<B: Backend>(
                         let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
 
                         let mut tree_state = crate::tree::widget::TreeState::new(node);
-                        tree_state.active_vault_path = Some(file_path);
                         tree_state.display_full_path = state.config.display_full_path;
-                        run_tree(state, terminal, tree_state, Some(pp_bytes))?;
+                        run_tree(
+                            state,
+                            terminal,
+                            tree_state,
+                            Some(SaveTarget {
+                                path: file_path,
+                                passphrase: pp_bytes,
+                            }),
+                        )?;
                     }
                 }
             }
@@ -1423,9 +1478,16 @@ fn handle_create_secret_file_key<B: Backend>(
                     let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
 
                     let mut tree_state = crate::tree::widget::TreeState::new(node);
-                    tree_state.active_vault_path = Some(file_path);
                     tree_state.display_full_path = state.config.display_full_path;
-                    run_tree(state, terminal, tree_state, Some(pp_bytes))?;
+                    run_tree(
+                        state,
+                        terminal,
+                        tree_state,
+                        Some(SaveTarget {
+                            path: file_path,
+                            passphrase: pp_bytes,
+                        }),
+                    )?;
                 }
             }
         }

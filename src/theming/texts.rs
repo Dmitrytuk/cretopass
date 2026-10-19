@@ -112,6 +112,8 @@ pub const HINT_PASSPHRASE: &str = "Enter:confirm  Ctrl+S:show  Esc:cancel";
 pub const HINT_CREATE_SECRET: &str = "Tab/↑/↓:switch  Ctrl+S:show  Enter:create  Esc:cancel";
 pub const HINT_ALERT: &str = "Press any key to dismiss";
 pub const HINT_HELP: &str = "Press any key to close";
+pub const HINT_SAVE_ERROR_BLOCKED: &str = "r:retry  q:quit without saving  any other key:stay";
+pub const HINT_DISCARD_CONFIRM: &str = "y:quit without saving  any other key:stay";
 
 pub const TREE_HELP_KEY_BINDINGS: &[&str] = &[
     " j/k      Navigate up/down",
@@ -158,6 +160,7 @@ pub const MSG_PW_EMPTY: &str = "New password fields cannot be empty";
 pub const MSG_PW_MISMATCH: &str = "New passwords do not match";
 pub const MSG_CONFIG_SAVED: &str = "Settings saved";
 pub const MSG_SAVE_FAILED: &str = "Failed to save: ";
+pub const MSG_DISCARD_CONFIRM: &str = "Unsaved changes could not be saved. Quit anyway? [y/N]";
 pub const MSG_EXPORT_SUCCESS: &str = "File exported at ";
 pub const MSG_IMPORT_SUCCESS: &str = "File imported successfully.";
 pub const MSG_IMPORT_NO_OPEN_FILE: &str = "Import requires an open file. Open one first.";

@@ -16,7 +16,7 @@ pub mod tree;
 pub mod vault;
 
 pub use tree::node::{ExtraField, FieldType, Node};
-pub use tree::widget::{InputMode, TreeState, TreeWidget};
+pub use tree::widget::{InputMode, SaveState, TreeState, TreeWidget};
 
 /// Runs the home screen. Selecting "Open secret file" opens the tree
 /// with the decrypted contents of the selected encrypted file.
@@ -34,7 +34,7 @@ pub fn run() -> io::Result<()> {
 pub fn run_with_root(root: Node) -> io::Result<()> {
     let mut state = TreeState::new(root);
     let mut terminal = setup_terminal()?;
-    let res = tree::app_tree::run_app(&mut terminal, &mut state, None);
+    let res = tree::app_tree::run_app(&mut terminal, &mut state, None).map(|_| ());
     cleanup_terminal(&mut terminal);
     if let Err(ref e) = res {
         eprintln!("Error: {e}");
