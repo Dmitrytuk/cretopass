@@ -4,6 +4,18 @@
 //! Submitting a new snapshot replaces any snapshot that has not started yet
 //! ("latest wins"), so a burst of edits costs at most one extra save and the
 //! newest root always wins.
+//!
+//! # Failure handling
+//!
+//! A panic in the save function is caught and reported as [`SaveError::Panicked`]
+//! without stopping the worker. A panic in the caller-supplied `on_event`
+//! callback stops the worker and closes the event channel, which the application
+//! surfaces as [`SaveError::WorkerStopped`].
+//!
+//! Both caught panics are still printed to stderr by the default panic hook,
+//! which can briefly disturb the alternate screen. The hook is intentionally
+//! left untouched: it is process-wide state, so mutating it from here would
+//! affect unrelated threads and is not worth the risk.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -100,8 +112,12 @@ pub struct Autosave {
 impl Autosave {
     /// Starts the writer thread.
     ///
-    /// `save` is called on the writer thread with the latest submitted root.
-    /// `on_event` receives one event per attempted snapshot.
+    /// `save` is called on the writer thread with the latest submitted root; a
+    /// panic in `save` is caught and reported as [`SaveError::Panicked`].
+    /// `on_event` receives one event per attempted snapshot; it must be cheap
+    /// and must not panic. A panic in `on_event` stops the worker and closes the
+    /// event channel, which the application surfaces as
+    /// [`SaveError::WorkerStopped`].
     ///
     /// # Errors
     ///
@@ -195,7 +211,9 @@ impl Drop for Autosave {
 ///
 /// On timeout the handle is dropped (detaching the thread) and
 /// [`SaveError::WorkerStopped`] is returned. `is_finished` polling is used
-/// because `std::thread::JoinHandle` has no timed join.
+/// because `std::thread::JoinHandle` has no timed join. A worker panic is not
+/// reported here: it is surfaced through the closed event channel instead, so
+/// `shutdown` reports only the join timeout.
 fn join_bounded(handle: JoinHandle<()>, timeout: Duration) -> Result<(), SaveError> {
     let deadline = Instant::now() + timeout;
     while !handle.is_finished() {
@@ -234,10 +252,16 @@ where
         let result =
             catch_unwind(AssertUnwindSafe(|| save(&job.root))).unwrap_or(Err(SaveError::Panicked));
 
-        on_event(SaveEvent {
+        let event = SaveEvent {
             generation: job.generation,
             result,
-        });
+        };
+        // A panicking `on_event` must not leave `submit` accepting jobs that are
+        // never attempted and never reported: stop the worker so the app sees a
+        // closed event channel (`save_rx.recv() -> None`).
+        if catch_unwind(AssertUnwindSafe(|| on_event(event))).is_err() {
+            return;
+        }
     }
 }
 
@@ -441,5 +465,30 @@ mod tests {
         let event = events_rx.recv_timeout(TIMEOUT).unwrap();
         assert_eq!(event.generation, generation);
         assert!(matches!(event.result, Err(SaveError::Panicked)));
+    }
+
+    #[test]
+    fn a_panicking_on_event_stops_the_worker() {
+        let (events_tx, events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(
+            |_: &Node| Ok(()),
+            move |event| {
+                // Deliver the event, then panic so the worker stops.
+                let _ = events_tx.send(event);
+                panic!("on_event boom");
+            },
+        )
+        .unwrap();
+
+        let generation = autosave.submit(node("first"));
+        let event = events_rx.recv_timeout(TIMEOUT).unwrap();
+        assert_eq!(event.generation, generation);
+
+        // The worker stopped: the event channel is closed, so `submit` can no
+        // longer accept jobs with no reporter.
+        assert!(matches!(
+            events_rx.recv_timeout(TIMEOUT),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        ));
     }
 }
