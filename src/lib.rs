@@ -16,7 +16,7 @@ pub mod tree;
 pub mod vault;
 
 pub use tree::node::{ExtraField, FieldType, Node};
-pub use tree::widget::{InputMode, TreeState, TreeWidget};
+pub use tree::widget::{InputMode, SaveState, TreeState, TreeWidget};
 
 /// Runs the home screen. Selecting "Open secret file" opens the tree
 /// with the decrypted contents of the selected encrypted file.

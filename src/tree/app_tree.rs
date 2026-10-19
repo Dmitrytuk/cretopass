@@ -10,7 +10,8 @@ use crate::theming::Action;
 use crate::theming::{ElementStyle, Icon, texts};
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{
-    AddPosition, FormFocus, FormPending, FormRow, FormState, InputMode, TreeState, TreeWidget,
+    AddPosition, FormFocus, FormPending, FormRow, FormState, InputMode, SaveState, TreeState,
+    TreeWidget,
 };
 use crossterm::event::{self, Event, EventStream, KeyEventKind};
 use futures_util::StreamExt;
@@ -60,7 +61,8 @@ pub fn run_app<B: Backend>(
                             if key.kind != KeyEventKind::Press {
                                 continue;
                             }
-                            if state.save_error.take().is_some() {
+                            if state.save_state.overlay_message().is_some() {
+                                state.save_state.acknowledge();
                                 terminal.draw(|f| ui(f, state))?;
                                 continue;
                             }
@@ -71,7 +73,7 @@ pub fn run_app<B: Backend>(
                                 state.modified = false;
                                 if let Some(ref mut worker) = autosave {
                                     submitted = worker.submit(state.root.clone());
-                                    state.status = Some(texts::STATUS_SAVING);
+                                    state.save_state = SaveState::Saving;
                                 }
                             }
                         }
@@ -93,28 +95,22 @@ pub fn run_app<B: Backend>(
                                 saved = saved.max(event.generation);
                             }
                             if event.generation == submitted {
-                                match event.result {
-                                    Ok(()) => {
-                                        state.status = None;
-                                        state.save_error = None;
-                                    }
-                                    Err(error) => {
-                                        state.status = Some(texts::STATUS_SAVE_FAILED);
-                                        state.save_error =
-                                            Some(format!("{}{}", texts::MSG_SAVE_FAILED, error));
-                                    }
-                                }
+                                state.save_state = match event.result {
+                                    Ok(()) => SaveState::Idle,
+                                    Err(error) => SaveState::Failed {
+                                        error,
+                                        acknowledged: false,
+                                    },
+                                };
                             }
                         }
                         None => {
                             save_open = false;
                             if saved < submitted {
-                                state.status = Some(texts::STATUS_SAVE_FAILED);
-                                state.save_error = Some(format!(
-                                    "{}{}",
-                                    texts::MSG_SAVE_FAILED,
-                                    SaveError::WorkerStopped
-                                ));
+                                state.save_state = SaveState::Failed {
+                                    error: SaveError::WorkerStopped,
+                                    acknowledged: false,
+                                };
                             }
                         }
                     }
@@ -123,14 +119,14 @@ pub fn run_app<B: Backend>(
 
             if state.quit || state.return_to_menu {
                 if let Some(ref mut worker) = autosave {
-                    let retry = state.modified || state.status == Some(texts::STATUS_SAVE_FAILED);
+                    let retry = state.modified || state.save_state.has_failed();
                     if retry {
                         state.modified = false;
                         submitted = worker.submit(state.root.clone());
                     }
 
                     if saved < submitted {
-                        state.status = Some(texts::STATUS_SAVING);
+                        state.save_state = SaveState::Saving;
                         terminal.draw(|f| ui(f, state))?;
 
                         match wait_for_save(&mut save_rx, state, &mut saved, submitted).await {
@@ -138,9 +134,10 @@ pub fn run_app<B: Backend>(
                             Err(error) => {
                                 state.quit = false;
                                 state.return_to_menu = false;
-                                state.status = Some(texts::STATUS_SAVE_FAILED);
-                                state.save_error =
-                                    Some(format!("{}{}", texts::MSG_SAVE_FAILED, error));
+                                state.save_state = SaveState::Failed {
+                                    error,
+                                    acknowledged: false,
+                                };
                             }
                         }
                     } else {
@@ -198,7 +195,7 @@ async fn wait_for_save(
                 if event.generation == target {
                     return match event.result {
                         Ok(()) => {
-                            state.status = None;
+                            state.save_state = SaveState::Idle;
                             Ok(())
                         }
                         Err(error) => Err(error),
@@ -1087,8 +1084,8 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
         _ => {}
     }
 
-    if let Some(message) = state.save_error.as_deref() {
-        render_save_error_overlay(frame, area, message);
+    if let Some(message) = state.save_state.overlay_message() {
+        render_save_error_overlay(frame, area, &message);
     }
 }
 
@@ -2232,7 +2229,7 @@ mod tests {
     async fn wait_for_save_reports_the_target_generation() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut state = TreeState::new(Node::new("Root"));
-        state.status = Some(texts::STATUS_SAVING);
+        state.save_state = SaveState::Saving;
         let mut saved = 0;
 
         tx.send(SaveEvent {
@@ -2250,7 +2247,7 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(saved, 3);
-        assert_eq!(state.status, None);
+        assert!(matches!(state.save_state, SaveState::Idle));
     }
 
     #[tokio::test]
