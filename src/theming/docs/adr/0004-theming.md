@@ -64,8 +64,9 @@ through matched rows only.
 
 | Keys | Action |
 |------|--------|
-| `j`/`k` | Navigate rows (a node's extra fields) |
-| `c` | Copy selected row to clipboard → "Copied!" alert |
+| `j`/`k` / `↑` / `↓` | Navigate rows (a node's extra fields) |
+| `Tab` / `Shift+Tab` | Navigate rows, wrapping (like the form's Nav level) |
+| `c` / `y` | Copy selected row to clipboard → "Copied!" alert |
 | `i` / `Enter` | Edit this node |
 | `Esc` | Close overlay |
 

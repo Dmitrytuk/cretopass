@@ -174,9 +174,11 @@ impl Action {
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => Self::NavDown,
             KeyCode::Char('k') | KeyCode::Up => Self::NavUp,
+            KeyCode::Tab => Self::NextField,
+            KeyCode::BackTab => Self::PrevField,
             KeyCode::Enter => Self::EditNode,
             KeyCode::Char('i') => Self::EditNode,
-            KeyCode::Char('c') => Self::CopyField,
+            KeyCode::Char('c') | KeyCode::Char('y') => Self::CopyField,
             KeyCode::Esc => Self::Cancel,
             _ => Self::None,
         }
@@ -340,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn from_detail_i_and_enter_edit_and_c_copies() {
+    fn from_detail_i_and_enter_edit_and_c_y_copy() {
         assert_eq!(
             Action::from_detail(&key(KeyCode::Char('i'))),
             Action::EditNode
@@ -349,6 +351,19 @@ mod tests {
         assert_eq!(
             Action::from_detail(&key(KeyCode::Char('c'))),
             Action::CopyField
+        );
+        assert_eq!(
+            Action::from_detail(&key(KeyCode::Char('y'))),
+            Action::CopyField
+        );
+    }
+
+    #[test]
+    fn from_detail_tab_navigates_fields() {
+        assert_eq!(Action::from_detail(&key(KeyCode::Tab)), Action::NextField);
+        assert_eq!(
+            Action::from_detail(&key(KeyCode::BackTab)),
+            Action::PrevField
         );
     }
 

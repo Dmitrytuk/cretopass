@@ -640,13 +640,15 @@ fn handle_detail(key: event::KeyEvent, state: &mut TreeState) {
         return;
     }
 
+    let field_count = state.current_node_ref().map_or(0, |n| n.extra_fields.len());
+
     match Action::from_detail(&key) {
         Action::Cancel => {
             state.mode = InputMode::Normal;
         }
         Action::NavDown => {
-            let max = state.current_node_ref().map_or(0, |n| n.extra_fields.len());
-            let new_sel = (selected + 1).min(max);
+            let last = field_count.saturating_sub(1);
+            let new_sel = (selected + 1).min(last);
             state.mode = InputMode::Detail {
                 selected: new_sel,
                 alert: None,
@@ -654,6 +656,20 @@ fn handle_detail(key: event::KeyEvent, state: &mut TreeState) {
         }
         Action::NavUp => {
             let new_sel = selected.saturating_sub(1);
+            state.mode = InputMode::Detail {
+                selected: new_sel,
+                alert: None,
+            };
+        }
+        Action::NextField if field_count > 0 => {
+            let new_sel = (selected + 1) % field_count;
+            state.mode = InputMode::Detail {
+                selected: new_sel,
+                alert: None,
+            };
+        }
+        Action::PrevField if field_count > 0 => {
+            let new_sel = (selected + field_count - 1) % field_count;
             state.mode = InputMode::Detail {
                 selected: new_sel,
                 alert: None,
@@ -1884,5 +1900,92 @@ mod tests {
         handle_confirm_delete(key(KeyCode::Char('y')), &mut state);
         assert_eq!(values(&state), vec!["a", "c"]);
         assert!(form_of(&state).selected_row < form_of(&state).rows(&state.root).len());
+    }
+
+    /// A tree whose root has three extra fields, opened in the Detail overlay.
+    fn detail_state() -> TreeState {
+        let mut node = Node::new("Root");
+        for value in ["a", "b", "c"] {
+            node.extra_fields.push(ExtraField {
+                field_type: FieldType::Login,
+                value: value.to_string(),
+            });
+        }
+        let mut state = TreeState::new(node);
+        state.mode = InputMode::Detail {
+            selected: 0,
+            alert: None,
+        };
+        state
+    }
+
+    fn detail_selected(state: &TreeState) -> usize {
+        match &state.mode {
+            InputMode::Detail { selected, .. } => *selected,
+            other => panic!("expected Detail mode, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detail_tab_wraps_forward_and_backtab_wraps_backward() {
+        let mut state = detail_state();
+        handle_detail(key(KeyCode::Tab), &mut state);
+        assert_eq!(detail_selected(&state), 1);
+        handle_detail(key(KeyCode::Tab), &mut state);
+        handle_detail(key(KeyCode::Tab), &mut state);
+        assert_eq!(detail_selected(&state), 0); // wrapped past the last field
+
+        handle_detail(key(KeyCode::BackTab), &mut state);
+        assert_eq!(detail_selected(&state), 2); // wrapped past the first field
+    }
+
+    #[test]
+    fn detail_nav_down_clamps_at_last_field() {
+        let mut state = detail_state();
+        for _ in 0..5 {
+            handle_detail(key(KeyCode::Char('j')), &mut state);
+        }
+        assert_eq!(detail_selected(&state), 2); // last field, no phantom row
+    }
+
+    #[test]
+    fn detail_nav_up_clamps_at_first_field() {
+        let mut state = detail_state();
+        handle_detail(key(KeyCode::Char('k')), &mut state);
+        assert_eq!(detail_selected(&state), 0);
+    }
+
+    #[test]
+    fn detail_tab_is_safe_without_fields() {
+        let mut state = TreeState::new(Node::new("Root"));
+        state.mode = InputMode::Detail {
+            selected: 0,
+            alert: None,
+        };
+        handle_detail(key(KeyCode::Tab), &mut state);
+        handle_detail(key(KeyCode::BackTab), &mut state);
+        assert_eq!(detail_selected(&state), 0);
+    }
+
+    #[test]
+    fn detail_y_sets_copy_alert() {
+        // An empty value skips the clipboard subprocess but still alerts.
+        let mut node = Node::new("Root");
+        node.extra_fields.push(ExtraField {
+            field_type: FieldType::Login,
+            value: String::new(),
+        });
+        let mut state = TreeState::new(node);
+        state.mode = InputMode::Detail {
+            selected: 0,
+            alert: None,
+        };
+        handle_detail(key(KeyCode::Char('y')), &mut state);
+        match &state.mode {
+            InputMode::Detail { alert, .. } => {
+                assert_eq!(alert.as_deref(), Some(texts::COPY_CHECK));
+            }
+            other => panic!("expected Detail mode, got {other:?}"),
+        }
     }
 }
