@@ -32,7 +32,7 @@ _Avoid_: Desc, Note
 **Tree**: The main workspace where the node tree is navigated, searched, and edited. Entered from Home after opening a secret file.
 _Avoid_: Tree view, Tree app, Workspace
 
-**Autosave**: The background writer that persists committed Tree changes. Each commit submits the current root; a newer submission replaces one that is still waiting, and `SaveState` ("Saving..." / "Save failed") tracks the latest generation. Leaving the Tree waits for that generation for at most `SAVE_TIMEOUT`; if the final flush fails or times out, the user may retry or explicitly quit without saving (see `SaveExit`). The writer is stopped with a bounded `shutdown`, or detached on a force-quit.
+**Autosave**: The background writer that persists committed Tree changes. Each commit submits the current root; a newer submission replaces one that is still waiting, and `SaveState` shows a spinning glyph with `Saving` (or a static `Save failed`) in the title bar while the latest generation is tracked. Leaving the Tree waits for that generation for at most `SAVE_TIMEOUT`; if the final flush fails or times out, the user may retry or explicitly quit without saving (see `SaveExit`). The writer is stopped with a bounded `shutdown`, or detached on a force-quit.
 _Avoid_: Auto-save, background save, sync
 
 **Detail**: Overlay listing a selected Node's ExtraFields. Rows can be navigated and copied to the system clipboard.

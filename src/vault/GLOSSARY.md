@@ -40,6 +40,9 @@ _Avoid_: Auto-persist
 **Modified**: A flag set when the tree has unsaved changes. Triggers Auto-save at the next event loop iteration.
 _Avoid_: Dirty, Unsaved
 
+**Busy indicator**: The animated glyph plus label shown in the title bar while a blocking operation runs. Loading and Saving are busy and spin; Save failed is not busy and shows a static label.
+_Avoid_: Spinner, Throbber, Progress
+
 **Configuration**: Persistent app preferences stored as a binary file in the config directory. Contains Recent secret files, last opened vault path, display preferences, and auto-open-on-startup behavior.
 _Avoid_: AppSettings, Preferences, App configuration
 

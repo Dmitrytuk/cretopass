@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use super::node::{ExtraField, Node};
 use crate::file_handling::SaveError;
-use crate::theming::{ElementStyle, Icon, texts};
+use crate::theming::{ElementStyle, Icon, Spinner, Status, texts};
 
 /// A single visible row in the flattened tree display.
 #[derive(Debug, Clone)]
@@ -549,22 +549,18 @@ pub enum SaveState {
 }
 
 impl SaveState {
-    /// Title-bar label for this state, or `None` when there is nothing to show.
-    pub fn title_label(&self) -> Option<&'static str> {
+    /// Title-bar status for this state, or `None` when there is nothing to show.
+    pub fn title_status(&self) -> Option<Status> {
         match self {
             Self::Idle => None,
-            Self::Saving => Some(texts::STATUS_SAVING),
-            Self::Failed { .. } => Some(texts::STATUS_SAVE_FAILED),
+            Self::Saving => Some(Status::Saving),
+            Self::Failed { .. } => Some(Status::SaveFailed),
         }
     }
 
-    /// Title-bar style matching [`SaveState::title_label`].
-    pub fn title_style(&self) -> Option<ElementStyle> {
-        match self {
-            Self::Idle => None,
-            Self::Saving => Some(ElementStyle::StatusSaving),
-            Self::Failed { .. } => Some(ElementStyle::StatusSaveFailed),
-        }
+    /// Whether the title-bar status is a busy state that should spin.
+    pub fn spins(&self) -> bool {
+        matches!(self, Self::Saving)
     }
 
     /// Message for the save-error overlay, or `None` when it should not show.
@@ -633,6 +629,8 @@ pub struct TreeState {
     /// Persistence status of the autosave worker, shown in the title bar and as
     /// the save-error overlay.
     pub save_state: SaveState,
+    /// Frame counter for the animated busy glyph shown next to `save_state`.
+    pub spinner: Spinner,
     /// A requested exit that is parked waiting on the save worker.
     pub save_exit: SaveExit,
     /// If `true`, window title shows the full path; otherwise just the filename.
@@ -658,6 +656,7 @@ impl TreeState {
             active_vault_path: None,
             modified: false,
             save_state: SaveState::Idle,
+            spinner: Spinner::default(),
             save_exit: SaveExit::None,
             display_full_path: true,
         };
@@ -1123,11 +1122,14 @@ impl TreeWidget {
             .unwrap_or_else(|| crate::theming::texts::TITLE_TREE_DEFAULT.to_string());
 
         let mut title_spans: Vec<Span> = Vec::new();
-        if let (Some(label), Some(style)) = (
-            state.save_state.title_label(),
-            state.save_state.title_style(),
-        ) {
-            title_spans.push(Span::styled(format!(" {label}  "), style.style()));
+        if let Some(status) = state.save_state.title_status() {
+            let mut text = String::new();
+            if status.spins() {
+                text.push_str(state.spinner.glyph());
+                text.push(' ');
+            }
+            text.push_str(status.label());
+            title_spans.push(Span::styled(format!(" {text}  "), status.style().style()));
         }
         title_spans.push(Span::raw(base_title));
 
@@ -1321,5 +1323,27 @@ mod tests {
         let err = state.insert_node_at_position(AddPosition::SiblingBefore, node);
         assert!(err.is_err());
         assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "B"]);
+    }
+
+    #[test]
+    fn save_state_idle_has_no_title_status() {
+        assert_eq!(SaveState::Idle.title_status(), None);
+        assert!(!SaveState::Idle.spins());
+    }
+
+    #[test]
+    fn save_state_saving_spins() {
+        assert_eq!(SaveState::Saving.title_status(), Some(Status::Saving));
+        assert!(SaveState::Saving.spins());
+    }
+
+    #[test]
+    fn save_state_failed_is_static() {
+        let failed = SaveState::Failed {
+            error: SaveError::WorkerStopped,
+            acknowledged: false,
+        };
+        assert_eq!(failed.title_status(), Some(Status::SaveFailed));
+        assert!(!failed.spins());
     }
 }

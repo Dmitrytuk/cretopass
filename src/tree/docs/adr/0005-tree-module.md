@@ -169,10 +169,11 @@ parent row (`collapse_or_select_parent`).
 3. The worker serializes saves on one thread. A submission made while a save is
    running replaces any still-waiting snapshot; the newest root therefore wins
    and a burst of edits costs at most one extra save.
-4. The title bar shows "Saving..." (amber) from submission until the event for
-   the latest generation arrives. On failure it shows "Save failed" (red), driven
-   by `TreeState.save_state: SaveState`; an unacknowledged failure also draws an
-   overlay with the full error. Any key dismisses the overlay.
+4. The title bar shows `Saving` (amber) with an animated glyph from submission
+   until the event for the latest generation arrives. On failure it shows
+   `Save failed` (red), driven by `TreeState.save_state: SaveState`; an
+   unacknowledged failure also draws an overlay with the full error. Any key
+   dismisses the overlay.
 5. On quit (`q`) or return-to-home (`H`) the loop decides via the pure
    `exit_plan` helper, retrying the final snapshot if the last attempt failed or
    `modified` is set, then waiting for the latest generation. The wait is bounded

@@ -7,7 +7,7 @@ use crate::cursor::{
 };
 use crate::file_handling::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree};
 use crate::theming::Action;
-use crate::theming::{ElementStyle, Icon, texts};
+use crate::theming::{ElementStyle, Icon, SPINNER_TICK, texts};
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{
     AddPosition, FormFocus, FormPending, FormRow, FormState, InputMode, SaveExit, SaveState,
@@ -22,6 +22,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::{Terminal, backend::Backend};
 use tokio::sync::mpsc;
+use tokio::time::MissedTickBehavior;
 use zeroize::Zeroizing;
 
 /// The vault location and credential the autosave worker needs to persist a
@@ -84,6 +85,12 @@ pub fn run_app<B: Backend>(
     let status = runtime.block_on(async {
         let mut events = EventStream::new();
         terminal.draw(|f| ui(f, state))?;
+
+        // Drives the title-bar spinner. The first tick is immediate, but the
+        // tick branch below is guarded by `save_state.spins()`, so the app does
+        // not redraw at the spinner rate while nothing is outstanding.
+        let mut tick = tokio::time::interval(SPINNER_TICK);
+        tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         loop {
             tokio::select! {
@@ -155,6 +162,9 @@ pub fn run_app<B: Backend>(
                         }
                     }
                 }
+                _ = tick.tick(), if state.save_state.spins() => {
+                    state.spinner.advance();
+                }
             }
 
             if state.save_exit == SaveExit::None && (state.quit || state.return_to_menu) {
@@ -174,12 +184,14 @@ pub fn run_app<B: Backend>(
 
                     let flush = tokio::time::timeout(
                         SAVE_TIMEOUT,
-                        wait_for_save(&mut save_rx, &mut saved, target),
+                        wait_for_save(terminal, state, &mut tick, &mut save_rx, &mut saved, target),
                     )
                     .await;
                     match flush {
-                        Ok(Ok(())) => break Ok(ExitStatus::Saved),
-                        Ok(Err(error)) => park_blocked(state, error),
+                        Ok(result) => match result? {
+                            Ok(()) => break Ok(ExitStatus::Saved),
+                            Err(error) => park_blocked(state, error),
+                        },
                         // The worker is still stuck; offer retry / force-quit.
                         Err(_elapsed) => park_blocked(state, SaveError::WorkerStopped),
                     }
@@ -320,12 +332,42 @@ fn start_autosave(
     Autosave::spawn(save, on_event).map(Some)
 }
 
+/// Waits until the snapshot with `target` generation has been attempted,
+/// animating the title-bar spinner while it waits.
+///
+/// The inner [`Result`] is the save outcome (as in [`wait_for_generation`]);
+/// the outer one reports terminal I/O errors from redrawing the spinner, which
+/// are kept distinct from a failed save.
+async fn wait_for_save<B: Backend>(
+    terminal: &mut Terminal<B>,
+    state: &mut TreeState,
+    tick: &mut tokio::time::Interval,
+    save_rx: &mut mpsc::UnboundedReceiver<SaveEvent>,
+    saved: &mut u64,
+    target: u64,
+) -> io::Result<Result<(), SaveError>> {
+    let wait = wait_for_generation(save_rx, saved, target);
+    tokio::pin!(wait);
+    loop {
+        // Read before the `select!` so the guard does not borrow `state` while
+        // the spinner branch mutates it.
+        let spinner_on = state.save_state.spins();
+        tokio::select! {
+            result = &mut wait => return Ok(result),
+            _ = tick.tick(), if spinner_on => {
+                state.spinner.advance();
+                terminal.draw(|f| ui(f, state))?;
+            }
+        }
+    }
+}
+
 /// Waits until the snapshot with `target` generation has been attempted.
 ///
 /// Returns the result of that attempt. The caller owns the `SaveState`
 /// transition: on success the exit path is finished, so there is nothing left to
-/// update.
-async fn wait_for_save(
+/// update. This is the pure core of [`wait_for_save`].
+async fn wait_for_generation(
     save_rx: &mut mpsc::UnboundedReceiver<SaveEvent>,
     saved: &mut u64,
     target: u64,
@@ -2521,7 +2563,7 @@ mod tests {
         })
         .unwrap();
 
-        let result = wait_for_save(&mut rx, &mut saved, 3).await;
+        let result = wait_for_generation(&mut rx, &mut saved, 3).await;
 
         assert!(result.is_ok());
         assert_eq!(saved, 3);
@@ -2543,7 +2585,7 @@ mod tests {
         })
         .unwrap();
 
-        let result = wait_for_save(&mut rx, &mut saved, 2).await;
+        let result = wait_for_generation(&mut rx, &mut saved, 2).await;
 
         assert!(matches!(result, Err(SaveError::Failed(_))));
         assert_eq!(saved, 1);
@@ -2555,7 +2597,7 @@ mod tests {
         drop(tx);
         let mut saved = 0;
 
-        let result = wait_for_save(&mut rx, &mut saved, 1).await;
+        let result = wait_for_generation(&mut rx, &mut saved, 1).await;
 
         assert!(matches!(result, Err(SaveError::WorkerStopped)));
     }
