@@ -118,7 +118,9 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
             state.mode = InputMode::PendingCut;
         }
         Action::PasteStart => {
-            state.mode = InputMode::PendingPaste;
+            if state.cut_buffer.is_some() {
+                state.mode = InputMode::PendingPaste;
+            }
         }
         Action::AddStart => {
             state.mode = InputMode::PendingAdd;
@@ -1884,6 +1886,21 @@ mod tests {
         handle_form(key(KeyCode::Char('p')), &mut state);
         assert_eq!(form_of(&state).pending, FormPending::None);
         assert_eq!(values(&state).len(), 3);
+    }
+
+    #[test]
+    fn p_with_empty_buffer_stays_in_normal() {
+        let mut state = TreeState::new(Node::new("Root"));
+        handle_normal(key(KeyCode::Char('p')), &mut state);
+        assert!(matches!(state.mode, InputMode::Normal));
+    }
+
+    #[test]
+    fn p_with_buffer_enters_pending_paste() {
+        let mut state = TreeState::new(Node::new("Root"));
+        state.cut_buffer = Some(Node::new("X"));
+        handle_normal(key(KeyCode::Char('p')), &mut state);
+        assert!(matches!(state.mode, InputMode::PendingPaste));
     }
 
     #[test]

@@ -70,8 +70,8 @@ This replaces the earlier duplication of the same fields in every variant.
 `PendingCut`, `PendingPaste`, and `PendingAdd` are one-key prefix modes:
 
 - `d` enters `PendingCut`; a second `d` cuts, any other key cancels.
-- `p` enters `PendingPaste`; `p`/`P`/`l`(→) choose paste after/before/child,
-  any other key cancels.
+- `p` enters `PendingPaste` only when the cut buffer is non-empty; `p`/`P`/`l`(→)
+  choose paste after/before/child, any other key cancels.
 - `a` enters `PendingAdd`; `a`/`A`/`l`(→) choose add after/before/child,
   any other key cancels. The choice is stored in `TreeState::add_position`
   (`AddPosition`) and consumed when the form is confirmed.
@@ -154,8 +154,8 @@ parent row (`collapse_or_select_parent`).
 - `cut_buffer: Option<Node>` is move-style: a cut node is consumed by the next
   successful paste, so it can be inserted only once. A failed paste (e.g. `P`
   on the root, which has no sibling slot) puts the node back in the buffer.
-- `p` enters `PendingPaste`; `p` pastes after, `P` pastes before, `l`/`→`
-  pastes as last child.
+- `p` enters `PendingPaste` only when the buffer is non-empty; `p` pastes after,
+  `P` pastes before, `l`/`→` pastes as last child.
 - System clipboard only used in detail overlay (Enter on a row). Targets: `pbcopy` (macOS), `wl-copy`/`xclip`/`xsel` (Linux).
 - `remove_node()` only targets children (not root). Root cannot be cut.
 
