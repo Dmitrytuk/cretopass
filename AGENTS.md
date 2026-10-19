@@ -50,3 +50,4 @@ map and cross-module data flow.
 - [0010 — Asynchronous tree autosave](./docs/adr/0010-async-tree-autosave.md) — background writer, latest-wins snapshots, bounded exit flush
 - [0011 — Animated status spinner](./docs/adr/0011-animated-status-spinner.md) — busy glyph and title-bar status
 - [0012 — Password generator](./docs/adr/0012-password-generator.md) — strict-leaf generator, `Ctrl+G` modal, symbol checklist, session settings
+- [0013 — Login word generator](./docs/adr/0013-login-word-generator.md) — syllable-assembled `Login` words, type-dispatched `Ctrl+G`, coalescing undo

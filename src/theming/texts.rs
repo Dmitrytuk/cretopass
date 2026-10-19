@@ -104,7 +104,7 @@ pub const HINT_FORM_EXTRA: &str =
     "j/k:field  i/Enter:edit  dd:cut  p:paste  Del:delete  u/r:undo/redo  Esc:close";
 pub const HINT_FORM_ADD: &str = "Enter:add field  Esc:cancel";
 pub const HINT_FORM_INPUT: &str = "Type to edit  Enter/Esc:done";
-pub const HINT_FORM_PASSWORD_INPUT: &str = "Type to edit  ^G:generate  Enter/Esc:done";
+pub const HINT_FORM_GENERATOR_INPUT: &str = "Type to edit  ^G:generate  Enter/Esc:done";
 pub const HINT_GENERATOR: &str =
     "j/k:row  digits:length  ←/→:cursor  Space:all  Enter:ok  Esc:cancel";
 pub const HINT_SYMBOLS: &str = "h/l/j/k:move  Space/Enter:toggle  Esc:done";

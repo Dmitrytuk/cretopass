@@ -25,9 +25,12 @@ _Avoid_: Desc, Note
 
 **Login**: A FieldType storing a username or login credential.
 
+**Login word**: The invented lowercase word the generator writes into a Login field. Assembled from syllables so it looks like a name (`brindel`, `quoravel`), never a persona, alias, or opaque string. It has no parameters: `Ctrl+G` generates one immediately and a second `Ctrl+G` rerolls it. Generation is a normal committed change; consecutive rerolls coalesce into one undo step.
+_Avoid_: username generator, fake name
+
 **Password**: A FieldType storing a password value. Masked as `*****` when displayed, shown in plain text only while actively editing.
 
-**Generated password**: A Password value produced by the generator rather than typed. It is an ordinary committed change: undoable with `u`, masked like any other password, and autosaved. Generating over a non-empty value replaces it without confirmation.
+**Generated password**: A Password value produced by the generator rather than typed. It is an ordinary committed change: undoable with `u`, masked like any other password, and autosaved. Generating over a non-empty value replaces it without confirmation, and consecutive generations coalesce into a single undo step.
 _Avoid_: random password, auto-password
 
 **Generator settings**: The last valid length and special-character selection used by the generator, remembered for the whole app run and never written to the configuration file. A fresh launch starts at 10 characters with all 17 symbols.
@@ -57,7 +60,7 @@ _Avoid_: Adding mode
 **Field cut buffer**: The form-local slot (`FormState::field_cut_buffer`) holding an ExtraField removed with `dd`, ready to be pasted with `p`/`P`. Reorders fields without touching the node until the form is saved; discarded with the form.
 _Avoid_: Clipboard, Yank buffer
 
-**Undo history**: The form-local record of a Node's successive committed states during one Edit session, capped by a redo tail. Cleared when the session ends. Distinct from the system clipboard and the Cut buffer.
+**Undo history**: The form-local record of a Node's successive committed states during one Edit session, capped by a redo tail. Consecutive generations collapse into one entry. Cleared when the session ends. Distinct from the system clipboard and the Cut buffer.
 _Avoid_: Change log, Version history
 
 **Expand**: Revealing a Branch Node's children in the Tree view. Collapse hides them again.

@@ -24,18 +24,17 @@ module graph acyclic and makes the generator testable without a terminal.
 The tree layer owns the mapping from field type to generator:
 
 ```rust
-enum FieldGenerator { Password }
+enum FieldGenerator { Login, Password }
 
 impl FieldGenerator {
     fn for_field(field_type: Option<&FieldType>) -> Option<Self>;
-    fn generate(self, params: &PasswordParams) -> String;
 }
 ```
 
-An enum rather than a trait: today there is exactly one generator, and a new
-variant forces every `match` to be revisited. The enum is the extension point
-for future field types; their parameters may need a broader type than
-`PasswordParams`.
+An enum rather than a trait: a new variant forces every `match` to be revisited.
+The enum is the extension point for future field types. The `Login` variant is
+added by ADR 0013; because the variants take different parameters, the tree layer
+matches per variant instead of calling a `generate` method on the enum.
 
 ## Public API
 
@@ -81,9 +80,9 @@ symbol, and checking budgets per class is harder to explain).
 ## UI contract
 
 - **Trigger:** `Ctrl+G` at the form's **Input** level only, when the focused row
-  is an `ExtraField` whose type has a generator. On `Login`, `Custom`, `Name`, or
-  the add button it is a no-op, and the binding is not advertised. At the Nav
-  level `Ctrl+G` is unbound.
+  is an `ExtraField` whose type has a generator (`Password` here, `Login` per
+  ADR 0013). On `Custom`, `Name`, or the add button it is a no-op, and the binding
+  is not advertised. At the Nav level `Ctrl+G` is unbound.
 - `from_form_input` checks **only** `Ctrl+G` before the plain-char match, so the
   printable keys (including a literal `g`) keep their existing meanings. The
   form's Input dispatcher ignores modifiers for every other key, unchanged by
@@ -109,7 +108,8 @@ symbol, and checking budgets per class is harder to explain).
   returns to the summary row. The raw length buffer, its caret, and the fresh
   flag survive the round trip because both modes carry the same `GeneratorModal`.
 - **Result:** generating writes the value into the focused field, pushes a form
-  undo entry, marks the tree modified (autosave persists it), remembers the
+  undo entry (consecutive generations coalesce into one; see ADR 0013), marks the
+  tree modified (autosave persists it), remembers the
   params, and returns to the form still editing the field at Input. The scratch
   buffer is synced to the generated value, so the revealed field shows it
   immediately and leaving Input does not restore the old password. Because the

@@ -49,9 +49,10 @@ pub enum Action {
     /// Toggles the focused item in the password-generator modal or its
     /// symbol checklist.
     Toggle,
-    /// Opens the password generator for the focused password field while
-    /// editing it at the form's input level.
-    GeneratePassword,
+    /// Generates a value for the focused field while editing it at the form's
+    /// input level, when that field type has a generator (a `Login` word or a
+    /// `Password`).
+    Generate,
     SaveConfig,
     /// Toggles plaintext display of a password field.
     ToggleShowPassword,
@@ -135,7 +136,7 @@ impl Action {
     /// `i`/`Enter` enter the input level, `j`/`k`/arrows/Tab move between
     /// fields, `u`/`r` undo/redo, `Esc` closes the form.
     ///
-    /// The password generator is opened from the input level instead (see
+    /// The field generator is invoked from the input level instead (see
     /// [`Action::from_form_input`]); `Ctrl+G` here is unbound.
     pub fn from_form_nav(key: &KeyEvent) -> Self {
         // No Ctrl chord is bound at the Nav level. The plain-char matches below
@@ -212,12 +213,12 @@ impl Action {
     /// field; both `Enter` and `Esc` return to the navigation level, committing
     /// the field's text.
     ///
-    /// `Ctrl+G` opens the password generator for the focused field when it has
-    /// one (today: a `Password` field); elsewhere it is a no-op. It must be
-    /// checked *before* the plain-char match, which ignores modifiers.
+    /// `Ctrl+G` invokes the field generator for the focused field when it has
+    /// one (today: a `Login` word or a `Password`); elsewhere it is a no-op. It
+    /// must be checked *before* the plain-char match, which ignores modifiers.
     pub fn from_form_input(key: &KeyEvent) -> Self {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('g') {
-            return Self::GeneratePassword;
+            return Self::Generate;
         }
         match key.code {
             KeyCode::Left => Self::CursorLeft,
@@ -743,12 +744,12 @@ mod tests {
     }
 
     #[test]
-    fn from_form_input_ctrl_g_opens_generator_and_plain_g_inserts() {
-        // The generator is opened from the input level; on a field without one
+    fn from_form_input_ctrl_g_invokes_the_generator_and_plain_g_inserts() {
+        // The generator is invoked from the input level; on a field without one
         // the handler treats the action as a no-op.
         assert_eq!(
             Action::from_form_input(&ctrl(KeyCode::Char('g'))),
-            Action::GeneratePassword
+            Action::Generate
         );
         assert_eq!(
             Action::from_form_input(&key(KeyCode::Char('g'))),
