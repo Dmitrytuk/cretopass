@@ -1,6 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::state::{FileBrowserAction, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget};
+use super::state::{
+    FileBrowserAction, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget, NewFilePrefix,
+};
 use crate::file_handling;
 use crate::theming::texts;
 
@@ -8,6 +10,22 @@ use crate::theming::texts;
 /// or cancelled the file browser.  Returns `None` when the browser
 /// state was just mutated (re-render needed).
 pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBrowserAction> {
+    // ── New file / new folder prefix (`n`) in CreateFile mode ──
+    if state.pending == NewFilePrefix::Pending {
+        state.pending = NewFilePrefix::None;
+        match key.code {
+            KeyCode::Char('n') => {
+                state.focus = FocusTarget::Input;
+                return None;
+            }
+            KeyCode::Char('N') => {
+                create_new_folder(state);
+                return None;
+            }
+            _ => {}
+        }
+    }
+
     // ── Delete confirmation mode ──
     if state.confirm_delete.is_some() {
         return match key.code {
@@ -64,6 +82,11 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
 
     // ── Global keys ──
     match key.code {
+        KeyCode::Esc if state.focus == FocusTarget::Input => {
+            // In the name input Esc steps back to the list, keeping the draft.
+            state.focus = FocusTarget::List;
+            return None;
+        }
         KeyCode::Esc => return Some(FileBrowserAction::Cancelled),
         KeyCode::Char('/') if !state.search_active && state.focus == FocusTarget::List => {
             state.search_active = true;
@@ -97,8 +120,8 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
                 };
                 None
             }
-            KeyCode::Char('N') if state.mode == FileBrowserMode::CreateFile => {
-                state.focus = FocusTarget::Input;
+            KeyCode::Char('n') if state.mode == FileBrowserMode::CreateFile => {
+                state.pending = NewFilePrefix::Pending;
                 None
             }
             _ => None,
@@ -161,11 +184,7 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
             None
         }
         KeyCode::Char('n') if state.mode == FileBrowserMode::CreateFile => {
-            create_new_folder(state);
-            None
-        }
-        KeyCode::Char('N') if state.mode == FileBrowserMode::CreateFile => {
-            state.focus = FocusTarget::Input;
+            state.pending = NewFilePrefix::Pending;
             None
         }
         KeyCode::Char('r') => {
@@ -234,12 +253,6 @@ fn handle_text_edit(cursor: &mut usize, text: &mut String, key: KeyCode) -> bool
 }
 
 fn handle_input_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBrowserAction> {
-    // Check focus-switch key before general Char(c) to avoid unreachable pattern
-    if key.code == KeyCode::Char('N') || key.code == KeyCode::Esc {
-        state.focus = FocusTarget::List;
-        return None;
-    }
-
     if handle_text_edit(
         &mut state.creating_cursor,
         &mut state.creating_name,
@@ -255,6 +268,10 @@ fn handle_input_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileB
                 return None;
             }
             let full_path = state.current_dir.join(&name);
+            if full_path.exists() {
+                state.error = Some(texts::MSG_FILE_EXISTS.to_string());
+                return None;
+            }
             Some(FileBrowserAction::Selected(
                 full_path.to_string_lossy().to_string(),
             ))
@@ -395,28 +412,63 @@ mod tests {
         state
     }
 
-    // ── N switches focus in CreateFile mode ──
+    // ── `n` prefix in CreateFile mode ──
 
     #[test]
-    fn test_n_switches_to_input_create_file() {
+    fn test_n_prefix_then_n_focuses_input() {
         let mut state = make_state(FileBrowserMode::CreateFile);
         assert_eq!(state.focus, FocusTarget::List);
 
-        let result = handle_key(key(KeyCode::Char('N')), &mut state);
+        assert_eq!(handle_key(key(KeyCode::Char('n')), &mut state), None);
+        assert_eq!(state.pending, NewFilePrefix::Pending);
+        // Still on the list — the prefix waits for the follow-up key.
+        assert_eq!(state.focus, FocusTarget::List);
 
-        assert_eq!(result, None);
+        assert_eq!(handle_key(key(KeyCode::Char('n')), &mut state), None);
+        assert_eq!(state.pending, NewFilePrefix::None);
         assert_eq!(state.focus, FocusTarget::Input);
     }
 
     #[test]
-    fn test_n_switches_to_input_empty_list() {
+    fn test_n_prefix_then_upper_n_creates_folder() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        let before = state.entries.len();
+
+        assert_eq!(handle_key(key(KeyCode::Char('n')), &mut state), None);
+        assert_eq!(handle_key(key(KeyCode::Char('N')), &mut state), None);
+
+        assert_eq!(state.pending, NewFilePrefix::None);
+        assert_eq!(state.focus, FocusTarget::List);
+        let created = state.current_dir.join(texts::NEW_FOLDER_DEFAULT);
+        assert!(created.is_dir(), "folder should have been created");
+        assert_eq!(state.entries.len(), before + 1);
+
+        let _ = std::fs::remove_dir(&created);
+    }
+
+    #[test]
+    fn test_n_prefix_other_key_cancels() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+
+        handle_key(key(KeyCode::Char('n')), &mut state);
+        assert_eq!(state.pending, NewFilePrefix::Pending);
+
+        let result = handle_key(key(KeyCode::Char('x')), &mut state);
+        assert_eq!(result, None);
+        assert_eq!(state.pending, NewFilePrefix::None);
+        assert_eq!(state.focus, FocusTarget::List);
+    }
+
+    #[test]
+    fn test_n_prefix_switches_to_input_on_empty_list() {
         let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
         state.current_dir = std::path::PathBuf::from("/tmp/__empty_test_dir__");
         let _ = std::fs::create_dir_all(&state.current_dir);
         state.entries = file_handling::list_dir(&state.current_dir).unwrap();
         assert_eq!(state.filtered_len(), 0);
 
-        let result = handle_key(key(KeyCode::Char('N')), &mut state);
+        handle_key(key(KeyCode::Char('n')), &mut state);
+        let result = handle_key(key(KeyCode::Char('n')), &mut state);
         assert_eq!(result, None);
         assert_eq!(state.focus, FocusTarget::Input);
 
@@ -424,13 +476,14 @@ mod tests {
     }
 
     #[test]
-    fn test_n_noop_in_open_file_mode() {
+    fn test_n_arms_no_prefix_in_open_file_mode() {
         let mut state = make_state(FileBrowserMode::OpenFile);
         assert_eq!(state.focus, FocusTarget::List);
 
-        handle_key(key(KeyCode::Char('N')), &mut state);
+        handle_key(key(KeyCode::Char('n')), &mut state);
 
-        // Focus should remain List (N only works in CreateFile mode)
+        // `n` only works in CreateFile mode.
+        assert_eq!(state.pending, NewFilePrefix::None);
         assert_eq!(state.focus, FocusTarget::List);
     }
 
@@ -438,7 +491,12 @@ mod tests {
 
     #[test]
     fn test_enter_in_input_returns_selected() {
+        let dir = std::path::PathBuf::from("/tmp/__test_create_selected__");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
         let mut state = make_state(FileBrowserMode::CreateFile);
+        state.current_dir = dir.clone();
         state.focus = FocusTarget::Input;
         state.creating_name = "test_create_file.age".to_string();
 
@@ -455,6 +513,28 @@ mod tests {
             FileBrowserAction::Cancelled => panic!("expected Selected, got Cancelled"),
             FileBrowserAction::Renamed { .. } => panic!("expected Selected, got Renamed"),
         }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_enter_in_input_existing_name_blocks() {
+        let dir = std::path::PathBuf::from("/tmp/__test_create_exists__");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("taken.age"), b"x").unwrap();
+
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.current_dir = dir.clone();
+        state.focus = FocusTarget::Input;
+        state.creating_name = "taken.age".to_string();
+
+        let result = handle_key(key(KeyCode::Enter), &mut state);
+
+        assert_eq!(result, None, "existing file must not be selected");
+        assert_eq!(state.error.as_deref(), Some(texts::MSG_FILE_EXISTS));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -472,12 +552,17 @@ mod tests {
 
     #[test]
     fn test_full_flow_create_file() {
-        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
-        state.current_dir = std::path::PathBuf::from("/tmp");
-        state.entries = file_handling::list_dir(std::path::Path::new("/tmp")).unwrap_or_default();
+        let dir = std::path::PathBuf::from("/tmp/__test_create_flow__");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
 
-        // Step 1: N → focus becomes Input
-        handle_key(key(KeyCode::Char('N')), &mut state);
+        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        state.current_dir = dir.clone();
+        state.entries = file_handling::list_dir(&dir).unwrap_or_default();
+
+        // Step 1: n n → focus becomes Input
+        handle_key(key(KeyCode::Char('n')), &mut state);
+        handle_key(key(KeyCode::Char('n')), &mut state);
         assert_eq!(state.focus, FocusTarget::Input);
 
         // Step 2: type filename
@@ -500,19 +585,24 @@ mod tests {
             FileBrowserAction::Cancelled => panic!("expected Selected, got Cancelled"),
             FileBrowserAction::Renamed { .. } => panic!("expected Selected, got Renamed"),
         }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // ── N in Input mode returns to List ──
+    // ── Esc in Input mode returns to List ──
 
     #[test]
-    fn test_n_in_input_returns_to_list() {
+    fn test_esc_in_input_returns_to_list() {
         let mut state = make_state(FileBrowserMode::CreateFile);
         state.focus = FocusTarget::Input;
+        state.creating_name = "draft".to_string();
 
-        let result = handle_key(key(KeyCode::Char('N')), &mut state);
+        let result = handle_key(key(KeyCode::Esc), &mut state);
 
         assert_eq!(result, None);
         assert_eq!(state.focus, FocusTarget::List);
+        // The draft is kept so the user can resume.
+        assert_eq!(state.creating_name, "draft");
     }
 
     // ── Typing in Input mode ──
@@ -527,6 +617,19 @@ mod tests {
 
         assert_eq!(state.creating_name, "hi");
         assert_eq!(state.creating_cursor, 2);
+    }
+
+    #[test]
+    fn test_typing_n_in_input_is_text() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.focus = FocusTarget::Input;
+
+        // `n` / `N` are typed as text while the name input is focused.
+        handle_key(key(KeyCode::Char('n')), &mut state);
+        handle_key(key(KeyCode::Char('N')), &mut state);
+
+        assert_eq!(state.creating_name, "nN");
+        assert_eq!(state.pending, NewFilePrefix::None);
     }
 
     #[test]

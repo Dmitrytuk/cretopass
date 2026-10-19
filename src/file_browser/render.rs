@@ -3,7 +3,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use super::state::{FileBrowserMode, FileBrowserState, FileFilter, FocusTarget};
+use super::state::{FileBrowserMode, FileBrowserState, FileFilter, FocusTarget, NewFilePrefix};
 use crate::cursor::cursor_field_spans;
 use crate::theming::{ElementStyle, Icon, texts};
 
@@ -222,7 +222,7 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     }
 
     if state.mode == FileBrowserMode::CreateFile {
-        spans.push(Span::styled(texts::FB_HINT_NEW_DIR, hint_style));
+        spans.push(Span::styled(texts::FB_HINT_NEW, hint_style));
     }
 
     // Show rename/delete hints when a PWD-marked file is selected
@@ -235,15 +235,19 @@ fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
         spans.push(Span::styled(texts::FB_HINT_DELETE, hint_style));
     }
 
-    if state.mode == FileBrowserMode::CreateFile {
-        if state.focus == FocusTarget::Input {
-            spans.push(Span::styled(texts::FB_HINT_LIST, hint_style));
-        } else {
-            spans.push(Span::styled(texts::FB_HINT_NAME, hint_style));
-        }
+    if state.mode == FileBrowserMode::CreateFile && state.focus == FocusTarget::Input {
+        spans.push(Span::styled(texts::FB_HINT_LIST, hint_style));
     }
 
-    frame.render_widget(Paragraph::new(Text::from(Line::from(spans))), area);
+    let mut lines = vec![Line::from(spans)];
+    if state.pending == NewFilePrefix::Pending {
+        lines.push(Line::from(Span::styled(
+            texts::FB_PROMPT_NEW,
+            ElementStyle::FbActiveSearch.style(),
+        )));
+    }
+
+    frame.render_widget(Paragraph::new(Text::from(lines)), area);
 }
 
 fn render_file_input(
@@ -390,10 +394,10 @@ mod tests {
             text.contains("Create New Secret File"),
             "title mismatch:\n{text}"
         );
-        // N hint should mention switching to name input
+        // n hint should mention the new file / new folder prefix
         assert!(
-            text.contains("[N]name"),
-            "should show N hint to switch to name input:\n{text}"
+            text.contains("[n]new"),
+            "should show n hint for new file/folder:\n{text}"
         );
     }
 
@@ -473,24 +477,36 @@ mod tests {
     }
 
     #[test]
-    fn test_render_new_dir_hint_shown_in_create_mode() {
+    fn test_render_new_hint_shown_in_create_mode() {
         let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
         let text = render_to_text(&state);
         assert!(
-            text.contains("[n]new dir"),
-            "should show new directory hint in CreateFile mode:\n{text}"
+            text.contains("[n]new"),
+            "should show new file/folder hint in CreateFile mode:\n{text}"
         );
     }
 
     #[test]
-    fn test_render_new_dir_hint_hidden_in_open_mode() {
+    fn test_render_new_hint_hidden_in_open_mode() {
         let mut state = FileBrowserState::new(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         let text = render_to_text(&state);
         assert!(
-            !text.contains("[n]new dir"),
-            "should NOT show new directory hint in OpenFile mode:\n{text}"
+            !text.contains("[n]new"),
+            "should NOT show new file/folder hint in OpenFile mode:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_n_prefix_prompt_when_pending() {
+        let mut state = FileBrowserState::new(FileBrowserMode::CreateFile);
+        populate_tmp(&mut state);
+        state.pending = NewFilePrefix::Pending;
+        let text = render_to_text(&state);
+        assert!(
+            text.contains("n:new file") && text.contains("N:new folder"),
+            "should show the n-prefix prompt while pending:\n{text}"
         );
     }
 
