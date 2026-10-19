@@ -13,6 +13,7 @@ snapshot back to an age-encrypted JSON file.
 | `crypt` | [0002](../src/crypt/docs/adr/0002-crypt.md) | age-based encryption/decryption |
 | `cursor` | [0003](../src/cursor/docs/adr/0003-cursor.md) | UTF-8 byte-offset cursor editing + TUI span helpers |
 | `theming` | [0004](../src/theming/docs/adr/0004-theming.md) | Centralized keybindings, styles, icons, UI strings, and the title-bar `Status`/`Spinner` ([0011](0011-animated-status-spinner.md)) |
+| `generator` | [0012](0012-password-generator.md) | Password generation — strict leaf, depends only on `rand`; TUI-free and tree-free |
 | `tree` | [0005](../src/tree/docs/adr/0005-tree-module.md) | Tree data model, state machine, rendering, async event loop |
 | `vault` | [0006](../src/vault/docs/adr/0006-vault-module.md) | Home screen, active vault state, configuration persistence |
 | `file_browser` | [0007](../src/file_browser/docs/adr/0007-file-browser.md) | OS directory browser overlay with mounted-disk locations and hidden-entry toggle |
@@ -34,6 +35,10 @@ main.rs  ──▶  lib.rs  ──▶  vault::widget::run()   ──▶  tree::a
             (used by all UI)
 ```
 
+The `generator` module sits below `tree`: `tree::app_tree` maps a `Password`
+field to `generator::generate_password` when the user runs the generator.
+`generator` never imports `tree` (or any other project module).
+
 ## Core design principles
 
 1. **I/O gateway** — all filesystem operations go through `file_handling`. No other module imports `std::fs`.
@@ -42,6 +47,7 @@ main.rs  ──▶  lib.rs  ──▶  vault::widget::run()   ──▶  tree::a
 4. **Asynchronous atomic autosave** — mutations submit a root snapshot to a single background writer. The worker serializes, encrypts, and writes via temp-file + fsync + rename, with a `.bak` backup. A newer snapshot replaces a waiting one; `q`/`H` flush the latest generation before leaving.
 5. **Theming as a strict leaf** — all UI strings, styles, icons, and keybindings live in `theming/` and depend on nothing else in the project.
 6. **byte-offset cursor** — all text editing uses byte offsets with explicit UTF-8 boundary checks via `is_char_boundary()` and `len_utf8()`.
+7. **Generator as a strict leaf** — password generation is a pure, TUI-free module. The tree maps a field type to a generator; the module never imports `FieldType` or any TUI code (see [0012](0012-password-generator.md)).
 
 ## Dependencies
 
@@ -52,6 +58,7 @@ main.rs  ──▶  lib.rs  ──▶  vault::widget::run()   ──▶  tree::a
 | `tokio` 1 (`rt`, `sync`, `macros`, `time`) | tree | current-thread runtime, `select!`, save-event channel, spinner `interval` and bounded `timeout` |
 | `futures-util` 0.3 | tree | `StreamExt::next` for `EventStream` |
 | `age` 0.11 | crypt | passphrase-based encryption |
+| `rand` 0.8 | generator | cryptographically secure password randomness (already in the graph via `age`) |
 | `serde` / `serde_json` 1 | file_handling, node | JSON serialization of tree |
 | `uuid` 1 (v4, serde) | node, widget | stable node identities |
 | `rkyv` | vault::utils | zero-copy config serialization |

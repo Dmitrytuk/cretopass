@@ -11,6 +11,7 @@ pub mod crypt;
 pub mod cursor;
 pub mod file_browser;
 pub mod file_handling;
+pub mod generator;
 pub mod theming;
 pub mod tree;
 pub mod vault;

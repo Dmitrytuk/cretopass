@@ -6,12 +6,13 @@ use crate::cursor::{
     selected_span,
 };
 use crate::file_handling::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree};
+use crate::generator::{self, PasswordLength, PasswordParams};
 use crate::theming::Action;
 use crate::theming::{ElementStyle, Icon, SPINNER_TICK, texts};
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{
-    AddPosition, FormFocus, FormPending, FormRow, FormState, InputMode, SaveExit, SaveState,
-    TreeState, TreeWidget,
+    AddPosition, FormFocus, FormPending, FormRow, FormState, GeneratorModal, InputMode, SaveExit,
+    SaveState, TreeState, TreeWidget,
 };
 use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
@@ -394,6 +395,8 @@ fn dispatch_key(key: event::KeyEvent, state: &mut TreeState) {
         InputMode::Form(_) => handle_form(key, state),
         InputMode::SelectFieldType { .. } => handle_select_field_type(key, state),
         InputMode::CustomFieldName { .. } => handle_custom_field_name(key, state),
+        InputMode::GeneratePassword(_) => handle_generate_password(key, state),
+        InputMode::SymbolChecklist(_) => handle_symbol_checklist(key, state),
         InputMode::ConfirmDeleteField { .. } => handle_confirm_delete(key, state),
         InputMode::Detail { .. } => handle_detail(key, state),
         InputMode::ExportNodeSelect { .. } => handle_export_node_select(key, state),
@@ -634,6 +637,41 @@ fn close_form(form: &FormState) -> InputMode {
     }
 }
 
+/// Which generator to build a value for, selected by the focused field's type.
+///
+/// An enum rather than a trait: today only `Password` has a generator, and a
+/// new variant forces every `match` to be revisited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FieldGenerator {
+    Password,
+}
+
+impl FieldGenerator {
+    /// The generator for `field_type`, or `None` when it has none.
+    fn for_field(field_type: Option<&FieldType>) -> Option<Self> {
+        match field_type {
+            Some(FieldType::Password) => Some(Self::Password),
+            _ => None,
+        }
+    }
+
+    /// Produces a value from `params`.
+    fn generate(self, params: &PasswordParams) -> String {
+        match self {
+            Self::Password => generator::generate_password(params),
+        }
+    }
+}
+
+/// Rows of the password-generator modal, in display order.
+const GENERATOR_ROW_LENGTH: usize = 0;
+const GENERATOR_ROW_SYMBOLS: usize = 1;
+const GENERATOR_ROW_GENERATE: usize = 2;
+const GENERATOR_ROWS: usize = 3;
+
+/// Columns in the symbol checklist grid.
+const SYMBOL_COLUMNS: usize = 3;
+
 fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
     let mut form = match std::mem::replace(&mut state.mode, InputMode::Normal) {
         InputMode::Form(form) => form,
@@ -663,6 +701,25 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
     }
 
     match action {
+        Action::GeneratePassword => {
+            // `Ctrl+G` is bound at the Input level and only when the focused
+            // row carries a generator (today: a Password field). Other rows
+            // fall through and the form is restored untouched.
+            if FieldGenerator::for_field(form.focused_field_type(&state.root)).is_some() {
+                let length_input = state.generator.length.value().to_string();
+                let length_cursor = length_input.len();
+                state.mode = InputMode::GeneratePassword(GeneratorModal {
+                    params: state.generator,
+                    length_input,
+                    length_cursor,
+                    length_fresh: true,
+                    error: None,
+                    selected: GENERATOR_ROW_LENGTH,
+                    form,
+                });
+                return;
+            }
+        }
         Action::Cut if form.pending == FormPending::None => {
             if matches!(row, FormRow::Extra(_)) {
                 form.pending = FormPending::Cut;
@@ -912,6 +969,197 @@ fn handle_custom_field_name(key: event::KeyEvent, state: &mut TreeState) {
         }
         _ => {
             state.mode = InputMode::CustomFieldName { form, input };
+        }
+    }
+}
+
+/// Keys for the password-generator parameter modal.
+///
+/// `Ctrl+G` opened this from the Add/Edit form's Input level. On the length row,
+/// the first digit replaces the seeded value and the caret can then be moved with
+/// `Left`/`Right`/`Home`/`End`, inserting/removing at most three digits.
+/// Generating writes the value into the focused field (and its scratch buffer),
+/// commits it (undo entry + autosave) and returns to the form still editing the
+/// field. `Esc` returns without touching the field.
+fn handle_generate_password(key: event::KeyEvent, state: &mut TreeState) {
+    let mut modal = match std::mem::replace(&mut state.mode, InputMode::Normal) {
+        InputMode::GeneratePassword(modal) => modal,
+        other => {
+            state.mode = other;
+            return;
+        }
+    };
+
+    match Action::from_generator(&key) {
+        Action::Cancel => {
+            state.mode = InputMode::Form(modal.form);
+        }
+        Action::NavDown => {
+            modal.selected = (modal.selected + 1) % GENERATOR_ROWS;
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::NavUp => {
+            modal.selected = (modal.selected + GENERATOR_ROWS - 1) % GENERATOR_ROWS;
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::Toggle => {
+            if modal.selected == GENERATOR_ROW_SYMBOLS {
+                modal.params.symbols.toggle_all();
+            }
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::CursorLeft if modal.selected == GENERATOR_ROW_LENGTH => {
+            modal.length_fresh = false;
+            modal.length_cursor = cursor_left(&modal.length_input, modal.length_cursor);
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::CursorRight if modal.selected == GENERATOR_ROW_LENGTH => {
+            modal.length_fresh = false;
+            modal.length_cursor = cursor_right(&modal.length_input, modal.length_cursor);
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::CursorHome if modal.selected == GENERATOR_ROW_LENGTH => {
+            modal.length_fresh = false;
+            modal.length_cursor = 0;
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::CursorEnd if modal.selected == GENERATOR_ROW_LENGTH => {
+            modal.length_fresh = false;
+            modal.length_cursor = modal.length_input.len();
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::InsertChar(c) if modal.selected == GENERATOR_ROW_LENGTH && c.is_ascii_digit() => {
+            if modal.length_fresh {
+                modal.length_input.clear();
+                modal.length_cursor = 0;
+                modal.length_fresh = false;
+            }
+            if modal.length_input.len() < 3 {
+                insert_char_at(&mut modal.length_input, &mut modal.length_cursor, c);
+            }
+            modal.error = None;
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::Backspace if modal.selected == GENERATOR_ROW_LENGTH => {
+            if modal.length_fresh {
+                modal.length_input.clear();
+                modal.length_cursor = 0;
+                modal.length_fresh = false;
+            } else {
+                modal.length_cursor = backspace_at(&mut modal.length_input, modal.length_cursor);
+            }
+            modal.error = None;
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::DeleteChar if modal.selected == GENERATOR_ROW_LENGTH => {
+            if modal.length_fresh {
+                modal.length_input.clear();
+                modal.length_cursor = 0;
+                modal.length_fresh = false;
+            } else {
+                delete_at(&mut modal.length_input, modal.length_cursor);
+            }
+            modal.error = None;
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::Confirm if modal.selected == GENERATOR_ROW_LENGTH => {
+            modal.selected = GENERATOR_ROW_SYMBOLS;
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::Confirm if modal.selected == GENERATOR_ROW_SYMBOLS => {
+            modal.selected = 0;
+            state.mode = InputMode::SymbolChecklist(modal);
+        }
+        Action::Confirm if modal.selected == GENERATOR_ROW_GENERATE => {
+            match modal.length_input.parse::<PasswordLength>() {
+                Ok(length) => {
+                    let params = PasswordParams {
+                        length,
+                        symbols: modal.params.symbols,
+                    };
+                    let Some(field_generator) =
+                        FieldGenerator::for_field(modal.form.focused_field_type(&state.root))
+                    else {
+                        // The row lost its generator (defensive); leave the
+                        // value untouched and return to the form.
+                        state.mode = InputMode::Form(modal.form);
+                        return;
+                    };
+                    let value = field_generator.generate(&params);
+                    if modal.form.set_focused_value(&mut state.root, value.clone()) {
+                        // The generator is opened from the Input level, so the
+                        // focused text lives in the scratch buffer. Keep it in
+                        // step with the generated value: the revealed field
+                        // shows it immediately and the later `commit_input` is
+                        // a no-op instead of restoring the old password.
+                        if modal.form.focus == FormFocus::Input
+                            && let Some(scratch) = modal.form.scratch.as_mut()
+                        {
+                            scratch.text = value;
+                            scratch.cursor = scratch.text.len();
+                        }
+                        modal.form.cursor = modal.form.active_len(&state.root);
+                        commit_form_change(state, &mut modal.form);
+                    }
+                    state.generator = params;
+                    state.mode = InputMode::Form(modal.form);
+                }
+                Err(error) => {
+                    modal.error = Some(error);
+                    state.mode = InputMode::GeneratePassword(modal);
+                }
+            }
+        }
+        _ => {
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+    }
+}
+
+/// Keys for the per-symbol checklist opened from the generator modal.
+///
+/// The 17 symbols are laid out in a [`SYMBOL_COLUMNS`]-wide grid; `h`/`l`
+/// move one cell and `j`/`k` move one row. `Space`/`Enter` toggle the focused
+/// symbol, `Esc` returns to the parameter modal focused on the summary row.
+fn handle_symbol_checklist(key: event::KeyEvent, state: &mut TreeState) {
+    let mut modal = match std::mem::replace(&mut state.mode, InputMode::Normal) {
+        InputMode::SymbolChecklist(modal) => modal,
+        other => {
+            state.mode = other;
+            return;
+        }
+    };
+
+    let last = generator::SYMBOLS.len() - 1;
+    match Action::from_symbol_checklist(&key) {
+        Action::Cancel => {
+            modal.selected = GENERATOR_ROW_SYMBOLS;
+            state.mode = InputMode::GeneratePassword(modal);
+        }
+        Action::NavLeft => {
+            modal.selected = modal.selected.saturating_sub(1);
+            state.mode = InputMode::SymbolChecklist(modal);
+        }
+        Action::NavRight => {
+            modal.selected = (modal.selected + 1).min(last);
+            state.mode = InputMode::SymbolChecklist(modal);
+        }
+        Action::NavUp => {
+            modal.selected = modal.selected.saturating_sub(SYMBOL_COLUMNS);
+            state.mode = InputMode::SymbolChecklist(modal);
+        }
+        Action::NavDown => {
+            modal.selected = (modal.selected + SYMBOL_COLUMNS).min(last);
+            state.mode = InputMode::SymbolChecklist(modal);
+        }
+        Action::Toggle => {
+            if let Some(&symbol) = generator::SYMBOLS.get(modal.selected) {
+                modal.params.symbols.toggle(symbol);
+            }
+            state.mode = InputMode::SymbolChecklist(modal);
+        }
+        _ => {
+            state.mode = InputMode::SymbolChecklist(modal);
         }
     }
 }
@@ -1238,6 +1486,8 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
         }
         InputMode::SelectFieldType { .. } => render_select_field_type_overlay(frame, area, state),
         InputMode::CustomFieldName { .. } => render_custom_field_name_overlay(frame, area, state),
+        InputMode::GeneratePassword(modal) => render_generate_password_overlay(frame, area, modal),
+        InputMode::SymbolChecklist(modal) => render_symbol_checklist_overlay(frame, area, modal),
         InputMode::ConfirmDeleteField { .. } => render_confirm_delete_overlay(frame, area, state),
         InputMode::Detail { .. } => {
             render_detail_overlay(frame, area, state);
@@ -1307,6 +1557,10 @@ fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
             texts::MODE_CUSTOM_NAME,
             ElementStyle::ModeCustomName.style(),
         ),
+        InputMode::GeneratePassword(_) => {
+            (texts::MODE_GENERATOR, ElementStyle::ModeGenerator.style())
+        }
+        InputMode::SymbolChecklist(_) => (texts::MODE_SYMBOLS, ElementStyle::ModeSymbols.style()),
         InputMode::ConfirmDeleteField { .. } => {
             (texts::MODE_CONFIRM, ElementStyle::ModeConfirmDelete.style())
         }
@@ -1364,6 +1618,8 @@ fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
         InputMode::Form(form) => form_hint(form, &state.root),
         InputMode::SelectFieldType { .. } => texts::HINT_SELECT_FIELD_TYPE,
         InputMode::CustomFieldName { .. } => texts::HINT_CUSTOM_FIELD_NAME,
+        InputMode::GeneratePassword(_) => texts::HINT_GENERATOR,
+        InputMode::SymbolChecklist(_) => texts::HINT_SYMBOLS,
         InputMode::ConfirmDeleteField { .. } => texts::HINT_CONFIRM_DELETE,
         InputMode::ExportNodeSelect { .. } => texts::HINT_EXPORT_NODE_SELECT,
         InputMode::ExportNodeFormat { .. } => texts::HINT_EXPORT_NODE_FORMAT,
@@ -1783,7 +2039,10 @@ fn form_hint(form: &FormState, root: &Node) -> &'static str {
         FormPending::None => {}
     }
     if form.focus == FormFocus::Input {
-        return texts::HINT_FORM_INPUT;
+        return match form.focused_field_type(root) {
+            Some(FieldType::Password) => texts::HINT_FORM_PASSWORD_INPUT,
+            _ => texts::HINT_FORM_INPUT,
+        };
     }
     match form.current_row(root) {
         FormRow::AddButton => texts::HINT_FORM_ADD,
@@ -1862,6 +2121,115 @@ fn render_custom_field_name_overlay(frame: &mut Frame, area: Rect, state: &TreeS
             ElementStyle::GrayHint.style(),
         )),
     ];
+
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(block, overlay_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+/// Renders the password-generator parameter modal.
+fn render_generate_password_overlay(frame: &mut Frame, area: Rect, modal: &GeneratorModal) {
+    let has_error = modal.error.is_some();
+    let content_height = 3 + u16::from(has_error);
+    let overlay_height = (content_height + 2).min(area.height);
+    let overlay_area = Rect {
+        x: area.width / 4,
+        y: area.height.saturating_sub(overlay_height) / 2,
+        width: area.width / 2,
+        height: overlay_height,
+    };
+
+    let block = Block::default()
+        .title(texts::OVERLAY_GENERATE_PASSWORD)
+        .borders(Borders::ALL)
+        .style(ElementStyle::GeneratorBlock.style());
+    let inner = block.inner(overlay_area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    if modal.selected == GENERATOR_ROW_LENGTH {
+        let mut spans = vec![Span::raw(Icon::SelectionArrow.as_str().to_string())];
+        spans.extend(cursor_field_spans(
+            texts::LABEL_GENERATOR_LENGTH,
+            &modal.length_input,
+            modal.length_cursor,
+            true,
+        ));
+        lines.push(Line::from(spans));
+    } else {
+        let length_label = format!("{}{}", texts::LABEL_GENERATOR_LENGTH, modal.length_input);
+        lines.push(Line::from(selected_span(&length_label, false)));
+    }
+
+    let selected = modal.params.symbols.len();
+    let total = generator::SYMBOLS.len();
+    let symbols_label = format!("{}: {selected}/{total}", texts::LABEL_GENERATOR_SYMBOLS);
+    lines.push(Line::from(selected_span(
+        &symbols_label,
+        modal.selected == GENERATOR_ROW_SYMBOLS,
+    )));
+
+    lines.push(Line::from(selected_span(
+        texts::LABEL_GENERATOR_RUN,
+        modal.selected == GENERATOR_ROW_GENERATE,
+    )));
+
+    if modal.error.is_some() {
+        lines.push(Line::from(Span::styled(
+            texts::ERROR_GENERATOR_LENGTH,
+            ElementStyle::GeneratorError.style(),
+        )));
+    }
+
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(block, overlay_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+/// Renders the per-symbol checklist as a grid of checkbox cells.
+fn render_symbol_checklist_overlay(frame: &mut Frame, area: Rect, modal: &GeneratorModal) {
+    let rows = u16::try_from(generator::SYMBOLS.len().div_ceil(SYMBOL_COLUMNS))
+        .expect("symbol checklist rows fit in a terminal height");
+    let content_height = rows;
+    let overlay_height = (content_height + 2).min(area.height);
+    let width = u16::try_from(SYMBOL_COLUMNS * 9)
+        .expect("symbol checklist width fits in a terminal")
+        .min(area.width);
+    let overlay_area = Rect {
+        x: area.width.saturating_sub(width) / 2,
+        y: area.height.saturating_sub(overlay_height) / 2,
+        width,
+        height: overlay_height,
+    };
+
+    let block = Block::default()
+        .title(texts::OVERLAY_SYMBOLS)
+        .borders(Borders::ALL)
+        .style(ElementStyle::SymbolsBlock.style());
+    let inner = block.inner(overlay_area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    for row in 0..rows {
+        let mut spans: Vec<Span> = Vec::new();
+        for column in 0..SYMBOL_COLUMNS {
+            let index = usize::from(row) * SYMBOL_COLUMNS + column;
+            let Some(&symbol) = generator::SYMBOLS.get(index) else {
+                break;
+            };
+            let marker = if modal.params.symbols.contains(symbol) {
+                Icon::CheckboxOn
+            } else {
+                Icon::CheckboxOff
+            };
+            let style = if index == modal.selected {
+                ElementStyle::ListRowSelected.style()
+            } else {
+                ElementStyle::CursorNormalText.style()
+            };
+            let cell = format!("{} {}", marker.as_str(), symbol);
+            spans.push(Span::styled(format!("{cell:<9}"), style));
+        }
+        lines.push(Line::from(spans));
+    }
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
@@ -2055,6 +2423,65 @@ mod tests {
         for c in text.chars() {
             handle_form(key(KeyCode::Char(c)), state);
         }
+    }
+
+    fn ctrl(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    fn editing_state_with_password(value: &str) -> TreeState {
+        let mut node = Node::new("Root");
+        node.extra_fields.push(ExtraField {
+            field_type: FieldType::Password,
+            value: value.to_string(),
+        });
+        let mut state = TreeState::new(node);
+        let node = state.root.clone();
+        state.mode = InputMode::Form(FormState::new_edit(&node));
+        state
+    }
+
+    fn password_value(state: &TreeState) -> &str {
+        &form_node(state).extra_fields[0].value
+    }
+
+    fn generator_modal(state: &TreeState) -> &GeneratorModal {
+        match &state.mode {
+            InputMode::GeneratePassword(modal) | InputMode::SymbolChecklist(modal) => modal,
+            other => panic!("expected generator mode, got {other:?}"),
+        }
+    }
+
+    fn open_generator(state: &mut TreeState) {
+        select_row(state, 1);
+        if form_of(state).focus == FormFocus::Nav {
+            handle_form(key(KeyCode::Char('i')), state);
+        }
+        handle_form(ctrl(KeyCode::Char('g')), state);
+        assert!(matches!(state.mode, InputMode::GeneratePassword(_)));
+    }
+
+    fn move_generator_to(state: &mut TreeState, target: usize) {
+        while generator_modal(state).selected < target {
+            dispatch_key(key(KeyCode::Char('j')), state);
+        }
+        while generator_modal(state).selected > target {
+            dispatch_key(key(KeyCode::Char('k')), state);
+        }
+    }
+
+    fn set_generator_length(state: &mut TreeState, digits: &str) {
+        while !generator_modal(state).length_input.is_empty() {
+            dispatch_key(key(KeyCode::Backspace), state);
+        }
+        for digit in digits.chars() {
+            dispatch_key(key(KeyCode::Char(digit)), state);
+        }
+    }
+
+    fn press_generate(state: &mut TreeState) {
+        move_generator_to(state, GENERATOR_ROW_GENERATE);
+        dispatch_key(key(KeyCode::Enter), state);
     }
 
     #[test]
@@ -2600,5 +3027,266 @@ mod tests {
         let result = wait_for_generation(&mut rx, &mut saved, 1).await;
 
         assert!(matches!(result, Err(SaveError::WorkerStopped)));
+    }
+
+    #[test]
+    fn generator_ctrl_g_is_bound_only_while_editing_a_password_field() {
+        // `Ctrl+G` is unbound at the Nav level, even on a password row.
+        let mut nav = editing_state_with_password("old");
+        select_row(&mut nav, 1);
+        handle_form(ctrl(KeyCode::Char('g')), &mut nav);
+        assert!(matches!(nav.mode, InputMode::Form(_)));
+
+        // At the Input level it opens only when the focused field carries a
+        // generator: Login and Name rows are no-ops.
+        let mut login = editing_state_with_fields();
+        select_row(&mut login, 1);
+        handle_form(key(KeyCode::Char('i')), &mut login);
+        handle_form(ctrl(KeyCode::Char('g')), &mut login);
+        assert!(matches!(login.mode, InputMode::Form(_)));
+
+        let mut name = editing_state();
+        select_row(&mut name, 0);
+        handle_form(key(KeyCode::Char('i')), &mut name);
+        handle_form(ctrl(KeyCode::Char('g')), &mut name);
+        assert!(matches!(name.mode, InputMode::Form(_)));
+
+        let mut password = editing_state_with_password("old");
+        open_generator(&mut password);
+    }
+
+    #[test]
+    fn generator_generate_writes_commits_and_returns_to_input_form() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        set_generator_length(&mut state, "12");
+        press_generate(&mut state);
+
+        assert!(matches!(state.mode, InputMode::Form(_)));
+        assert_eq!(form_of(&state).focus, FormFocus::Input);
+        let value = password_value(&state);
+        assert_eq!(value.chars().count(), 12);
+        assert!(value.chars().all(|c| c.is_ascii_graphic()));
+        assert!(state.modified);
+        assert_eq!(form_of(&state).history.len(), 2);
+        assert_eq!(state.generator.length.value(), 12);
+
+        // The scratch buffer mirrors the generated value, so leaving the input
+        // level keeps the password instead of restoring the old one.
+        let generated = value.to_string();
+        assert_eq!(
+            form_of(&state).scratch.as_ref().map(|s| s.text.as_str()),
+            Some(generated.as_str())
+        );
+        handle_form(key(KeyCode::Esc), &mut state);
+        assert_eq!(form_of(&state).focus, FormFocus::Nav);
+        assert_eq!(password_value(&state), generated);
+    }
+
+    #[test]
+    fn generated_password_is_undoable() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        press_generate(&mut state);
+        assert_ne!(password_value(&state), "old");
+
+        // Generation leaves the form at the Input level, where `u` is plain
+        // text; leave it first so `u` reaches the Nav-level undo.
+        handle_form(key(KeyCode::Esc), &mut state);
+        handle_form(key(KeyCode::Char('u')), &mut state);
+        assert_eq!(password_value(&state), "old");
+    }
+
+    #[test]
+    fn generator_esc_leaves_the_value_untouched() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        dispatch_key(key(KeyCode::Esc), &mut state);
+
+        assert!(matches!(state.mode, InputMode::Form(_)));
+        assert_eq!(password_value(&state), "old");
+        assert!(!state.modified);
+        assert_eq!(form_of(&state).history.len(), 1);
+    }
+
+    #[test]
+    fn generator_out_of_range_length_shows_an_error_and_does_not_write() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        set_generator_length(&mut state, "999");
+        press_generate(&mut state);
+
+        assert!(matches!(state.mode, InputMode::GeneratePassword(_)));
+        assert!(generator_modal(&state).error.is_some());
+        let value = &generator_modal(&state).form.node(&state.root).extra_fields[0].value;
+        assert_eq!(value, "old");
+        assert!(!state.modified);
+    }
+
+    #[test]
+    fn generator_digits_replace_the_seed_and_edit_at_the_caret() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+
+        // The seeded "10" is replaced by the first digits typed.
+        dispatch_key(key(KeyCode::Char('1')), &mut state);
+        dispatch_key(key(KeyCode::Char('2')), &mut state);
+        assert_eq!(generator_modal(&state).length_input, "12");
+        assert_eq!(generator_modal(&state).length_cursor, 2);
+
+        // The caret can be moved and a digit inserted mid-string.
+        dispatch_key(key(KeyCode::Left), &mut state);
+        assert_eq!(generator_modal(&state).length_cursor, 1);
+        dispatch_key(key(KeyCode::Char('0')), &mut state);
+        assert_eq!(generator_modal(&state).length_input, "102");
+
+        // Home / End move to the edges; Delete removes at the caret.
+        dispatch_key(key(KeyCode::Home), &mut state);
+        assert_eq!(generator_modal(&state).length_cursor, 0);
+        dispatch_key(key(KeyCode::Delete), &mut state);
+        assert_eq!(generator_modal(&state).length_input, "02");
+        dispatch_key(key(KeyCode::End), &mut state);
+        assert_eq!(generator_modal(&state).length_cursor, 2);
+
+        // At most three digits are kept.
+        dispatch_key(key(KeyCode::Char('7')), &mut state);
+        dispatch_key(key(KeyCode::Char('8')), &mut state);
+        assert_eq!(generator_modal(&state).length_input, "027");
+    }
+
+    #[test]
+    fn generator_length_backspace_on_fresh_seed_clears_it() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+
+        dispatch_key(key(KeyCode::Backspace), &mut state);
+        assert_eq!(generator_modal(&state).length_input, "");
+        assert_eq!(generator_modal(&state).length_cursor, 0);
+
+        dispatch_key(key(KeyCode::Char('4')), &mut state);
+        dispatch_key(key(KeyCode::Char('2')), &mut state);
+        assert_eq!(generator_modal(&state).length_input, "42");
+    }
+
+    #[test]
+    fn generator_digits_and_caret_keys_only_edit_the_length_row() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        move_generator_to(&mut state, GENERATOR_ROW_GENERATE);
+
+        for code in [
+            KeyCode::Char('5'),
+            KeyCode::Backspace,
+            KeyCode::Delete,
+            KeyCode::Left,
+            KeyCode::Home,
+        ] {
+            dispatch_key(key(code), &mut state);
+        }
+        assert_eq!(generator_modal(&state).length_input, "10");
+        assert_eq!(generator_modal(&state).length_cursor, 2);
+    }
+
+    #[test]
+    fn generator_enter_on_length_moves_to_symbols_row() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        assert_eq!(generator_modal(&state).selected, GENERATOR_ROW_LENGTH);
+
+        dispatch_key(key(KeyCode::Enter), &mut state);
+        assert_eq!(generator_modal(&state).selected, GENERATOR_ROW_SYMBOLS);
+    }
+
+    #[test]
+    fn generator_symbols_summary_toggles_all() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        move_generator_to(&mut state, GENERATOR_ROW_SYMBOLS);
+
+        dispatch_key(key(KeyCode::Char(' ')), &mut state);
+        assert!(generator_modal(&state).params.symbols.is_empty());
+        dispatch_key(key(KeyCode::Char(' ')), &mut state);
+        assert_eq!(
+            generator_modal(&state).params.symbols,
+            generator::SymbolSet::all()
+        );
+    }
+
+    #[test]
+    fn symbol_checklist_moves_in_a_grid_and_toggles() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        move_generator_to(&mut state, GENERATOR_ROW_SYMBOLS);
+        dispatch_key(key(KeyCode::Enter), &mut state);
+        assert!(matches!(state.mode, InputMode::SymbolChecklist(_)));
+
+        dispatch_key(key(KeyCode::Char(' ')), &mut state);
+        assert!(!generator_modal(&state).params.symbols.contains('!'));
+        dispatch_key(key(KeyCode::Char('l')), &mut state);
+        assert_eq!(generator_modal(&state).selected, 1);
+        dispatch_key(key(KeyCode::Char('j')), &mut state);
+        assert_eq!(generator_modal(&state).selected, 4);
+        dispatch_key(key(KeyCode::Char(' ')), &mut state);
+        assert!(!generator_modal(&state).params.symbols.contains('%'));
+
+        dispatch_key(key(KeyCode::Esc), &mut state);
+        assert!(matches!(state.mode, InputMode::GeneratePassword(_)));
+        assert_eq!(generator_modal(&state).selected, GENERATOR_ROW_SYMBOLS);
+    }
+
+    #[test]
+    fn generator_with_all_symbols_off_generates_alphanumerics() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        move_generator_to(&mut state, GENERATOR_ROW_SYMBOLS);
+        dispatch_key(key(KeyCode::Char(' ')), &mut state);
+        press_generate(&mut state);
+
+        assert!(matches!(state.mode, InputMode::Form(_)));
+        let value = password_value(&state);
+        assert!(value.chars().all(|c| c.is_ascii_alphanumeric()));
+        assert!(value.chars().any(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn generator_settings_are_remembered_for_the_next_open() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        set_generator_length(&mut state, "12");
+        press_generate(&mut state);
+
+        open_generator(&mut state);
+        assert_eq!(generator_modal(&state).length_input, "12");
+    }
+
+    #[test]
+    fn form_hint_selects_the_password_variant_only_while_editing_a_password() {
+        let mut password = editing_state_with_password("old");
+        select_row(&mut password, 1);
+        assert_eq!(
+            form_hint(form_of(&password), &password.root),
+            texts::HINT_FORM_EXTRA
+        );
+        handle_form(key(KeyCode::Char('i')), &mut password);
+        assert_eq!(
+            form_hint(form_of(&password), &password.root),
+            texts::HINT_FORM_PASSWORD_INPUT
+        );
+
+        let mut login = editing_state_with_fields();
+        select_row(&mut login, 1);
+        assert_eq!(
+            form_hint(form_of(&login), &login.root),
+            texts::HINT_FORM_EXTRA
+        );
+        handle_form(key(KeyCode::Char('i')), &mut login);
+        assert_eq!(
+            form_hint(form_of(&login), &login.root),
+            texts::HINT_FORM_INPUT
+        );
+
+        let mut name = editing_state();
+        select_row(&mut name, 0);
+        assert_eq!(form_hint(form_of(&name), &name.root), texts::HINT_FORM);
     }
 }

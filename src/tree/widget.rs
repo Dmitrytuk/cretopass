@@ -8,8 +8,9 @@ use ratatui::{
 };
 use uuid::Uuid;
 
-use super::node::{ExtraField, Node};
+use super::node::{ExtraField, FieldType, Node};
 use crate::file_handling::SaveError;
+use crate::generator::{PasswordLengthError, PasswordParams};
 use crate::theming::{ElementStyle, Icon, Spinner, Status, texts};
 
 /// A single visible row in the flattened tree display.
@@ -53,6 +54,11 @@ pub enum InputMode {
     },
     /// Popup for entering a custom field name.
     CustomFieldName { form: FormState, input: String },
+    /// Password-generator parameter modal opened with `Ctrl+G` from the form's
+    /// input level.
+    GeneratePassword(GeneratorModal),
+    /// Per-symbol checklist overlay opened from the generator modal.
+    SymbolChecklist(GeneratorModal),
     /// Confirmation popup for deleting an extra field.
     ConfirmDeleteField {
         form: FormState,
@@ -317,6 +323,31 @@ impl FormState {
         self.active_text(root).map_or(0, str::len)
     }
 
+    /// The field type of the focused row, when that row is an extra field.
+    pub fn focused_field_type<'a>(&'a self, root: &'a Node) -> Option<&'a FieldType> {
+        let FormRow::Extra(index) = self.current_row(root) else {
+            return None;
+        };
+        self.node(root)
+            .extra_fields
+            .get(index)
+            .map(|field| &field.field_type)
+    }
+
+    /// Writes `value` into the focused extra field.
+    ///
+    /// Returns `false` when the focused row is not an extra field.
+    pub fn set_focused_value(&mut self, root: &mut Node, value: String) -> bool {
+        let FormRow::Extra(index) = self.current_row(root) else {
+            return false;
+        };
+        let Some(field) = self.node_mut(root).extra_fields.get_mut(index) else {
+            return false;
+        };
+        field.value = value;
+        true
+    }
+
     /// Enters the Input level, seeding the scratch buffer from the focused
     /// field. A no-op on the `+ Add Field` row (which has no text).
     pub fn begin_input(&mut self, root: &Node) {
@@ -528,6 +559,30 @@ impl FormState {
     }
 }
 
+/// Transient state of the password-generator modal and its symbol checklist.
+///
+/// Shared by [`InputMode::GeneratePassword`] and [`InputMode::SymbolChecklist`]
+/// so the raw length buffer survives the round trip into the checklist. The
+/// carried [`FormState`] is the same form the modal was opened from.
+#[derive(Debug, Clone)]
+pub struct GeneratorModal {
+    /// The Add/Edit form the generator writes into.
+    pub form: FormState,
+    /// Last valid parameters; updated only when a password is generated.
+    pub params: PasswordParams,
+    /// Raw length digits as typed; may be empty or out of range.
+    pub length_input: String,
+    /// Caret byte-offset inside [`GeneratorModal::length_input`].
+    pub length_cursor: usize,
+    /// `true` until the user edits the length: the first digit (or
+    /// `Backspace`/`Delete`) replaces the seeded value instead of appending.
+    pub length_fresh: bool,
+    /// Why the current `length_input` cannot be used, set by Generate.
+    pub error: Option<PasswordLengthError>,
+    /// Focused row in the modal, or focused symbol index in the checklist.
+    pub selected: usize,
+}
+
 /// Persistence status of the Tree's background autosave.
 ///
 /// Replaces the previous `status` / `save_error` pair, which could disagree. A
@@ -635,6 +690,9 @@ pub struct TreeState {
     pub save_exit: SaveExit,
     /// If `true`, window title shows the full path; otherwise just the filename.
     pub display_full_path: bool,
+    /// Password-generator settings remembered for this app run. Seeded from the
+    /// home state and written back when the tree exits.
+    pub generator: PasswordParams,
 }
 
 impl TreeState {
@@ -659,6 +717,7 @@ impl TreeState {
             spinner: Spinner::default(),
             save_exit: SaveExit::None,
             display_full_path: true,
+            generator: PasswordParams::default(),
         };
         state.update_visible();
         state
