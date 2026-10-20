@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::state::{FileBrowserMode, FileBrowserState, FileFilter, FocusTarget, NewFilePrefix};
 use crate::cursor::cursor_field_spans;
-use crate::theming::{ElementStyle, Icon, render_status_bar, texts};
+use crate::theming::{ElementStyle, Icon, texts};
 
 const DEFAULT_HEIGHT: u16 = 18;
 
@@ -38,19 +38,13 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
 
     let inner = block.inner(overlay_area);
 
-    // Split the inner area: path bar, file list, unified status bar.
-    let layout = Layout::vertical([
-        Constraint::Length(1), // path bar
-        Constraint::Min(1),    // file list
-        Constraint::Length(1), // unified status bar (mode badge + hints)
-    ])
-    .split(inner);
+    // Split the inner area into the path bar and the file list. The status bar
+    // is not drawn here: the parent window (Home) owns it and renders the File
+    // Browser's mode badge and hints through `status_parts`.
+    let layout = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(inner);
 
     render_path_bar(frame, layout[0], state);
     render_file_list(frame, layout[1], state);
-
-    let (mode_str, mode_style, hint) = status_parts(state);
-    render_status_bar(frame, layout[2], mode_str, mode_style.style(), &hint);
 
     // Transient prompts are centered popups stacked over the browser:
     // the active input / delete confirmation first, the error on top.
@@ -75,15 +69,10 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
     } else if state.confirm_delete.is_some() {
         render_delete_popup(frame, overlay_area, state);
     } else if state.focus == FocusTarget::Locations {
-        // The Locations popup is centred on the full frame (it holds a taller
-        // list than the other dialogs). Clamp its bounds above the browser's
-        // status row so the hint it now routes through the status bar stays
-        // visible.
-        let bounds = Rect {
-            height: layout[2].y.saturating_sub(area.y),
-            ..area
-        };
-        render_locations_popup(frame, bounds, state);
+        // Centred on the full frame so the disk list has room. `centered_popup_sized`
+        // keeps the popup off the bottom row, which is where the parent window's
+        // status bar lives, so the hint stays visible.
+        render_locations_popup(frame, area, state);
     }
 
     if state.error.is_some() {
@@ -230,6 +219,9 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBrowserState)
 
 /// Maps the browser's mode and active overlay to the unified status-bar parts:
 /// `(mode label, badge style, context hint)`.
+///
+/// The File Browser does not draw a status bar of its own; the parent window
+/// (Home) calls this to render the browser's badge and hint in its status line.
 ///
 /// Transient overlays (error, delete confirmation, Locations picker, rename /
 /// name input) capture keys, so they own the hint while shown. The list hint is
@@ -558,44 +550,42 @@ mod tests {
     }
 
     #[test]
-    fn test_render_open_file_shows_mode_badge_and_filter_hint() {
+    fn status_parts_open_file_shows_open_badge_and_filter_hint() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
-        let text = render_to_text(&mut state);
-        assert!(
-            text.contains(" OPEN ") || text.contains("[OPEN]"),
-            "status bar should show the OPEN mode badge:\n{text}"
+        let (mode, _, hint) = status_parts(&state);
+        assert_eq!(
+            mode,
+            texts::MODE_OPEN,
+            "the OPEN badge should lead the hint"
         );
         assert!(
-            text.contains("[f]"),
-            "status bar should show filter toggle hint:\n{text}"
+            hint.contains("[f]"),
+            "hint should advertise the filter toggle: {hint}"
         );
     }
 
     #[test]
-    fn test_render_pwd_filter_shows_pwd_badge() {
+    fn status_parts_pwd_filter_shows_pwd_badge() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         state.filter = FileFilter::PwdKeeperOnly;
-        let text = render_to_text(&mut state);
-        assert!(
-            text.contains(" PWD "),
-            "status bar should switch to the PWD badge under the PwdKeeper filter:\n{text}"
-        );
-        assert!(
-            !text.contains(" OPEN "),
-            "the OPEN badge should be replaced, not duplicated:\n{text}"
+        let (mode, _, _) = status_parts(&state);
+        assert_eq!(
+            mode,
+            texts::MODE_PWD,
+            "the PWD badge should replace OPEN under the PwdKeeper filter"
         );
     }
 
     #[test]
-    fn test_render_open_file_shows_search_hint() {
+    fn status_parts_open_file_advertises_search_hint() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
-        let text = render_to_text(&mut state);
+        let (_, _, hint) = status_parts(&state);
         assert!(
-            text.contains("[/]search") || text.contains("Search:"),
-            "options bar should have search hint:\n{text}"
+            hint.contains("[/]search"),
+            "hint should advertise search: {hint}"
         );
     }
 
@@ -611,11 +601,6 @@ mod tests {
             text.contains("Create New Secret File"),
             "title mismatch:\n{text}"
         );
-        // n hint should mention the new file / new folder prefix
-        assert!(
-            text.contains("[n]new"),
-            "should show n hint for new file/folder:\n{text}"
-        );
     }
 
     #[test]
@@ -628,9 +613,18 @@ mod tests {
             text.contains("Name:"),
             "should show Name: input when focused:\n{text}"
         );
+    }
+
+    #[test]
+    fn status_parts_name_input_shows_confirm_and_cancel() {
+        let mut state = new_state(FileBrowserMode::CreateFile);
+        populate_tmp(&mut state);
+        state.focus = FocusTarget::Input;
+        let (mode, _, hint) = status_parts(&state);
+        assert_eq!(mode, texts::MODE_CREATE);
         assert!(
-            text.contains("Enter:confirm"),
-            "should show Enter:confirm hint:\n{text}"
+            hint.contains("Enter:confirm") && hint.contains("Esc:cancel"),
+            "the name input should route confirm/cancel to the status bar: {hint}"
         );
     }
 
@@ -707,15 +701,15 @@ mod tests {
     }
 
     #[test]
-    fn test_render_search_active_shows_query() {
+    fn status_parts_search_active_shows_query() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         state.search_active = true;
         state.search_query = "test".to_string();
-        let text = render_to_text(&mut state);
+        let (_, _, hint) = status_parts(&state);
         assert!(
-            text.contains("Search: test"),
-            "should show search query:\n{text}"
+            hint.contains("Search: test"),
+            "the search prompt should be the hint: {hint}"
         );
     }
 
@@ -752,36 +746,36 @@ mod tests {
     }
 
     #[test]
-    fn test_render_new_hint_shown_in_create_mode() {
+    fn status_parts_create_file_advertises_new_hint() {
         let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
-        let text = render_to_text(&mut state);
+        let (_, _, hint) = status_parts(&state);
         assert!(
-            text.contains("[n]new"),
-            "should show new file/folder hint in CreateFile mode:\n{text}"
+            hint.contains("[n]new"),
+            "CreateFile should advertise the new file/folder hint: {hint}"
         );
     }
 
     #[test]
-    fn test_render_new_hint_hidden_in_open_mode() {
+    fn status_parts_open_file_hides_new_hint() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
-        let text = render_to_text(&mut state);
+        let (_, _, hint) = status_parts(&state);
         assert!(
-            !text.contains("[n]new"),
-            "should NOT show new file/folder hint in OpenFile mode:\n{text}"
+            !hint.contains("[n]new"),
+            "OpenFile must not advertise the new file/folder hint: {hint}"
         );
     }
 
     #[test]
-    fn test_render_n_prefix_prompt_when_pending() {
+    fn status_parts_pending_prefix_shows_new_file_prompt() {
         let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
         state.pending = NewFilePrefix::Pending;
-        let text = render_to_text(&mut state);
+        let (_, _, hint) = status_parts(&state);
         assert!(
-            text.contains("n:new file") && text.contains("N:new folder"),
-            "should show the n-prefix prompt while pending:\n{text}"
+            hint.contains("n:new file") && hint.contains("N:new folder"),
+            "the pending n-prefix prompt should be the hint: {hint}"
         );
     }
 
@@ -840,18 +834,18 @@ mod tests {
     // ── Status bar: disks + hidden hints ──
 
     #[test]
-    fn test_render_status_bar_shows_disks_and_hidden_hints() {
+    fn status_parts_open_file_advertises_disks_and_hidden() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
 
-        let text = render_to_text(&mut state);
+        let (_, _, hint) = status_parts(&state);
         assert!(
-            text.contains("[D]disks"),
-            "should advertise the locations overlay:\n{text}"
+            hint.contains("[D]disks"),
+            "hint should advertise the locations overlay: {hint}"
         );
         assert!(
-            text.contains("[Ctrl+h]hidden"),
-            "should advertise the hidden toggle:\n{text}"
+            hint.contains("[Ctrl+h]hidden"),
+            "hint should advertise the hidden toggle: {hint}"
         );
     }
 
@@ -892,9 +886,12 @@ mod tests {
             text.contains("vfat") && text.contains("[USB]"),
             "overlay should show disk details:\n{text}"
         );
+
+        let (mode, _, hint) = status_parts(&state);
+        assert_eq!(mode, texts::MODE_MENU);
         assert!(
-            text.contains("Enter:open"),
-            "status bar should route the Locations overlay hints:\n{text}"
+            hint.contains("Enter:open"),
+            "the Locations overlay hint should be routed to the status bar: {hint}"
         );
     }
 
@@ -1030,8 +1027,8 @@ mod tests {
 
         let text = render_to_text(&mut state);
 
-        // The 14-row list keeps the 3-row margin: rows 13–15 stay visible
-        // below the cursor (viewport 2..15) while file16 falls outside.
+        // The 15-row list keeps the 3-row margin: rows 13–15 stay visible
+        // below the cursor (viewport 1..15) while file16 falls outside.
         assert!(
             text.contains("file13.txt") && text.contains("file15.txt"),
             "entries below the cursor should remain visible:\n{text}"
@@ -1053,27 +1050,27 @@ mod tests {
         state.current_dir = dir.path().to_path_buf();
         state.entries = file_handling::list_dir(dir.path()).unwrap();
 
-        // The 14-row viewport reaches its bottom margin at row 12, so the
-        // first render scrolls once (viewport 0..13 → 2..15).
+        // The 15-row viewport reaches its bottom margin at row 12, so the
+        // first render scrolls once (viewport 0..14 → 1..15).
         state.selected = 12;
         let _ = render_to_text(&mut state);
-        assert_eq!(state.scroll, 2);
+        assert_eq!(state.scroll, 1);
 
         state.selected = 11;
         let _ = render_to_text(&mut state);
         assert_eq!(
-            state.scroll, 2,
+            state.scroll, 1,
             "cursor should move up inside the viewport before scrolling"
         );
 
-        state.selected = 5;
-        let _ = render_to_text(&mut state);
-        assert_eq!(state.scroll, 2, "cursor should reach the top margin");
-
         state.selected = 4;
         let _ = render_to_text(&mut state);
+        assert_eq!(state.scroll, 1, "cursor should reach the top margin");
+
+        state.selected = 3;
+        let _ = render_to_text(&mut state);
         assert_eq!(
-            state.scroll, 1,
+            state.scroll, 0,
             "viewport should follow only after the margin"
         );
     }
@@ -1109,21 +1106,21 @@ mod tests {
         state.location_selected = 19;
         let _ = render_to_text(&mut state);
         assert_eq!(
-            state.location_scroll, 9,
+            state.location_scroll, 4,
             "cursor should move up inside the overlay before scrolling"
-        );
-
-        state.location_selected = 8;
-        let _ = render_to_text(&mut state);
-        assert_eq!(
-            state.location_scroll, 5,
-            "cursor should reach the overlay top margin"
         );
 
         state.location_selected = 7;
         let _ = render_to_text(&mut state);
         assert_eq!(
             state.location_scroll, 4,
+            "cursor should reach the overlay top margin"
+        );
+
+        state.location_selected = 6;
+        let _ = render_to_text(&mut state);
+        assert_eq!(
+            state.location_scroll, 3,
             "overlay should scroll only after the margin"
         );
     }

@@ -20,7 +20,7 @@ file listing UX to vault-specific modal logic, preventing reuse.
 |------|---------------|
 | `state.rs` | `FileBrowserState`, `FileBrowserMode` (OpenFile/CreateFile/ImportFile), `FileBrowserSession` (last directory + hidden setting), `Location` (Home or mounted disk row), `FocusTarget` (List/Input/Rename/Locations), `NewFilePrefix` (None/Pending), `FileFilter` (All/PwdKeeperOnly), `FileBrowserAction` (Selected/Cancelled/Renamed), viewport offsets (`scroll`, `location_scroll`) |
 | `handler.rs` | `handle_key()` dispatches to list/input/rename/locations handlers. Supports j/k navigation, Enter, search, filter toggle, hidden-entry toggle (`Ctrl+h`), directory traversal, rename, delete, the `n` prefix (new file/folder), text editing |
-| `render.rs` | `render_file_browser()` renders overlay with path bar, file list (icons, selection, scrolling), and the shared status bar ([0014](../../../docs/adr/0014-status-bar-unification.md)) showing the mode badge (`[OPEN]`/`[PWD]`/`[CREATE]`/`[IMPORT]`) plus contextual hints. `status_parts()` is the mode→`(badge, style, hint)` mapping, reused by the Home status bar. Centered popups for the name input / rename input / delete confirmation / error, plus the Locations overlay |
+| `render.rs` | `render_file_browser()` renders the overlay with the path bar and file list (icons, selection, scrolling). It draws no status bar of its own — the owning Home window renders the browser's badge and hints from `status_parts()`, the mode→`(badge, style, hint)` mapping. Centered popups for the name input / rename input / delete confirmation / error, plus the Locations overlay |
 
 ## Contracts
 

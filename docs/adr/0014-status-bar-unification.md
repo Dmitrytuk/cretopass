@@ -10,8 +10,9 @@ and behaves the same everywhere and is cheap to change.
 
 **Decision:** a single `theming::render_status_bar(frame, area, mode_str,
 mode_style, hint)` draws `[MODE] hints`. Each screen maps its own state to that
-tuple; no screen draws status chrome itself. Layouts lose a row: content +
-status, two rows.
+tuple; no screen draws status chrome itself. A modal embedded in a screen (the
+File Browser) draws no status line of its own either: the owning screen renders
+it from the modal's parts. Layouts lose a row: content + status, two rows.
 
 ## Decisions
 
@@ -22,17 +23,18 @@ status, two rows.
 | 3 | **Badge colour = importance to the user, not the window.** Destructive red, Attention yellow, Active Input blue, Generator cyan, Add green, Passive dark gray. | One style means one thing in every screen; `CUT` is red wherever it appears. |
 | 4 | **Reuse `ElementStyle::Mode*`.** Only `ModePendingPaste` (Cyan→Yellow), `ModeDetail` and `ModeHelp` (Magenta→DarkGray) change. | The existing palette already matched the categories except for three modes that were coloured by screen, not by meaning. |
 | 5 | **Drop the Tree context statistics** (`N items`, `/{query}`, the node name). | Accepted loss: the line must be uniform across screens, and the count/query are not worth a dedicated row. |
-| 6 | **File Browser collapses to the same line.** `Hidden: on/off` and `Filter:` are removed; the badge becomes `[PWD]` for the PwdKeeper filter and `[OPEN]` for All. | The filter is an active mode, so it belongs in the badge, not in a text indicator. |
+| 6 | **File Browser collapses to the same line.** `Hidden: on/off` and `Filter:` are removed; the badge becomes `[PWD]` for the PwdKeeper filter and `[OPEN]` for All. The File Browser draws no status bar of its own — the Home window, which owns it, renders its badge and hint from `file_browser::status_parts`. | The filter is an active mode, so it belongs in the badge, not in a text indicator. One status line per screen means the browser must defer to its owner, not duplicate it. |
 | 7 | **`Alert` shows no badge.** `render_status_bar` omits the badge when `mode_str` is empty. | An alert is a transient dismissal prompt, not a mode; a `NORMAL` badge there was misleading. |
 | 8 | **Hints are passive Gray.** All hint text uses `ElementStyle::StatusBarText` (Gray). | One colour for all hints; the badge carries the only accent. |
-| 9 | **Hints live only in the status bar.** Every modal drops its inline hint line; a screen routes the hint for the active modal / overlay through the status bar instead. This includes the Tree save-error and discard-confirm overlays, the File Browser name/rename/delete/error popups and the File Browser `Locations` popup, none of which are `InputMode`/`FileBrowserMode` variants. The `Locations` popup clamps its bottom above the browser's status row so its hint, now drawn by the status bar, stays visible. | The whole point of the unification: one place to read keys. |
+| 9 | **Hints live only in the status bar.** Every modal drops its inline hint line; the owning screen routes the hint for the active modal / overlay through the status bar instead. This includes the Tree save-error and discard-confirm overlays and the File Browser name/rename/delete/error and `Locations` popups, none of which are `InputMode`/`FileBrowserMode` variants. | The whole point of the unification: one place to read keys. |
 
 ## Consequences
 
 - Home's status line becomes dynamic: it reflects the open modal (`MENU`,
   `PASSPHRASE`, `CONFIG`, `DELETE`, `CHANGE PW`, `EXPORT`, …). While the File
-  Browser is open it mirrors the browser's own line, using the same
-  `file_browser::status_parts`, so the two can never disagree.
+  Browser is open, Home renders the browser's badge and hint from the same
+  `file_browser::status_parts`; the browser itself draws no status bar, so the
+  two can never disagree.
 - `theming::texts::STATUS_HOME_LABEL` and the `ElementStyle` variants `HelpBar`,
   `HomeStatusBar`, `FbActiveSearch`, `HomeHelp`, `GrayHint` and `DismissHint` are
   removed; `MODE_MENU`, `MODE_OPEN`, `MODE_PWD`, `MODE_CREATE`, `MODE_IMPORT`,
@@ -41,12 +43,14 @@ status, two rows.
   `FB_HIDDEN_*`, `FB_HINT_LIST` and `FB_DELETE_CONFIRM_SUFFIX` constants are
   removed with their indicators.
 - Modal and popup heights shrank by the removed hint row (one or two rows each).
-- The File Browser `Locations` popup no longer draws its hint inline: it keeps
-  its wide frame-centred width but is clamped vertically so its bottom stays
-  above the browser's status row, and its hint is routed through the status bar
-  like every other overlay.
-- The File Browser list viewport grows by one row (three rows of chrome → two),
-  which shifted its scroll-margin tests.
+- The File Browser draws no status row of its own: its list viewport gains that
+  row, and its badge and hint appear only in the owning Home window's status
+  line. The File Browser `Locations` popup likewise draws no inline hint; it
+  stays frame-centred but `centered_popup_sized` keeps it off the bottom row, so
+  the Home status bar (which carries its `MENU j/k:move Enter:open Esc:close`
+  hint) stays visible.
+- The File Browser list layout went from three rows of chrome to two (path bar +
+  list), which shifted its scroll-margin tests.
 - There is now a single row for hints; on a narrow terminal a long hint (the
   File Browser's `[f] [/]search [D]disks [Ctrl+h]hidden …`) clips instead of
   wrapping to a second line.

@@ -7,8 +7,9 @@ shared status-bar renderer. Depends on nothing else in the project.
 
 **Status bar**:
 The single line of chrome at the bottom of every screen: the active mode as a
-Mode badge followed by Hint text. Exactly one is drawn per screen, including
-under the File Browser.
+Mode badge followed by Hint text. Exactly one is drawn per screen. A modal
+embedded in a screen — the File Browser — draws none of its own; the owning
+screen renders its parts.
 _Avoid_: Footer, help bar, options bar
 
 **Mode badge**:
