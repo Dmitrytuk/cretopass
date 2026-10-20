@@ -8,7 +8,7 @@ use crate::cursor::{
 use crate::file_handling::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree};
 use crate::generator::{self, PasswordLength, PasswordParams};
 use crate::theming::Action;
-use crate::theming::{ElementStyle, Icon, SPINNER_TICK, texts};
+use crate::theming::{ElementStyle, Icon, SPINNER_TICK, render_status_bar, texts};
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{
     AddPosition, FormFocus, FormPending, FormRow, FormState, GeneratorModal, InputMode, SaveExit,
@@ -18,7 +18,6 @@ use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModif
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::{Terminal, backend::Backend};
@@ -1495,16 +1494,12 @@ fn handle_help(key: event::KeyEvent, state: &mut TreeState) {
 fn ui(frame: &mut Frame, state: &mut TreeState) {
     let area = frame.area();
 
-    let layout = Layout::vertical([
-        Constraint::Min(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
+    let layout = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
 
     TreeWidget::render(frame, layout[0], state);
-    render_status_bar(frame, layout[1], state);
-    render_help_bar(frame, layout[2], state);
+
+    let (mode_str, mode_style, hint) = status_bar_parts(state);
+    render_status_bar(frame, layout[1], mode_str, mode_style.style(), hint);
 
     match &state.mode {
         InputMode::Search => render_search_overlay(frame, area, state),
@@ -1557,114 +1552,95 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
     }
 }
 
-fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let (mode_str, mode_style) = match &state.mode {
-        InputMode::Normal => (texts::MODE_NORMAL, ElementStyle::ModeNormal.style()),
-        InputMode::Search => (texts::MODE_SEARCH, ElementStyle::ModeSearch.style()),
+/// Maps the active tree mode to the unified status-bar parts:
+/// `(mode label, badge style, context hint)`.
+fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static str) {
+    match &state.mode {
+        InputMode::Normal => (
+            texts::MODE_NORMAL,
+            ElementStyle::ModeNormal,
+            texts::HINT_TREE,
+        ),
+        InputMode::Search => (
+            texts::MODE_SEARCH,
+            ElementStyle::ModeSearch,
+            texts::HINT_SEARCH,
+        ),
         InputMode::PendingCut => (
             texts::MODE_PENDING_CUT,
-            ElementStyle::ModePendingCut.style(),
+            ElementStyle::ModePendingCut,
+            texts::HINT_PENDING_CUT,
         ),
-        InputMode::PendingPaste => (texts::MODE_PASTE, ElementStyle::ModePendingPaste.style()),
+        InputMode::PendingPaste => (
+            texts::MODE_PASTE,
+            ElementStyle::ModePendingPaste,
+            texts::HINT_PASTE,
+        ),
         InputMode::PendingAdd => (
             texts::MODE_PENDING_ADD,
-            ElementStyle::ModePendingAdd.style(),
+            ElementStyle::ModePendingAdd,
+            texts::HINT_PENDING_ADD,
         ),
-        InputMode::Detail { .. } => (texts::MODE_DETAIL, ElementStyle::ModeDetail.style()),
-        InputMode::Form(form) => match form.pending {
-            FormPending::Cut => (
-                texts::MODE_PENDING_CUT,
-                ElementStyle::ModePendingCut.style(),
-            ),
-            FormPending::Paste => (texts::MODE_PASTE, ElementStyle::ModePendingPaste.style()),
-            FormPending::None if form.is_adding() => {
-                (texts::MODE_ADD, ElementStyle::ModeAdd.style())
-            }
-            FormPending::None => (texts::MODE_EDIT, ElementStyle::ModeEdit.style()),
-        },
-        InputMode::SelectFieldType { .. } => {
-            (texts::MODE_FIELD_TYPE, ElementStyle::ModeFieldType.style())
+        InputMode::Detail { alert, .. } => (
+            texts::MODE_DETAIL,
+            ElementStyle::ModeDetail,
+            if alert.is_some() {
+                texts::HINT_DETAIL_ALERT
+            } else {
+                texts::HINT_DETAIL
+            },
+        ),
+        InputMode::Form(form) => {
+            let (mode_str, mode_style) = match form.pending {
+                FormPending::Cut => (texts::MODE_PENDING_CUT, ElementStyle::ModePendingCut),
+                FormPending::Paste => (texts::MODE_PASTE, ElementStyle::ModePendingPaste),
+                FormPending::None if form.is_adding() => (texts::MODE_ADD, ElementStyle::ModeAdd),
+                FormPending::None => (texts::MODE_EDIT, ElementStyle::ModeEdit),
+            };
+            (mode_str, mode_style, form_hint(form, &state.root))
         }
+        InputMode::SelectFieldType { .. } => (
+            texts::MODE_FIELD_TYPE,
+            ElementStyle::ModeFieldType,
+            texts::HINT_SELECT_FIELD_TYPE,
+        ),
         InputMode::CustomFieldName { .. } => (
             texts::MODE_CUSTOM_NAME,
-            ElementStyle::ModeCustomName.style(),
+            ElementStyle::ModeCustomName,
+            texts::HINT_CUSTOM_FIELD_NAME,
         ),
-        InputMode::GeneratePassword(_) => {
-            (texts::MODE_GENERATOR, ElementStyle::ModeGenerator.style())
-        }
-        InputMode::SymbolChecklist(_) => (texts::MODE_SYMBOLS, ElementStyle::ModeSymbols.style()),
-        InputMode::ConfirmDeleteField { .. } => {
-            (texts::MODE_CONFIRM, ElementStyle::ModeConfirmDelete.style())
-        }
+        InputMode::GeneratePassword(_) => (
+            texts::MODE_GENERATOR,
+            ElementStyle::ModeGenerator,
+            texts::HINT_GENERATOR,
+        ),
+        InputMode::SymbolChecklist(_) => (
+            texts::MODE_SYMBOLS,
+            ElementStyle::ModeSymbols,
+            texts::HINT_SYMBOLS,
+        ),
+        InputMode::ConfirmDeleteField { .. } => (
+            texts::MODE_CONFIRM,
+            ElementStyle::ModeConfirmDelete,
+            texts::HINT_CONFIRM_DELETE,
+        ),
         InputMode::ExportNodeSelect { .. } => (
             texts::MODE_EXPORT_SELECT,
-            ElementStyle::ModeFieldType.style(),
+            ElementStyle::ModeFieldType,
+            texts::HINT_EXPORT_NODE_SELECT,
         ),
         InputMode::ExportNodeFormat { .. } => (
             texts::MODE_EXPORT_FORMAT,
-            ElementStyle::ModeFieldType.style(),
+            ElementStyle::ModeFieldType,
+            texts::HINT_EXPORT_NODE_FORMAT,
         ),
-        InputMode::Alert { .. } => (texts::MODE_NORMAL, ElementStyle::ModeNormal.style()),
-        InputMode::Help => (texts::MODE_HELP, ElementStyle::ModeHelp.style()),
-    };
-
-    let name = state.current_name().unwrap_or_default();
-
-    let text = Text::from(Line::from(vec![
-        Span::styled(
-            format!(" {} ", mode_str),
-            mode_style.add_modifier(Modifier::BOLD),
+        InputMode::Alert { .. } => (
+            texts::MODE_NORMAL,
+            ElementStyle::ModeNormal,
+            texts::HINT_DETAIL_ALERT,
         ),
-        Span::raw(" "),
-        Span::styled(
-            format!(
-                "{} items{} | {}",
-                state.num_visible(),
-                if state.search_active {
-                    format!(" ({} matches)", state.num_matched())
-                } else {
-                    String::new()
-                },
-                if state.search_active {
-                    format!("/{}", state.search_query)
-                } else {
-                    name
-                }
-            ),
-            ElementStyle::StatusBarText.style(),
-        ),
-    ]));
-
-    frame.render_widget(Paragraph::new(text), area);
-}
-
-fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let help = match &state.mode {
-        InputMode::Normal => texts::HINT_TREE,
-        InputMode::Search => texts::HINT_SEARCH,
-        InputMode::PendingCut => texts::HINT_PENDING_CUT,
-        InputMode::PendingPaste => texts::HINT_PASTE,
-        InputMode::PendingAdd => texts::HINT_PENDING_ADD,
-        InputMode::Detail { alert, .. } if alert.is_some() => texts::HINT_DETAIL_ALERT,
-        InputMode::Detail { .. } => texts::HINT_DETAIL,
-        InputMode::Form(form) => form_hint(form, &state.root),
-        InputMode::SelectFieldType { .. } => texts::HINT_SELECT_FIELD_TYPE,
-        InputMode::CustomFieldName { .. } => texts::HINT_CUSTOM_FIELD_NAME,
-        InputMode::GeneratePassword(_) => texts::HINT_GENERATOR,
-        InputMode::SymbolChecklist(_) => texts::HINT_SYMBOLS,
-        InputMode::ConfirmDeleteField { .. } => texts::HINT_CONFIRM_DELETE,
-        InputMode::ExportNodeSelect { .. } => texts::HINT_EXPORT_NODE_SELECT,
-        InputMode::ExportNodeFormat { .. } => texts::HINT_EXPORT_NODE_FORMAT,
-        InputMode::Alert { .. } => texts::HINT_DETAIL_ALERT,
-        InputMode::Help => texts::HINT_HELP,
-    };
-
-    let text = Text::from(Line::from(vec![Span::styled(
-        help,
-        ElementStyle::HelpBar.style(),
-    )]));
-
-    frame.render_widget(Paragraph::new(text), area);
+        InputMode::Help => (texts::MODE_HELP, ElementStyle::ModeHelp, texts::HINT_HELP),
+    }
 }
 
 fn render_search_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {

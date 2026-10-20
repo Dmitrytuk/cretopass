@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::state::{FileBrowserMode, FileBrowserState, FileFilter, FocusTarget, NewFilePrefix};
 use crate::cursor::cursor_field_spans;
-use crate::theming::{ElementStyle, Icon, texts};
+use crate::theming::{ElementStyle, Icon, render_status_bar, texts};
 
 const DEFAULT_HEIGHT: u16 = 18;
 
@@ -38,17 +38,19 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
 
     let inner = block.inner(overlay_area);
 
-    // Split the inner area: path bar, file list, options bar.
+    // Split the inner area: path bar, file list, unified status bar.
     let layout = Layout::vertical([
         Constraint::Length(1), // path bar
         Constraint::Min(1),    // file list
-        Constraint::Length(2), // options bar (filter + search + actions)
+        Constraint::Length(1), // unified status bar (mode badge + hints)
     ])
     .split(inner);
 
     render_path_bar(frame, layout[0], state);
     render_file_list(frame, layout[1], state);
-    render_options_bar(frame, layout[2], state);
+
+    let (mode_str, mode_style, hint) = status_parts(state);
+    render_status_bar(frame, layout[2], mode_str, mode_style.style(), &hint);
 
     // Transient prompts are centered popups stacked over the browser:
     // the active input / delete confirmation first, the error on top.
@@ -218,77 +220,62 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBrowserState)
     }
 }
 
-fn render_options_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
-    let filter_text = match state.filter {
-        FileFilter::All => texts::FB_FILTER_ALL,
-        FileFilter::PwdKeeperOnly => texts::FB_FILTER_PWDKEEPER,
+/// Maps the browser's mode (and filter) to the unified status-bar parts:
+/// `(mode label, badge style, context hint)`.
+///
+/// The hint is dynamic: while searching it becomes the query prompt, while the
+/// `n` prefix is armed it becomes the new-file prompt, otherwise it is the list
+/// of advertised keys.
+pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementStyle, String) {
+    let (mode_str, mode_style) = match state.mode {
+        FileBrowserMode::OpenFile => match state.filter {
+            FileFilter::PwdKeeperOnly => (texts::MODE_PWD, ElementStyle::ModeNormal),
+            FileFilter::All => (texts::MODE_OPEN, ElementStyle::ModeSearch),
+        },
+        FileBrowserMode::CreateFile => (texts::MODE_CREATE, ElementStyle::ModeEdit),
+        FileBrowserMode::ImportFile => (texts::MODE_IMPORT, ElementStyle::ModeSearch),
     };
 
-    let hint_style = ElementStyle::FbHintText.style();
-    let search_style = ElementStyle::FbActiveSearch.style();
-
-    // Row 1: filter / search / hidden indicator.
-    let mut first = vec![
-        Span::styled(format!(" Filter: {} ", filter_text), hint_style),
-        Span::styled(texts::FB_HINT_FILTER, hint_style),
-    ];
-
-    if state.search_active {
-        first.push(Span::styled(
-            format!(" Search: {}█", state.search_query),
-            search_style,
-        ));
+    let hint = if state.search_active {
+        format!("Search: {}█", state.search_query)
+    } else if state.pending == NewFilePrefix::Pending {
+        texts::FB_PROMPT_NEW.to_string()
     } else {
-        first.push(Span::styled(texts::FB_HINT_SEARCH, hint_style));
-    }
+        fb_hint(state)
+    };
 
-    first.push(Span::styled(
-        format!(
-            " {} ",
-            if state.show_hidden {
-                texts::FB_HIDDEN_ON
-            } else {
-                texts::FB_HIDDEN_OFF
-            }
-        ),
-        hint_style,
-    ));
+    (mode_str, mode_style, hint)
+}
 
-    // Row 2: contextual actions, replaced by the n-prefix prompt.
-    let mut second = vec![
-        Span::styled(texts::FB_HINT_DISKS, hint_style),
-        Span::styled(texts::FB_HINT_HIDDEN, hint_style),
+/// Concatenates the key hints advertised by the file list for the current mode
+/// and selection. Constants carry their own padding, so a plain `trim` suffices.
+fn fb_hint(state: &FileBrowserState) -> String {
+    let mut parts = vec![
+        texts::FB_HINT_FILTER,
+        texts::FB_HINT_SEARCH,
+        texts::FB_HINT_DISKS,
+        texts::FB_HINT_HIDDEN,
     ];
 
     if state.mode == FileBrowserMode::CreateFile {
-        second.push(Span::styled(texts::FB_HINT_NEW, hint_style));
+        parts.push(texts::FB_HINT_NEW);
     }
 
-    // Show rename/delete hints when a PWD-marked file is selected
+    // Rename/delete hints only when a PWD-marked (age) file is selected.
     if let Some(entry) = state.entries.get(state.selected)
         && entry.is_age_file
         && !entry.is_dir
         && state.mode != FileBrowserMode::ImportFile
     {
-        second.push(Span::styled(texts::FB_HINT_RENAME, hint_style));
-        second.push(Span::styled(texts::FB_HINT_DELETE, hint_style));
+        parts.push(texts::FB_HINT_RENAME);
+        parts.push(texts::FB_HINT_DELETE);
     }
 
     if state.mode == FileBrowserMode::CreateFile && state.focus == FocusTarget::Input {
-        second.push(Span::styled(texts::FB_HINT_LIST, hint_style));
+        parts.push(texts::FB_HINT_LIST);
     }
 
-    let mut lines = vec![Line::from(first)];
-    if state.pending == NewFilePrefix::Pending {
-        lines.push(Line::from(Span::styled(
-            texts::FB_PROMPT_NEW,
-            ElementStyle::FbActiveSearch.style(),
-        )));
-    } else {
-        lines.push(Line::from(second));
-    }
-
-    frame.render_widget(Paragraph::new(Text::from(lines)), area);
+    parts.concat().trim().to_string()
 }
 
 fn render_locations_popup(frame: &mut Frame, area: Rect, state: &mut FileBrowserState) {
@@ -555,17 +542,33 @@ mod tests {
     }
 
     #[test]
-    fn test_render_open_file_shows_filter_hint() {
+    fn test_render_open_file_shows_mode_badge_and_filter_hint() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         let text = render_to_text(&mut state);
         assert!(
-            text.contains("Filter:"),
-            "options bar should show filter indicator:\n{text}"
+            text.contains(" OPEN ") || text.contains("[OPEN]"),
+            "status bar should show the OPEN mode badge:\n{text}"
         );
         assert!(
             text.contains("[f]"),
-            "options bar should show filter toggle hint:\n{text}"
+            "status bar should show filter toggle hint:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_pwd_filter_shows_pwd_badge() {
+        let mut state = new_state(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        state.filter = FileFilter::PwdKeeperOnly;
+        let text = render_to_text(&mut state);
+        assert!(
+            text.contains(" PWD "),
+            "status bar should switch to the PWD badge under the PwdKeeper filter:\n{text}"
+        );
+        assert!(
+            !text.contains(" OPEN "),
+            "the OPEN badge should be replaced, not duplicated:\n{text}"
         );
     }
 
@@ -818,18 +821,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    // ── Options bar: hidden + disks hints ──
+    // ── Status bar: disks + hidden hints ──
 
     #[test]
-    fn test_render_footer_shows_hidden_state_and_hints() {
+    fn test_render_status_bar_shows_disks_and_hidden_hints() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
 
         let text = render_to_text(&mut state);
-        assert!(
-            text.contains("Hidden: off"),
-            "hidden indicator should start off:\n{text}"
-        );
         assert!(
             text.contains("[D]disks"),
             "should advertise the locations overlay:\n{text}"
@@ -837,13 +836,6 @@ mod tests {
         assert!(
             text.contains("[Ctrl+h]hidden"),
             "should advertise the hidden toggle:\n{text}"
-        );
-
-        state.show_hidden = true;
-        let text = render_to_text(&mut state);
-        assert!(
-            text.contains("Hidden: on"),
-            "hidden indicator should reflect the toggle:\n{text}"
         );
     }
 
@@ -1022,7 +1014,8 @@ mod tests {
 
         let text = render_to_text(&mut state);
 
-        // The 13-row list keeps rows 13–15 visible below the cursor.
+        // The 14-row list keeps the 3-row margin: rows 13–15 stay visible
+        // below the cursor (viewport 2..15) while file16 falls outside.
         assert!(
             text.contains("file13.txt") && text.contains("file15.txt"),
             "entries below the cursor should remain visible:\n{text}"
@@ -1044,25 +1037,27 @@ mod tests {
         state.current_dir = dir.path().to_path_buf();
         state.entries = file_handling::list_dir(dir.path()).unwrap();
 
+        // The 14-row viewport reaches its bottom margin at row 12, so the
+        // first render scrolls once (viewport 0..13 → 2..15).
         state.selected = 12;
         let _ = render_to_text(&mut state);
-        assert_eq!(state.scroll, 3);
+        assert_eq!(state.scroll, 2);
 
         state.selected = 11;
         let _ = render_to_text(&mut state);
         assert_eq!(
-            state.scroll, 3,
+            state.scroll, 2,
             "cursor should move up inside the viewport before scrolling"
         );
 
-        state.selected = 6;
-        let _ = render_to_text(&mut state);
-        assert_eq!(state.scroll, 3, "cursor should reach the top margin");
-
         state.selected = 5;
         let _ = render_to_text(&mut state);
+        assert_eq!(state.scroll, 2, "cursor should reach the top margin");
+
+        state.selected = 4;
+        let _ = render_to_text(&mut state);
         assert_eq!(
-            state.scroll, 2,
+            state.scroll, 1,
             "viewport should follow only after the margin"
         );
     }

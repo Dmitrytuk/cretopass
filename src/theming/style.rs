@@ -24,7 +24,6 @@ pub enum ElementStyle {
     ModeConfirmDelete,
     ModeHelp,
     StatusBarText,
-    HelpBar,
     SearchBlock,
     EditBlock,
     FieldTypeBlock,
@@ -59,11 +58,9 @@ pub enum ElementStyle {
     FbPrefix,
     FbEmptyText,
     FbHintText,
-    FbActiveSearch,
     HomeSelected,
     HomeNormal,
     HomeBlockBorder,
-    HomeStatusBar,
     HomeHelp,
     HomeSectionHeader,
     HomeOverlayBlock,
@@ -101,7 +98,7 @@ impl ElementStyle {
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
             Self::ModePendingPaste => Style::default()
-                .bg(Color::Cyan)
+                .bg(Color::Yellow)
                 .fg(Color::Black)
                 .add_modifier(Modifier::BOLD),
             Self::ModePendingAdd => Style::default()
@@ -109,7 +106,7 @@ impl ElementStyle {
                 .fg(Color::Black)
                 .add_modifier(Modifier::BOLD),
             Self::ModeDetail => Style::default()
-                .bg(Color::Magenta)
+                .bg(Color::DarkGray)
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
             Self::ModeEdit => Style::default()
@@ -141,11 +138,10 @@ impl ElementStyle {
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
             Self::ModeHelp => Style::default()
-                .bg(Color::Magenta)
+                .bg(Color::DarkGray)
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
             Self::StatusBarText => Style::default().fg(Color::Gray),
-            Self::HelpBar => Style::default().fg(Color::DarkGray),
             Self::SearchBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
             Self::EditBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
             Self::FieldTypeBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
@@ -184,14 +180,9 @@ impl ElementStyle {
             Self::FbPrefix => Style::default().fg(Color::White),
             Self::FbEmptyText => Style::default().fg(Color::DarkGray),
             Self::FbHintText => Style::default().fg(Color::DarkGray),
-            Self::FbActiveSearch => Style::default().fg(Color::Yellow),
             Self::HomeSelected => Style::default().bg(Color::DarkGray).fg(Color::White),
             Self::HomeNormal => Style::default().fg(Color::White),
             Self::HomeBlockBorder => Style::default().fg(Color::Cyan),
-            Self::HomeStatusBar => Style::default()
-                .bg(Color::Cyan)
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
             Self::HomeHelp => Style::default().fg(Color::DarkGray),
             Self::HomeSectionHeader => Style::default().fg(Color::DarkGray),
             Self::HomeOverlayBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
