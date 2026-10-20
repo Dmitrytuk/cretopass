@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   row; Home's static ` HOME ` label becomes a mode badge that reflects the open
   modal; the file browser no longer draws a status line of its own — the Home
   window renders its badge and hints (the `Hidden: on/off` and `Filter:`
-  indicators are gone, with the filter shown as the `[PWD]`/`[OPEN]` badge).
+  indicators are gone, with the `[PWD]` filter badge replacing the mode badge in
+  every file-browser mode).
   Badge colours now encode the risk of the active action and mean the same thing
   in every screen.
 - Modal windows no longer repeat their key hints inline: the Tree overlays, the
