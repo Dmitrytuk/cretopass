@@ -25,6 +25,7 @@ status, two rows.
 | 6 | **File Browser collapses to the same line.** `Hidden: on/off` and `Filter:` are removed; the badge becomes `[PWD]` for the PwdKeeper filter and `[OPEN]` for All. | The filter is an active mode, so it belongs in the badge, not in a text indicator. |
 | 7 | **`Alert` shows no badge.** `render_status_bar` omits the badge when `mode_str` is empty. | An alert is a transient dismissal prompt, not a mode; a `NORMAL` badge there was misleading. |
 | 8 | **Hints are passive Gray.** All hint text uses `ElementStyle::StatusBarText` (Gray). | One colour for all hints; the badge carries the only accent. |
+| 9 | **Hints live only in the status bar.** Every modal drops its inline hint line; a screen routes the hint for the active modal / overlay through the status bar instead. This includes the Tree save-error and discard-confirm overlays and the File Browser name/rename/delete/error popups, none of which are `InputMode`/`FileBrowserMode` variants. | The whole point of the unification: one place to read keys. The exception is the File Browser `Locations` popup, which can be tall enough to cover the status bar, so it keeps its own hint and the status bar shows only the badge. |
 
 ## Consequences
 
@@ -33,9 +34,13 @@ status, two rows.
   Browser is open it mirrors the browser's own line, using the same
   `file_browser::status_parts`, so the two can never disagree.
 - `theming::texts::STATUS_HOME_LABEL` and the `ElementStyle` variants `HelpBar`,
-  `HomeStatusBar`, `FbActiveSearch` are removed; `MODE_MENU`, `MODE_OPEN`,
-  `MODE_PWD`, `MODE_CREATE`, `MODE_IMPORT`, `MODE_PASSPHRASE`, `MODE_CONFIG`,
-  `MODE_DELETE`, `MODE_CHANGE_PW`, `MODE_EXPORT` and the export hints are added.
+  `HomeStatusBar`, `FbActiveSearch`, `HomeHelp`, `GrayHint` and `DismissHint` are
+  removed; `MODE_MENU`, `MODE_OPEN`, `MODE_PWD`, `MODE_CREATE`, `MODE_IMPORT`,
+  `MODE_PASSPHRASE`, `MODE_CONFIG`, `MODE_DELETE`, `MODE_CHANGE_PW`,
+  `MODE_EXPORT` and the export hints are added. The `FB_FILTER_*`,
+  `FB_HIDDEN_*`, `FB_HINT_LIST` and `FB_DELETE_CONFIRM_SUFFIX` constants are
+  removed with their indicators.
+- Modal and popup heights shrank by the removed hint row (one or two rows each).
 - The File Browser list viewport grows by one row (three rows of chrome → two),
   which shifted its scroll-margin tests.
 - There is now a single row for hints; on a narrow terminal a long hint (the

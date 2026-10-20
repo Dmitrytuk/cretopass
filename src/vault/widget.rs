@@ -1733,7 +1733,7 @@ fn render_config_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
         _ => 0,
     };
 
-    let overlay_area = make_overlay(area, 10);
+    let overlay_area = make_overlay(area, 9);
     let block = Block::default()
         .title(texts::CONFIG_TITLE)
         .borders(Borders::ALL)
@@ -1776,10 +1776,6 @@ fn render_config_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        texts::HINT_CONFIG,
-        ElementStyle::HomeHelp.style(),
-    )));
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
@@ -1787,7 +1783,7 @@ fn render_config_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
 }
 
 fn render_delete_confirm_modal(frame: &mut Frame, area: Rect, path: &str) {
-    let overlay_area = make_overlay(area, 7);
+    let overlay_area = make_overlay(area, 6);
     let block = Block::default()
         .title(texts::HOME_DELETE_CONFIRM)
         .borders(Borders::ALL)
@@ -1807,10 +1803,6 @@ fn render_delete_confirm_modal(frame: &mut Frame, area: Rect, path: &str) {
             ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            texts::HINT_DELETE_CONFIRM,
-            ElementStyle::HomeHelp.style(),
-        )),
     ];
 
     frame.render_widget(Clear, overlay_area);
@@ -1819,7 +1811,7 @@ fn render_delete_confirm_modal(frame: &mut Frame, area: Rect, path: &str) {
 }
 
 fn render_change_pw_confirm_modal(frame: &mut Frame, area: Rect) {
-    let overlay_area = make_overlay(area, 7);
+    let overlay_area = make_overlay(area, 6);
     let block = Block::default()
         .title(texts::HOME_CHANGE_PASSWORD)
         .borders(Borders::ALL)
@@ -1834,10 +1826,6 @@ fn render_change_pw_confirm_modal(frame: &mut Frame, area: Rect) {
             ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            texts::HINT_CHANGE_PW_CONFIRM,
-            ElementStyle::HomeHelp.style(),
-        )),
     ];
 
     frame.render_widget(Clear, overlay_area);
@@ -1846,7 +1834,7 @@ fn render_change_pw_confirm_modal(frame: &mut Frame, area: Rect) {
 }
 
 fn render_confirm_no_passphrase_modal(frame: &mut Frame, area: Rect) {
-    let overlay_area = make_overlay(area, 7);
+    let overlay_area = make_overlay(area, 6);
     let block = Block::default()
         .title(texts::HOME_NO_PASSPHRASE)
         .borders(Borders::ALL)
@@ -1861,10 +1849,6 @@ fn render_confirm_no_passphrase_modal(frame: &mut Frame, area: Rect) {
             ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            texts::HINT_NO_PASSPHRASE,
-            ElementStyle::HomeHelp.style(),
-        )),
     ];
 
     frame.render_widget(Clear, overlay_area);
@@ -1956,7 +1940,7 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &HomeState
         _ => return,
     };
 
-    let overlay_area = make_overlay(area, if error.is_some() { 13 } else { 12 });
+    let overlay_area = make_overlay(area, if error.is_some() { 12 } else { 11 });
     let block = Block::default()
         .title(texts::HOME_CHANGE_PASSWORD)
         .borders(Borders::ALL)
@@ -1991,10 +1975,6 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &HomeState
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        texts::HINT_CHANGE_PW_INPUT,
-        ElementStyle::HomeHelp.style(),
-    )));
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
@@ -2007,7 +1987,7 @@ fn render_export_select_type_modal(frame: &mut Frame, area: Rect, state: &HomeSt
         _ => 0,
     };
 
-    let overlay_area = make_overlay(area, 10);
+    let overlay_area = make_overlay(area, 9);
     let block = Block::default()
         .title(texts::EXPORT_SELECT_TITLE)
         .borders(Borders::ALL)
@@ -2037,10 +2017,6 @@ fn render_export_select_type_modal(frame: &mut Frame, area: Rect, state: &HomeSt
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        texts::HINT_EXPORT_SELECT,
-        ElementStyle::HomeHelp.style(),
-    )));
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
@@ -2048,7 +2024,7 @@ fn render_export_select_type_modal(frame: &mut Frame, area: Rect, state: &HomeSt
 }
 
 fn render_export_confirm_modal(frame: &mut Frame, area: Rect, export_type: &str) {
-    let overlay_area = make_overlay(area, 7);
+    let overlay_area = make_overlay(area, 6);
     let block = Block::default()
         .title(texts::EXPORT_CONFIRM_TITLE)
         .borders(Borders::ALL)
@@ -2068,10 +2044,6 @@ fn render_export_confirm_modal(frame: &mut Frame, area: Rect, export_type: &str)
             ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            texts::HINT_EXPORT_CONFIRM,
-            ElementStyle::HomeHelp.style(),
-        )),
     ];
 
     frame.render_widget(Clear, overlay_area);
@@ -2101,7 +2073,7 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
             .unwrap_or_else(|| file_path.to_string())
     };
 
-    let overlay_area = make_overlay(area, if error.is_some() { 9 } else { 8 });
+    let overlay_area = make_overlay(area, if error.is_some() { 8 } else { 7 });
 
     let block = Block::default()
         .title(texts::HOME_ENTER_PASSPHRASE)
@@ -2151,10 +2123,6 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        texts::HINT_PASSPHRASE,
-        ElementStyle::HomeHelp.style(),
-    )));
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
@@ -2195,7 +2163,7 @@ fn render_create_secret_file_modal(frame: &mut Frame, area: Rect, state: &HomeSt
             .unwrap_or_else(|| file_path.to_string())
     };
 
-    let overlay_area = make_overlay(area, if error.is_some() { 11 } else { 10 });
+    let overlay_area = make_overlay(area, if error.is_some() { 10 } else { 9 });
     let block = Block::default()
         .title(texts::HOME_CREATE_SECRET)
         .borders(Borders::ALL)
@@ -2234,10 +2202,6 @@ fn render_create_secret_file_modal(frame: &mut Frame, area: Rect, state: &HomeSt
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        texts::HINT_CREATE_SECRET,
-        ElementStyle::HomeHelp.style(),
-    )));
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
@@ -2245,7 +2209,7 @@ fn render_create_secret_file_modal(frame: &mut Frame, area: Rect, state: &HomeSt
 }
 
 fn render_alert_modal(frame: &mut Frame, area: Rect, message: &str) {
-    let overlay_area = make_overlay(area, 6);
+    let overlay_area = make_overlay(area, 5);
     let block = Block::default()
         .title(texts::HOME_ALERT)
         .borders(Borders::ALL)
@@ -2257,10 +2221,6 @@ fn render_alert_modal(frame: &mut Frame, area: Rect, message: &str) {
         Line::from(""),
         Line::from(Span::styled(message, ElementStyle::ConfirmMessage.style())),
         Line::from(""),
-        Line::from(Span::styled(
-            texts::HINT_ALERT,
-            ElementStyle::HomeHelp.style(),
-        )),
     ];
 
     frame.render_widget(Clear, overlay_area);

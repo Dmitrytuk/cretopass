@@ -37,13 +37,11 @@ pub enum ElementStyle {
     HelpText,
     CopiedText,
     ConfirmMessage,
-    DismissHint,
     SearchText,
     /// Inline error inside the password-generator modal.
     GeneratorError,
 
     InvertedCursor,
-    GrayHint,
     StatusLoading,
     StatusSaving,
     StatusSaveFailed,
@@ -61,7 +59,6 @@ pub enum ElementStyle {
     HomeSelected,
     HomeNormal,
     HomeBlockBorder,
-    HomeHelp,
     HomeSectionHeader,
     HomeOverlayBlock,
     HomeDeleteBlock,
@@ -157,12 +154,10 @@ impl ElementStyle {
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
             Self::ConfirmMessage => Style::default().fg(Color::White),
-            Self::DismissHint => Style::default().fg(Color::DarkGray),
             Self::SearchText => Style::default().fg(Color::White),
             Self::GeneratorError => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
 
             Self::InvertedCursor => Style::default().bg(Color::White).fg(Color::Black),
-            Self::GrayHint => Style::default().fg(Color::DarkGray),
             Self::StatusLoading => Style::default().fg(Color::Green),
             Self::StatusSaving => Style::default().fg(Color::Yellow),
             Self::StatusSaveFailed => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
@@ -183,7 +178,6 @@ impl ElementStyle {
             Self::HomeSelected => Style::default().bg(Color::DarkGray).fg(Color::White),
             Self::HomeNormal => Style::default().fg(Color::White),
             Self::HomeBlockBorder => Style::default().fg(Color::Cyan),
-            Self::HomeHelp => Style::default().fg(Color::DarkGray),
             Self::HomeSectionHeader => Style::default().fg(Color::DarkGray),
             Self::HomeOverlayBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
             Self::HomeDeleteBlock => Style::default().bg(Color::Black).fg(Color::Red),

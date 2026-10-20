@@ -220,13 +220,35 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBrowserState)
     }
 }
 
-/// Maps the browser's mode (and filter) to the unified status-bar parts:
+/// Maps the browser's mode and active overlay to the unified status-bar parts:
 /// `(mode label, badge style, context hint)`.
 ///
-/// The hint is dynamic: while searching it becomes the query prompt, while the
-/// `n` prefix is armed it becomes the new-file prompt, otherwise it is the list
-/// of advertised keys.
+/// Transient overlays (error, delete confirmation, Locations picker, rename /
+/// name input) capture keys, so they own the hint while shown. The list hint is
+/// otherwise dynamic: while searching it is the query prompt, while the `n`
+/// prefix is armed it is the new-file prompt, and otherwise it is the set of
+/// advertised keys.
 pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementStyle, String) {
+    // Overlays are drawn on top of the list and route keys themselves.
+    if state.error.is_some() {
+        return ("", ElementStyle::ModeNormal, texts::HINT_ALERT.to_string());
+    }
+    if state.confirm_delete.is_some() {
+        return (
+            texts::MODE_DELETE,
+            ElementStyle::ModeConfirmDelete,
+            texts::FB_HINT_DELETE_CONFIRM.to_string(),
+        );
+    }
+    if state.focus == FocusTarget::Locations {
+        // The Locations popup can be tall enough to cover the status bar, so it
+        // keeps its own hint; the status bar shows the badge alone.
+        return (texts::MODE_MENU, ElementStyle::ModeNormal, String::new());
+    }
+    if state.focus == FocusTarget::Rename {
+        return (texts::MODE_EDIT, ElementStyle::ModeEdit, fb_input_hint());
+    }
+
     let (mode_str, mode_style) = match state.mode {
         FileBrowserMode::OpenFile => match state.filter {
             FileFilter::PwdKeeperOnly => (texts::MODE_PWD, ElementStyle::ModeNormal),
@@ -240,11 +262,18 @@ pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementSt
         format!("Search: {}█", state.search_query)
     } else if state.pending == NewFilePrefix::Pending {
         texts::FB_PROMPT_NEW.to_string()
+    } else if state.focus == FocusTarget::Input {
+        fb_input_hint()
     } else {
         fb_hint(state)
     };
 
     (mode_str, mode_style, hint)
+}
+
+/// The confirm/dismiss hint for the rename and new-file name inputs.
+fn fb_input_hint() -> String {
+    format!("{}  {}", texts::FB_HINT_CONFIRM, texts::FB_HINT_CANCEL)
 }
 
 /// Concatenates the key hints advertised by the file list for the current mode
@@ -269,10 +298,6 @@ fn fb_hint(state: &FileBrowserState) -> String {
     {
         parts.push(texts::FB_HINT_RENAME);
         parts.push(texts::FB_HINT_DELETE);
-    }
-
-    if state.mode == FileBrowserMode::CreateFile && state.focus == FocusTarget::Input {
-        parts.push(texts::FB_HINT_LIST);
     }
 
     parts.concat().trim().to_string()
@@ -369,7 +394,7 @@ fn render_input_popup(
     text: &str,
     cursor: usize,
 ) {
-    let popup_area = centered_popup(area, 5);
+    let popup_area = centered_popup(area, 4);
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
@@ -379,10 +404,6 @@ fn render_input_popup(
     let lines = vec![
         Line::from(""),
         Line::from(cursor_field_spans(label, text, cursor, true)),
-        Line::from(Span::styled(
-            format!("{}  {}", texts::FB_HINT_CONFIRM, texts::FB_HINT_CANCEL),
-            ElementStyle::GrayHint.style(),
-        )),
     ];
 
     frame.render_widget(Clear, popup_area);
@@ -400,7 +421,7 @@ fn render_delete_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) 
         .map(|n| n.to_string_lossy())
         .unwrap_or(std::borrow::Cow::Borrowed(path_str));
 
-    let popup_area = centered_popup(area, 5);
+    let popup_area = centered_popup(area, 4);
     let block = Block::default()
         .title(texts::OVERLAY_CONFIRM_DELETE)
         .borders(Borders::ALL)
@@ -412,10 +433,6 @@ fn render_delete_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) 
         Line::from(Span::styled(
             format!(" Delete {filename}? "),
             ElementStyle::ConfirmMessage.style(),
-        )),
-        Line::from(Span::styled(
-            texts::FB_DELETE_CONFIRM_SUFFIX,
-            ElementStyle::DismissHint.style(),
         )),
     ];
 
@@ -429,7 +446,7 @@ fn render_error_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
         return;
     };
 
-    let popup_area = centered_popup(area, 5);
+    let popup_area = centered_popup(area, 4);
     let block = Block::default()
         .title(texts::HOME_ALERT)
         .borders(Borders::ALL)
@@ -441,10 +458,6 @@ fn render_error_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
         Line::from(Span::styled(
             format!(" {err}"),
             ElementStyle::ConfirmMessage.style(),
-        )),
-        Line::from(Span::styled(
-            texts::HINT_ALERT,
-            ElementStyle::DismissHint.style(),
         )),
     ];
 

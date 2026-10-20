@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the `Hidden: on/off` and `Filter:` indicators are gone, with the filter shown
   as the `[PWD]`/`[OPEN]` badge). Badge colours now encode the risk of the active
   action and mean the same thing in every screen.
+- Modal windows no longer repeat their key hints inline: the Tree overlays, the
+  Home modals, the File Browser name/rename/delete/error popups and the
+  save-error / discard-confirm overlays all defer to the status bar. The File
+  Browser `Locations` popup is the one exception, keeping its hint because it
+  can cover the status bar.
 - The file browser list and `Locations` overlay keep a 3-row margin around the
   cursor (`scrolloff`-style). The cursor moves within that margin before the
   viewport scrolls in either direction, instead of staying pinned to the bottom
