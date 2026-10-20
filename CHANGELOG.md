@@ -13,9 +13,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`D`), toggle hidden dot-entries with `Ctrl+h` (or `Ctrl+Backspace`), and
   remember the last browsed directory and hidden setting for the rest of the
   session.
+- The import file browser advertises the accepted formats (`json`/`csv`/`xml`)
+  at the head of its status-bar hint.
 
 ### Changed
 
+- All screens now draw a single unified status bar (`[MODE] hints`) instead of a
+  separate status line and help line. The Tree drops its `N items`/query context
+  row; Home's static ` HOME ` label becomes a mode badge that reflects the open
+  modal; the file browser no longer draws a status line of its own — the Home
+  window renders its badge and hints (the `Hidden: on/off` and `Filter:`
+  indicators are gone, with the `[PWD]` filter badge replacing the mode badge in
+  every file-browser mode).
+  Badge colours now encode the risk of the active action and mean the same thing
+  in every screen.
+- Modal windows no longer repeat their key hints inline: the Tree overlays, the
+  Home modals, the File Browser name/rename/delete/error and `Locations` popups
+  and the save-error / discard-confirm overlays all defer to the status bar.
+  Because the File Browser draws no status bar, it routes its badge and hint
+  through the owning Home window's status line.
 - The file browser list and `Locations` overlay keep a 3-row margin around the
   cursor (`scrolloff`-style). The cursor moves within that margin before the
   viewport scrolls in either direction, instead of staying pinned to the bottom

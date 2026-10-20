@@ -8,7 +8,7 @@ use crate::cursor::{
 use crate::file_handling::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree};
 use crate::generator::{self, PasswordLength, PasswordParams};
 use crate::theming::Action;
-use crate::theming::{ElementStyle, Icon, SPINNER_TICK, texts};
+use crate::theming::{ElementStyle, Icon, SPINNER_TICK, render_status_bar, texts};
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{
     AddPosition, FormFocus, FormPending, FormRow, FormState, GeneratorModal, InputMode, SaveExit,
@@ -18,7 +18,6 @@ use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModif
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::{Terminal, backend::Backend};
@@ -1495,16 +1494,12 @@ fn handle_help(key: event::KeyEvent, state: &mut TreeState) {
 fn ui(frame: &mut Frame, state: &mut TreeState) {
     let area = frame.area();
 
-    let layout = Layout::vertical([
-        Constraint::Min(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
+    let layout = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
 
     TreeWidget::render(frame, layout[0], state);
-    render_status_bar(frame, layout[1], state);
-    render_help_bar(frame, layout[2], state);
+
+    let (mode_str, mode_style, hint) = status_bar_parts(state);
+    render_status_bar(frame, layout[1], mode_str, mode_style.style(), hint);
 
     match &state.mode {
         InputMode::Search => render_search_overlay(frame, area, state),
@@ -1546,125 +1541,117 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
         SaveExit::ConfirmDiscard => render_discard_confirm_overlay(frame, area),
         _ => {
             if let Some(message) = state.save_state.overlay_message() {
-                render_save_error_overlay(
-                    frame,
-                    area,
-                    &message,
-                    state.save_exit == SaveExit::Blocked,
-                );
+                render_save_error_overlay(frame, area, &message);
             }
         }
     }
 }
 
-fn render_status_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let (mode_str, mode_style) = match &state.mode {
-        InputMode::Normal => (texts::MODE_NORMAL, ElementStyle::ModeNormal.style()),
-        InputMode::Search => (texts::MODE_SEARCH, ElementStyle::ModeSearch.style()),
+/// Maps the active tree mode (or a parked save overlay) to the unified
+/// status-bar parts: `(mode label, badge style, context hint)`.
+///
+/// A parked save overlay takes priority over the mode because it is drawn on
+/// top of it. It carries no badge: it is a transient prompt, not a mode.
+fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static str) {
+    match state.save_exit {
+        SaveExit::ConfirmDiscard => {
+            return ("", ElementStyle::ModeNormal, texts::HINT_DISCARD_CONFIRM);
+        }
+        SaveExit::Blocked => {
+            return ("", ElementStyle::ModeNormal, texts::HINT_SAVE_ERROR_BLOCKED);
+        }
+        SaveExit::None => {}
+    }
+    if state.save_state.overlay_message().is_some() {
+        return ("", ElementStyle::ModeNormal, texts::HINT_DETAIL_ALERT);
+    }
+
+    match &state.mode {
+        InputMode::Normal => (
+            texts::MODE_NORMAL,
+            ElementStyle::ModeNormal,
+            texts::HINT_TREE,
+        ),
+        InputMode::Search => (
+            texts::MODE_SEARCH,
+            ElementStyle::ModeSearch,
+            texts::HINT_SEARCH,
+        ),
         InputMode::PendingCut => (
             texts::MODE_PENDING_CUT,
-            ElementStyle::ModePendingCut.style(),
+            ElementStyle::ModePendingCut,
+            texts::HINT_PENDING_CUT,
         ),
-        InputMode::PendingPaste => (texts::MODE_PASTE, ElementStyle::ModePendingPaste.style()),
+        InputMode::PendingPaste => (
+            texts::MODE_PASTE,
+            ElementStyle::ModePendingPaste,
+            texts::HINT_PASTE,
+        ),
         InputMode::PendingAdd => (
             texts::MODE_PENDING_ADD,
-            ElementStyle::ModePendingAdd.style(),
+            ElementStyle::ModePendingAdd,
+            texts::HINT_PENDING_ADD,
         ),
-        InputMode::Detail { .. } => (texts::MODE_DETAIL, ElementStyle::ModeDetail.style()),
-        InputMode::Form(form) => match form.pending {
-            FormPending::Cut => (
-                texts::MODE_PENDING_CUT,
-                ElementStyle::ModePendingCut.style(),
-            ),
-            FormPending::Paste => (texts::MODE_PASTE, ElementStyle::ModePendingPaste.style()),
-            FormPending::None if form.is_adding() => {
-                (texts::MODE_ADD, ElementStyle::ModeAdd.style())
-            }
-            FormPending::None => (texts::MODE_EDIT, ElementStyle::ModeEdit.style()),
-        },
-        InputMode::SelectFieldType { .. } => {
-            (texts::MODE_FIELD_TYPE, ElementStyle::ModeFieldType.style())
+        InputMode::Detail { alert, .. } => (
+            texts::MODE_DETAIL,
+            ElementStyle::ModeDetail,
+            if alert.is_some() {
+                texts::HINT_DETAIL_ALERT
+            } else {
+                texts::HINT_DETAIL
+            },
+        ),
+        InputMode::Form(form) => {
+            let (mode_str, mode_style) = match form.pending {
+                FormPending::Cut => (texts::MODE_PENDING_CUT, ElementStyle::ModePendingCut),
+                FormPending::Paste => (texts::MODE_PASTE, ElementStyle::ModePendingPaste),
+                FormPending::None if form.is_adding() => (texts::MODE_ADD, ElementStyle::ModeAdd),
+                FormPending::None => (texts::MODE_EDIT, ElementStyle::ModeEdit),
+            };
+            (mode_str, mode_style, form_hint(form, &state.root))
         }
+        InputMode::SelectFieldType { .. } => (
+            texts::MODE_FIELD_TYPE,
+            ElementStyle::ModeFieldType,
+            texts::HINT_SELECT_FIELD_TYPE,
+        ),
         InputMode::CustomFieldName { .. } => (
             texts::MODE_CUSTOM_NAME,
-            ElementStyle::ModeCustomName.style(),
+            ElementStyle::ModeCustomName,
+            texts::HINT_CUSTOM_FIELD_NAME,
         ),
-        InputMode::GeneratePassword(_) => {
-            (texts::MODE_GENERATOR, ElementStyle::ModeGenerator.style())
-        }
-        InputMode::SymbolChecklist(_) => (texts::MODE_SYMBOLS, ElementStyle::ModeSymbols.style()),
-        InputMode::ConfirmDeleteField { .. } => {
-            (texts::MODE_CONFIRM, ElementStyle::ModeConfirmDelete.style())
-        }
+        InputMode::GeneratePassword(_) => (
+            texts::MODE_GENERATOR,
+            ElementStyle::ModeGenerator,
+            texts::HINT_GENERATOR,
+        ),
+        InputMode::SymbolChecklist(_) => (
+            texts::MODE_SYMBOLS,
+            ElementStyle::ModeSymbols,
+            texts::HINT_SYMBOLS,
+        ),
+        InputMode::ConfirmDeleteField { .. } => (
+            texts::MODE_CONFIRM,
+            ElementStyle::ModeConfirmDelete,
+            texts::HINT_CONFIRM_DELETE,
+        ),
         InputMode::ExportNodeSelect { .. } => (
             texts::MODE_EXPORT_SELECT,
-            ElementStyle::ModeFieldType.style(),
+            ElementStyle::ModeFieldType,
+            texts::HINT_EXPORT_NODE_SELECT,
         ),
         InputMode::ExportNodeFormat { .. } => (
             texts::MODE_EXPORT_FORMAT,
-            ElementStyle::ModeFieldType.style(),
+            ElementStyle::ModeFieldType,
+            texts::HINT_EXPORT_NODE_FORMAT,
         ),
-        InputMode::Alert { .. } => (texts::MODE_NORMAL, ElementStyle::ModeNormal.style()),
-        InputMode::Help => (texts::MODE_HELP, ElementStyle::ModeHelp.style()),
-    };
-
-    let name = state.current_name().unwrap_or_default();
-
-    let text = Text::from(Line::from(vec![
-        Span::styled(
-            format!(" {} ", mode_str),
-            mode_style.add_modifier(Modifier::BOLD),
+        InputMode::Alert { .. } => (
+            texts::MODE_NORMAL,
+            ElementStyle::ModeNormal,
+            texts::HINT_DETAIL_ALERT,
         ),
-        Span::raw(" "),
-        Span::styled(
-            format!(
-                "{} items{} | {}",
-                state.num_visible(),
-                if state.search_active {
-                    format!(" ({} matches)", state.num_matched())
-                } else {
-                    String::new()
-                },
-                if state.search_active {
-                    format!("/{}", state.search_query)
-                } else {
-                    name
-                }
-            ),
-            ElementStyle::StatusBarText.style(),
-        ),
-    ]));
-
-    frame.render_widget(Paragraph::new(text), area);
-}
-
-fn render_help_bar(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let help = match &state.mode {
-        InputMode::Normal => texts::HINT_TREE,
-        InputMode::Search => texts::HINT_SEARCH,
-        InputMode::PendingCut => texts::HINT_PENDING_CUT,
-        InputMode::PendingPaste => texts::HINT_PASTE,
-        InputMode::PendingAdd => texts::HINT_PENDING_ADD,
-        InputMode::Detail { alert, .. } if alert.is_some() => texts::HINT_DETAIL_ALERT,
-        InputMode::Detail { .. } => texts::HINT_DETAIL,
-        InputMode::Form(form) => form_hint(form, &state.root),
-        InputMode::SelectFieldType { .. } => texts::HINT_SELECT_FIELD_TYPE,
-        InputMode::CustomFieldName { .. } => texts::HINT_CUSTOM_FIELD_NAME,
-        InputMode::GeneratePassword(_) => texts::HINT_GENERATOR,
-        InputMode::SymbolChecklist(_) => texts::HINT_SYMBOLS,
-        InputMode::ConfirmDeleteField { .. } => texts::HINT_CONFIRM_DELETE,
-        InputMode::ExportNodeSelect { .. } => texts::HINT_EXPORT_NODE_SELECT,
-        InputMode::ExportNodeFormat { .. } => texts::HINT_EXPORT_NODE_FORMAT,
-        InputMode::Alert { .. } => texts::HINT_DETAIL_ALERT,
-        InputMode::Help => texts::HINT_HELP,
-    };
-
-    let text = Text::from(Line::from(vec![Span::styled(
-        help,
-        ElementStyle::HelpBar.style(),
-    )]));
-
-    frame.render_widget(Paragraph::new(text), area);
+        InputMode::Help => (texts::MODE_HELP, ElementStyle::ModeHelp, texts::HINT_HELP),
+    }
 }
 
 fn render_search_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
@@ -1693,7 +1680,7 @@ fn render_search_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
 
 fn render_help_overlay(frame: &mut Frame, area: Rect) {
     let n_bindings = texts::TREE_HELP_KEY_BINDINGS.len() as u16;
-    let overlay_height = (n_bindings + 4).min(area.height.saturating_sub(2));
+    let overlay_height = (n_bindings + 3).min(area.height.saturating_sub(2));
     let overlay_area = Rect {
         x: area.width / 6,
         y: area.height.saturating_sub(overlay_height) / 2,
@@ -1715,10 +1702,6 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
         )));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        texts::HINT_HELP,
-        ElementStyle::DismissHint.style(),
-    )));
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
@@ -1735,7 +1718,7 @@ fn render_export_node_select_overlay(frame: &mut Frame, area: Rect, state: &Tree
         x: area.width / 4,
         y: area.height / 2 - 3,
         width: area.width / 2,
-        height: 7,
+        height: 6,
     };
 
     let block = Block::default()
@@ -1751,10 +1734,6 @@ fn render_export_node_select_overlay(frame: &mut Frame, area: Rect, state: &Tree
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        texts::HINT_EXPORT_NODE_SELECT,
-        ElementStyle::GrayHint.style(),
-    )));
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
@@ -1773,7 +1752,7 @@ fn render_export_node_format_overlay(frame: &mut Frame, area: Rect, state: &Tree
         x: area.width / 4,
         y: area.height / 2 - 3,
         width: area.width / 2,
-        height: 8,
+        height: 7,
     };
 
     let block = Block::default()
@@ -1789,10 +1768,6 @@ fn render_export_node_format_overlay(frame: &mut Frame, area: Rect, state: &Tree
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        texts::HINT_EXPORT_NODE_FORMAT,
-        ElementStyle::GrayHint.style(),
-    )));
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
@@ -1804,7 +1779,7 @@ fn render_alert_overlay(frame: &mut Frame, area: Rect, message: &str) {
         x: area.width / 6,
         y: area.height / 2 - 2,
         width: area.width * 2 / 3,
-        height: 5,
+        height: 4,
     };
 
     let block = Block::default()
@@ -1818,10 +1793,6 @@ fn render_alert_overlay(frame: &mut Frame, area: Rect, message: &str) {
             ElementStyle::CopiedText.style(),
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            texts::HINT_DETAIL_ALERT,
-            ElementStyle::DismissHint.style(),
-        )),
     ];
 
     let inner = block.inner(overlay_area);
@@ -1832,9 +1803,9 @@ fn render_alert_overlay(frame: &mut Frame, area: Rect, message: &str) {
 
 /// Renders the save-error overlay.
 ///
-/// `blocked` selects the hint: an exit flush that failed offers retry /
-/// quit-without-saving actions; a background failure is dismissed by any key.
-fn render_save_error_overlay(frame: &mut Frame, area: Rect, message: &str, blocked: bool) {
+/// The retry / quit-without-saving hint and the dismiss hint live in the
+/// status bar (see [`status_bar_parts`]); the overlay carries only the message.
+fn render_save_error_overlay(frame: &mut Frame, area: Rect, message: &str) {
     let width = (area.width.saturating_mul(2) / 3).max(1);
     let inner_width = width.saturating_sub(2).max(1) as usize;
     // Approximate display width: non-ASCII characters are counted as two
@@ -1845,7 +1816,7 @@ fn render_save_error_overlay(frame: &mut Frame, area: Rect, message: &str, block
         .sum::<usize>()
         .saturating_add(1);
     let message_rows = display_width.div_ceil(inner_width).max(1) as u16;
-    let height = message_rows.saturating_add(4).min(area.height).max(1);
+    let height = message_rows.saturating_add(3).min(area.height).max(1);
 
     let overlay_area = Rect {
         x: area.width.saturating_sub(width) / 2,
@@ -1859,19 +1830,12 @@ fn render_save_error_overlay(frame: &mut Frame, area: Rect, message: &str, block
         .borders(Borders::ALL)
         .style(ElementStyle::ConfirmDeleteBlock.style());
 
-    let hint = if blocked {
-        texts::HINT_SAVE_ERROR_BLOCKED
-    } else {
-        texts::HINT_DETAIL_ALERT
-    };
-
     let lines = vec![
         Line::from(Span::styled(
             format!(" {}", message),
             ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),
-        Line::from(Span::styled(hint, ElementStyle::DismissHint.style())),
     ];
 
     let inner = block.inner(overlay_area);
@@ -1884,12 +1848,14 @@ fn render_save_error_overlay(frame: &mut Frame, area: Rect, message: &str, block
 }
 
 /// Renders the "quit without saving?" confirmation overlay.
+///
+/// The confirm/dismiss hint lives in the status bar (see [`status_bar_parts`]).
 fn render_discard_confirm_overlay(frame: &mut Frame, area: Rect) {
     let overlay_area = Rect {
         x: area.width / 6,
         y: area.height / 2 - 2,
         width: area.width * 2 / 3,
-        height: 5,
+        height: 4,
     };
 
     let block = Block::default()
@@ -1903,10 +1869,6 @@ fn render_discard_confirm_overlay(frame: &mut Frame, area: Rect) {
             ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            texts::HINT_DISCARD_CONFIRM,
-            ElementStyle::DismissHint.style(),
-        )),
     ];
 
     let inner = block.inner(overlay_area);
@@ -2002,7 +1964,7 @@ fn render_edit_overlay(frame: &mut Frame, area: Rect, form: &FormState, root: &N
     let current = form.selected_row.min(rows.len() - 1);
     let is_editing = form.focus == FormFocus::Input;
 
-    let overlay_area = make_overlay_area(area, node.extra_fields.len(), 5);
+    let overlay_area = make_overlay_area(area, node.extra_fields.len(), 4);
 
     let block = Block::default()
         .title(format!(" {} ", title))
@@ -2053,10 +2015,6 @@ fn render_edit_overlay(frame: &mut Frame, area: Rect, form: &FormState, root: &N
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        form_hint(form, root),
-        ElementStyle::GrayHint.style(),
-    )));
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
@@ -2095,7 +2053,7 @@ fn render_select_field_type_overlay(frame: &mut Frame, area: Rect, state: &TreeS
         x: area.width / 4,
         y: area.height / 2 - 4,
         width: area.width / 2,
-        height: 9,
+        height: 8,
     };
 
     let block = Block::default()
@@ -2112,10 +2070,6 @@ fn render_select_field_type_overlay(frame: &mut Frame, area: Rect, state: &TreeS
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        texts::HINT_SELECT_FIELD_TYPE,
-        ElementStyle::GrayHint.style(),
-    )));
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
@@ -2132,7 +2086,7 @@ fn render_custom_field_name_overlay(frame: &mut Frame, area: Rect, state: &TreeS
         x: area.width / 4,
         y: area.height / 2 - 2,
         width: area.width / 2,
-        height: 5,
+        height: 4,
     };
 
     let block = Block::default()
@@ -2149,10 +2103,6 @@ fn render_custom_field_name_overlay(frame: &mut Frame, area: Rect, state: &TreeS
             true,
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            texts::HINT_CUSTOM_FIELD_NAME,
-            ElementStyle::GrayHint.style(),
-        )),
     ];
 
     frame.render_widget(Clear, overlay_area);
@@ -2284,7 +2234,7 @@ fn render_confirm_delete_overlay(frame: &mut Frame, area: Rect, state: &TreeStat
         x: area.width / 4,
         y: area.height / 2 - 2,
         width: area.width / 2,
-        height: 5,
+        height: 4,
     };
 
     let block = Block::default()
@@ -2304,10 +2254,6 @@ fn render_confirm_delete_overlay(frame: &mut Frame, area: Rect, state: &TreeStat
             ElementStyle::ConfirmMessage.style(),
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            texts::HINT_CONFIRM_DELETE,
-            ElementStyle::DismissHint.style(),
-        )),
     ];
 
     frame.render_widget(Clear, overlay_area);
@@ -2320,7 +2266,7 @@ fn render_copy_alert_overlay(frame: &mut Frame, area: Rect) {
         x: area.width / 3,
         y: area.height / 2 - 2,
         width: area.width / 3,
-        height: 5,
+        height: 4,
     };
 
     let block = Block::default()
@@ -2334,11 +2280,6 @@ fn render_copy_alert_overlay(frame: &mut Frame, area: Rect) {
         Line::from(Span::styled(
             texts::COPY_CHECK,
             ElementStyle::CopiedText.style(),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            texts::HINT_DETAIL_ALERT,
-            ElementStyle::DismissHint.style(),
         )),
     ];
 
@@ -2358,7 +2299,7 @@ fn render_detail_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
         _ => 0,
     };
 
-    let overlay_area = make_overlay_area(area, node.extra_fields.len(), 4);
+    let overlay_area = make_overlay_area(area, node.extra_fields.len(), 3);
 
     let block = Block::default()
         .title(format!(" {} ", node.name))
@@ -2378,10 +2319,6 @@ fn render_detail_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        texts::HINT_DETAIL,
-        ElementStyle::DismissHint.style(),
-    )));
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
