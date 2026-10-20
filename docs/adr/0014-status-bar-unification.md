@@ -25,7 +25,7 @@ status, two rows.
 | 6 | **File Browser collapses to the same line.** `Hidden: on/off` and `Filter:` are removed; the badge becomes `[PWD]` for the PwdKeeper filter and `[OPEN]` for All. | The filter is an active mode, so it belongs in the badge, not in a text indicator. |
 | 7 | **`Alert` shows no badge.** `render_status_bar` omits the badge when `mode_str` is empty. | An alert is a transient dismissal prompt, not a mode; a `NORMAL` badge there was misleading. |
 | 8 | **Hints are passive Gray.** All hint text uses `ElementStyle::StatusBarText` (Gray). | One colour for all hints; the badge carries the only accent. |
-| 9 | **Hints live only in the status bar.** Every modal drops its inline hint line; a screen routes the hint for the active modal / overlay through the status bar instead. This includes the Tree save-error and discard-confirm overlays and the File Browser name/rename/delete/error popups, none of which are `InputMode`/`FileBrowserMode` variants. | The whole point of the unification: one place to read keys. The exception is the File Browser `Locations` popup, which can be tall enough to cover the status bar, so it keeps its own hint and the status bar shows only the badge. |
+| 9 | **Hints live only in the status bar.** Every modal drops its inline hint line; a screen routes the hint for the active modal / overlay through the status bar instead. This includes the Tree save-error and discard-confirm overlays, the File Browser name/rename/delete/error popups and the File Browser `Locations` popup, none of which are `InputMode`/`FileBrowserMode` variants. The `Locations` popup clamps its bottom above the browser's status row so its hint, now drawn by the status bar, stays visible. | The whole point of the unification: one place to read keys. |
 
 ## Consequences
 
@@ -41,6 +41,10 @@ status, two rows.
   `FB_HIDDEN_*`, `FB_HINT_LIST` and `FB_DELETE_CONFIRM_SUFFIX` constants are
   removed with their indicators.
 - Modal and popup heights shrank by the removed hint row (one or two rows each).
+- The File Browser `Locations` popup no longer draws its hint inline: it keeps
+  its wide frame-centred width but is clamped vertically so its bottom stays
+  above the browser's status row, and its hint is routed through the status bar
+  like every other overlay.
 - The File Browser list viewport grows by one row (three rows of chrome → two),
   which shifted its scroll-margin tests.
 - There is now a single row for hints; on a narrow terminal a long hint (the

@@ -75,7 +75,15 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
     } else if state.confirm_delete.is_some() {
         render_delete_popup(frame, overlay_area, state);
     } else if state.focus == FocusTarget::Locations {
-        render_locations_popup(frame, area, state);
+        // The Locations popup is centred on the full frame (it holds a taller
+        // list than the other dialogs). Clamp its bounds above the browser's
+        // status row so the hint it now routes through the status bar stays
+        // visible.
+        let bounds = Rect {
+            height: layout[2].y.saturating_sub(area.y),
+            ..area
+        };
+        render_locations_popup(frame, bounds, state);
     }
 
     if state.error.is_some() {
@@ -241,9 +249,11 @@ pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementSt
         );
     }
     if state.focus == FocusTarget::Locations {
-        // The Locations popup can be tall enough to cover the status bar, so it
-        // keeps its own hint; the status bar shows the badge alone.
-        return (texts::MODE_MENU, ElementStyle::ModeNormal, String::new());
+        return (
+            texts::MODE_MENU,
+            ElementStyle::ModeNormal,
+            texts::FB_HINT_LOCATIONS.to_string(),
+        );
     }
     if state.focus == FocusTarget::Rename {
         return (texts::MODE_EDIT, ElementStyle::ModeEdit, fb_input_hint());
@@ -305,7 +315,7 @@ fn fb_hint(state: &FileBrowserState) -> String {
 
 fn render_locations_popup(frame: &mut Frame, area: Rect, state: &mut FileBrowserState) {
     let row_count = state.locations.len().max(1) as u16;
-    let height = row_count.saturating_add(3); // borders + rows + hint
+    let height = row_count.saturating_add(2); // borders + rows
     let popup_area = centered_popup_sized(area, height, 3, 4, 40);
 
     let block = Block::default()
@@ -314,8 +324,7 @@ fn render_locations_popup(frame: &mut Frame, area: Rect, state: &mut FileBrowser
         .style(ElementStyle::FieldTypeBlock.style());
 
     let inner = block.inner(popup_area);
-    let layout = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
-    let list_height = layout[0].height as usize;
+    let list_height = inner.height as usize;
 
     update_scroll(
         &mut state.location_scroll,
@@ -375,15 +384,9 @@ fn render_locations_popup(frame: &mut Frame, area: Rect, state: &mut FileBrowser
         )));
     }
 
-    let hint = Line::from(Span::styled(
-        texts::FB_HINT_LOCATIONS,
-        ElementStyle::FbHintText.style(),
-    ));
-
     frame.render_widget(Clear, popup_area);
     frame.render_widget(block, popup_area);
-    frame.render_widget(Paragraph::new(Text::from(rows)), layout[0]);
-    frame.render_widget(Paragraph::new(hint), layout[1]);
+    frame.render_widget(Paragraph::new(Text::from(rows)), inner);
 }
 
 fn render_input_popup(
@@ -891,7 +894,7 @@ mod tests {
         );
         assert!(
             text.contains("Enter:open"),
-            "overlay should show its key hints:\n{text}"
+            "status bar should route the Locations overlay hints:\n{text}"
         );
     }
 
@@ -1106,7 +1109,7 @@ mod tests {
         state.location_selected = 19;
         let _ = render_to_text(&mut state);
         assert_eq!(
-            state.location_scroll, 5,
+            state.location_scroll, 9,
             "cursor should move up inside the overlay before scrolling"
         );
 
