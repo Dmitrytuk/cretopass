@@ -204,6 +204,7 @@ pub const CUSTOM_FIELD_DEFAULT: &str = "Custom";
 pub const FIELD_LOGIN: &str = "Login";
 pub const FIELD_PASSWORD: &str = "Password";
 pub const FB_HINT_FILTER: &str = " [f] ";
+pub const FB_HINT_IMPORT_TYPES: &str = " [json/csv/xml] ";
 pub const FB_HINT_SEARCH: &str = " [/]search ";
 pub const FB_HINT_NEW: &str = " [n]new ";
 pub const FB_HINT_RENAME: &str = " [r]rename ";

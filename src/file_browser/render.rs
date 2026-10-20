@@ -290,12 +290,19 @@ fn fb_input_hint() -> String {
 /// Concatenates the key hints advertised by the file list for the current mode
 /// and selection. Constants carry their own padding, so a plain `trim` suffices.
 fn fb_hint(state: &FileBrowserState) -> String {
-    let mut parts = vec![
+    let mut parts = Vec::new();
+
+    // Import only accepts the exported formats; advertise them before the keys.
+    if state.mode == FileBrowserMode::ImportFile {
+        parts.push(texts::FB_HINT_IMPORT_TYPES);
+    }
+
+    parts.extend([
         texts::FB_HINT_FILTER,
         texts::FB_HINT_SEARCH,
         texts::FB_HINT_DISKS,
         texts::FB_HINT_HIDDEN,
-    ];
+    ]);
 
     if state.mode == FileBrowserMode::CreateFile {
         parts.push(texts::FB_HINT_NEW);
@@ -602,6 +609,18 @@ mod tests {
         let mut import = new_state(FileBrowserMode::ImportFile);
         populate_tmp(&mut import);
         assert_eq!(status_parts(&import).0, texts::MODE_IMPORT);
+    }
+
+    #[test]
+    fn status_parts_import_file_leads_with_supported_types() {
+        let mut state = new_state(FileBrowserMode::ImportFile);
+        populate_tmp(&mut state);
+        let (mode, _, hint) = status_parts(&state);
+        assert_eq!(mode, texts::MODE_IMPORT);
+        assert!(
+            hint.starts_with("[json/csv/xml]"),
+            "the supported-format hint should lead the ImportFile hint: {hint}"
+        );
     }
 
     #[test]

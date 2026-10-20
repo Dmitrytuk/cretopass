@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`D`), toggle hidden dot-entries with `Ctrl+h` (or `Ctrl+Backspace`), and
   remember the last browsed directory and hidden setting for the rest of the
   session.
+- The import file browser advertises the accepted formats (`json`/`csv`/`xml`)
+  at the head of its status-bar hint.
 
 ### Changed
 
