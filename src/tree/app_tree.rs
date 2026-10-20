@@ -617,6 +617,10 @@ fn commit_form_change(state: &mut TreeState, form: &mut FormState) {
         }
     } else {
         form.push_history(&state.root);
+        // A commit can rename the node, but the flat visible list caches names.
+        // Rebuild it so the tree shows the new name. (The Add path above already
+        // refreshes visibility via `insert_node_at_position`.)
+        state.update_visible();
     }
     state.modified = true;
 }
@@ -809,11 +813,15 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
         Action::Undo => {
             if form.undo(&mut state.root) {
                 state.modified = true;
+                // Undo can restore a different name; refresh the visible list.
+                state.update_visible();
             }
         }
         Action::Redo => {
             if form.redo(&mut state.root) {
                 state.modified = true;
+                // Redo can restore a different name; refresh the visible list.
+                state.update_visible();
             }
         }
         // Delete on a Name row or the add button has no meaning in Nav.
@@ -2567,6 +2575,41 @@ mod tests {
         assert_eq!(form_node(&state).name, "Root!");
         assert_eq!(form_of(&state).focus, FormFocus::Nav);
         assert!(state.modified);
+    }
+
+    #[test]
+    fn renaming_a_leaf_updates_the_visible_tree() {
+        let leaf = Node::new("Old");
+        let leaf_id = leaf.id;
+        let root = Node::with_children("Root", vec![leaf]);
+        let mut state = TreeState::new(root);
+        state.expanded.insert(state.root.id);
+        state.update_visible();
+        assert_eq!(state.visible.len(), 2);
+
+        state.select_by_id(leaf_id);
+        let node = state.current_node_ref().expect("leaf exists").clone();
+        state.mode = InputMode::Form(FormState::new_edit(&node));
+
+        handle_form(key(KeyCode::Char('i')), &mut state);
+        type_text(&mut state, "!");
+        handle_form(key(KeyCode::Enter), &mut state);
+
+        let visible_leaf = state
+            .visible
+            .iter()
+            .find(|v| v.id == leaf_id)
+            .expect("leaf stays visible");
+        assert_eq!(visible_leaf.name, "Old!");
+
+        // Undo and redo must also refresh the cached name.
+        handle_form(key(KeyCode::Char('u')), &mut state);
+        let visible_leaf = state.visible.iter().find(|v| v.id == leaf_id).unwrap();
+        assert_eq!(visible_leaf.name, "Old");
+
+        handle_form(key(KeyCode::Char('r')), &mut state);
+        let visible_leaf = state.visible.iter().find(|v| v.id == leaf_id).unwrap();
+        assert_eq!(visible_leaf.name, "Old!");
     }
 
     #[test]
