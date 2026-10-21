@@ -12,7 +12,7 @@
 //! surfaces (`#0f1014`), a muted grey-blue foreground (`#9898a2`), a periwinkle
 //! structural accent (`#acaaff`), sky-blue directories (`#5cc9f5`), mint
 //! success (`#23ebc0`), warm-gold warning (`#ffd493`) and magenta information
-//! (`#da68fb`). The recommended terminal background is [`SURFACE`]
+//! (`#c055e0`). The recommended terminal background is [`SURFACE`]
 //! (`#0f1014`); the app also paints it behind every block and modal.
 //!
 //! Nothing outside [`ElementStyle`](super::ElementStyle) maps these colours onto
@@ -25,7 +25,7 @@ use ratatui::style::Color;
 /// Background of blocks, modals and popups. (editor background)
 pub const SURFACE: Color = Color::Rgb(0x0F, 0x10, 0x14);
 /// Background of a highlighted row (selected, matched or focused).
-pub const SELECTION_BG: Color = Color::Rgb(0x1A, 0x1B, 0x24);
+pub const SELECTION_BG: Color = Color::Rgb(0x2E, 0x30, 0x3E);
 /// Background of the file-browser path bar. (between SURFACE and SELECTION_BG)
 pub const PATH_BAR_BG: Color = Color::Rgb(0x13, 0x15, 0x1A);
 
@@ -56,10 +56,10 @@ pub const DIR_NAME: Color = Color::Rgb(0x5C, 0xC9, 0xF5);
 pub const SUCCESS: Color = Color::Rgb(0x23, 0xEB, 0xC0);
 /// Warning / edit. (warm gold)
 pub const WARNING: Color = Color::Rgb(0xFF, 0xD4, 0x93);
-/// Danger / destructive. (near-white)
-pub const DANGER: Color = Color::Rgb(0xEE, 0xF0, 0xF9);
+/// Danger / destructive. (soft red)
+pub const DANGER: Color = Color::Rgb(0xE0, 0x6C, 0x75);
 /// Search / informational (active input). (magenta)
-pub const INFO: Color = Color::Rgb(0xDA, 0x68, 0xFB);
+pub const INFO: Color = Color::Rgb(0xC0, 0x55, 0xE0);
 
 // ── Status (title bar) ───────────────────────────────────────────────────
 
@@ -67,8 +67,8 @@ pub const INFO: Color = Color::Rgb(0xDA, 0x68, 0xFB);
 pub const STATUS_LOADING: Color = Color::Rgb(0x23, 0xEB, 0xC0);
 /// A save is running. (warm gold)
 pub const STATUS_SAVING: Color = Color::Rgb(0xFF, 0xD4, 0x93);
-/// The latest save attempt failed. (near-white)
-pub const STATUS_FAILED: Color = Color::Rgb(0xEE, 0xF0, 0xF9);
+/// The latest save attempt failed. (soft red)
+pub const STATUS_FAILED: Color = Color::Rgb(0xE0, 0x6C, 0x75);
 
 // ── Inverse ──────────────────────────────────────────────────────────────
 

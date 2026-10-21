@@ -25,7 +25,7 @@ roles.
 | Role | Value | Source |
 |------|-------|--------|
 | `SURFACE` | `#0f1014` | editor background |
-| `SELECTION_BG` | `#1a1b24` | selection over `SURFACE` |
+| `SELECTION_BG` | `#2e303e` | selection over `SURFACE` |
 | `PATH_BAR_BG` | `#13151a` | between the two |
 | `TEXT` | `#9898a2` | editor foreground |
 | `TEXT_MUTED` / `TEXT_HEADER` | `#686974` | comments |
@@ -35,8 +35,8 @@ roles.
 | `DIR_NAME` | `#5cc9f5` | sky blue |
 | `SUCCESS` | `#23ebc0` | mint |
 | `WARNING` | `#ffd493` | warm gold |
-| `DANGER` / `STATUS_FAILED` | `#eef0f9` | near-white |
-| `INFO` | `#da68fb` | magenta |
+| `DANGER` / `STATUS_FAILED` | `#e06c75` | soft red |
+| `INFO` | `#c055e0` | magenta |
 | `STATUS_LOADING` | `#23ebc0` | mint |
 | `STATUS_SAVING` | `#ffd493` | warm gold |
 | `INVERSE_FG` / `INVERSE_BG` | `#0f1014` / `#9898a2` | = SURFACE / TEXT |
