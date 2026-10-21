@@ -26,10 +26,10 @@ use ratatui::style::Color;
 
 /// Background of the whole screen, behind every panel: the Base background.
 /// The darkest surface in the scheme, so panels read as raised above it.
-pub const BASE_BG: Color = Color::Rgb(0x0A, 0x0B, 0x0E);
+pub const BASE_BG: Color = Color::Rgb(0x2C, 0x2C, 0x2C);
 /// Background of blocks, modals and popups. (editor background; brighter than
 /// [`BASE_BG`])
-pub const SURFACE: Color = Color::Rgb(0x0F, 0x10, 0x14);
+pub const SURFACE: Color = Color::Rgb(0x20, 0x20, 0x20);
 /// Background of a highlighted row (selected, matched or focused) and of the
 /// neutral status-bar badges (`NORMAL` / `DETAIL` / `HELP`).
 pub const SELECTION_BG: Color = Color::Rgb(0x3A, 0x3D, 0x4E);
