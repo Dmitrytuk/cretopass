@@ -73,6 +73,7 @@ pub const LABEL_GENERATOR_SYMBOLS: &str = "Special characters";
 pub const LABEL_GENERATOR_RUN: &str = "Generate";
 
 pub const MODE_NORMAL: &str = "NORMAL";
+pub const MODE_NAV: &str = "NAV";
 pub const MODE_SEARCH: &str = "SEARCH";
 pub const MODE_PENDING_CUT: &str = "CUT";
 pub const MODE_PASTE: &str = "PASTE";
@@ -101,7 +102,8 @@ pub const STATUS_LOADING: &str = "Loading";
 pub const STATUS_SAVING: &str = "Saving";
 pub const STATUS_SAVE_FAILED: &str = "Save failed";
 
-pub const HINT_TREE: &str = "H:home  /:search  ?:help  q:quit";
+pub const HINT_TREE: &str =
+    "j/↓ k/↑:up-down  h/← l/→:collaps-expand  H:home  /:search  ?:help  q:quit";
 pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
 pub const HINT_PENDING_CUT: &str = "d:cut  Esc:cancel";
 pub const HINT_PASTE: &str = "p:after  P:before  l/→:child  Esc:cancel";
