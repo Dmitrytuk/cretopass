@@ -13,7 +13,7 @@ Read the applicable doc before writing or modifying code in its area:
 
 ### Branch Rules
 - Never commit directly to `master`.
-- Work in a feature branch (`feat/...`, `fix/...`, `hotfix/...`, `refactor/...`).
+- Work in a feature branch (`feat/...`, `fix/...`, `hotfix/...`, `refactor/...`), checkout on it before build.
 - The `git-committer` subagent must verify the branch before committing.
 
 ### Workflow
