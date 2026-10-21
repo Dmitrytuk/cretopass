@@ -25,7 +25,7 @@ roles.
 | Role | Value | Source |
 |------|-------|--------|
 | `SURFACE` | `#0f1014` | editor background |
-| `SELECTION_BG` | `#2e303e` | selection over `SURFACE` |
+| `SELECTION_BG` | `#3a3d4e` | selection over `SURFACE`, brightened for badge / row legibility |
 | `PATH_BAR_BG` | `#13151a` | between the two |
 | `TEXT` | `#b0b0be` | editor foreground, brightened for legibility |
 | `TEXT_MUTED` / `TEXT_HEADER` | `#686974` | comments |

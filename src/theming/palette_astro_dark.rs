@@ -24,8 +24,9 @@ use ratatui::style::Color;
 
 /// Background of blocks, modals and popups. (editor background)
 pub const SURFACE: Color = Color::Rgb(0x0F, 0x10, 0x14);
-/// Background of a highlighted row (selected, matched or focused).
-pub const SELECTION_BG: Color = Color::Rgb(0x2E, 0x30, 0x3E);
+/// Background of a highlighted row (selected, matched or focused) and of the
+/// neutral status-bar badges (`NORMAL` / `DETAIL` / `HELP`).
+pub const SELECTION_BG: Color = Color::Rgb(0x3A, 0x3D, 0x4E);
 /// Background of the file-browser path bar. (between SURFACE and SELECTION_BG)
 pub const PATH_BAR_BG: Color = Color::Rgb(0x13, 0x15, 0x1A);
 
