@@ -1,4 +1,6 @@
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
+
+use super::palette;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ElementStyle {
@@ -77,120 +79,128 @@ pub enum ElementStyle {
 impl ElementStyle {
     pub fn style(self) -> Style {
         match self {
-            Self::TreeBorder => Style::default().fg(Color::Cyan),
-            Self::TreeRow => Style::default().fg(Color::White),
-            Self::ListRowSelected => Style::default().bg(Color::DarkGray).fg(Color::White),
-            Self::TreeRowMatched => Style::default().bg(Color::DarkGray).fg(Color::White),
-            Self::FormRowFocused => Style::default().bg(Color::DarkGray).fg(Color::White),
+            Self::TreeBorder => Style::default().fg(palette::ACCENT),
+            Self::TreeRow => Style::default().fg(palette::TEXT),
+            Self::ListRowSelected => Style::default().bg(palette::SELECTION_BG).fg(palette::TEXT),
+            Self::TreeRowMatched => Style::default().bg(palette::SELECTION_BG).fg(palette::TEXT),
+            Self::FormRowFocused => Style::default().bg(palette::SELECTION_BG).fg(palette::TEXT),
             Self::ModeNormal => Style::default()
-                .bg(Color::DarkGray)
-                .fg(Color::White)
+                .bg(palette::SELECTION_BG)
+                .fg(palette::TEXT)
                 .add_modifier(Modifier::BOLD),
             Self::ModeSearch => Style::default()
-                .bg(Color::Blue)
-                .fg(Color::White)
+                .bg(palette::INFO)
+                .fg(palette::TEXT)
                 .add_modifier(Modifier::BOLD),
             Self::ModePendingCut => Style::default()
-                .bg(Color::Red)
-                .fg(Color::White)
+                .bg(palette::DANGER)
+                .fg(palette::TEXT)
                 .add_modifier(Modifier::BOLD),
             Self::ModePendingPaste => Style::default()
-                .bg(Color::Yellow)
-                .fg(Color::Black)
+                .bg(palette::WARNING)
+                .fg(palette::INVERSE_FG)
                 .add_modifier(Modifier::BOLD),
             Self::ModePendingAdd => Style::default()
-                .bg(Color::Green)
-                .fg(Color::Black)
+                .bg(palette::SUCCESS)
+                .fg(palette::INVERSE_FG)
                 .add_modifier(Modifier::BOLD),
             Self::ModeDetail => Style::default()
-                .bg(Color::DarkGray)
-                .fg(Color::White)
+                .bg(palette::SELECTION_BG)
+                .fg(palette::TEXT)
                 .add_modifier(Modifier::BOLD),
             Self::ModeEdit => Style::default()
-                .bg(Color::Yellow)
-                .fg(Color::Black)
+                .bg(palette::WARNING)
+                .fg(palette::INVERSE_FG)
                 .add_modifier(Modifier::BOLD),
             Self::ModeAdd => Style::default()
-                .bg(Color::Green)
-                .fg(Color::Black)
+                .bg(palette::SUCCESS)
+                .fg(palette::INVERSE_FG)
                 .add_modifier(Modifier::BOLD),
             Self::ModeFieldType => Style::default()
-                .bg(Color::Blue)
-                .fg(Color::White)
+                .bg(palette::INFO)
+                .fg(palette::TEXT)
                 .add_modifier(Modifier::BOLD),
             Self::ModeCustomName => Style::default()
-                .bg(Color::Blue)
-                .fg(Color::White)
+                .bg(palette::INFO)
+                .fg(palette::TEXT)
                 .add_modifier(Modifier::BOLD),
             Self::ModeGenerator => Style::default()
-                .bg(Color::Cyan)
-                .fg(Color::Black)
+                .bg(palette::ACCENT)
+                .fg(palette::INVERSE_FG)
                 .add_modifier(Modifier::BOLD),
             Self::ModeSymbols => Style::default()
-                .bg(Color::Cyan)
-                .fg(Color::Black)
+                .bg(palette::ACCENT)
+                .fg(palette::INVERSE_FG)
                 .add_modifier(Modifier::BOLD),
             Self::ModeConfirmDelete => Style::default()
-                .bg(Color::Red)
-                .fg(Color::White)
+                .bg(palette::DANGER)
+                .fg(palette::TEXT)
                 .add_modifier(Modifier::BOLD),
             Self::ModeHelp => Style::default()
-                .bg(Color::DarkGray)
-                .fg(Color::White)
+                .bg(palette::SELECTION_BG)
+                .fg(palette::TEXT)
                 .add_modifier(Modifier::BOLD),
-            Self::StatusBarText => Style::default().fg(Color::Gray),
-            Self::SearchBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
-            Self::EditBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
-            Self::FieldTypeBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
-            Self::CustomNameBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
-            Self::GeneratorBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
-            Self::SymbolsBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
-            Self::ConfirmDeleteBlock => Style::default().bg(Color::Black).fg(Color::Red),
-            Self::CopiedBlock => Style::default().bg(Color::Black).fg(Color::Green),
-            Self::DetailBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
-            Self::HelpBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
-            Self::HelpText => Style::default().fg(Color::White),
+            Self::StatusBarText => Style::default().fg(palette::TEXT_MUTED),
+            Self::SearchBlock => Style::default().bg(palette::SURFACE).fg(palette::ACCENT),
+            Self::EditBlock => Style::default().bg(palette::SURFACE).fg(palette::ACCENT),
+            Self::FieldTypeBlock => Style::default().bg(palette::SURFACE).fg(palette::ACCENT),
+            Self::CustomNameBlock => Style::default().bg(palette::SURFACE).fg(palette::ACCENT),
+            Self::GeneratorBlock => Style::default().bg(palette::SURFACE).fg(palette::ACCENT),
+            Self::SymbolsBlock => Style::default().bg(palette::SURFACE).fg(palette::ACCENT),
+            Self::ConfirmDeleteBlock => Style::default().bg(palette::SURFACE).fg(palette::DANGER),
+            Self::CopiedBlock => Style::default().bg(palette::SURFACE).fg(palette::SUCCESS),
+            Self::DetailBlock => Style::default().bg(palette::SURFACE).fg(palette::ACCENT),
+            Self::HelpBlock => Style::default().bg(palette::SURFACE).fg(palette::ACCENT),
+            Self::HelpText => Style::default().fg(palette::TEXT),
             Self::CopiedText => Style::default()
-                .fg(Color::Green)
+                .fg(palette::SUCCESS)
                 .add_modifier(Modifier::BOLD),
-            Self::ConfirmMessage => Style::default().fg(Color::White),
-            Self::SearchText => Style::default().fg(Color::White),
-            Self::GeneratorError => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Self::ConfirmMessage => Style::default().fg(palette::TEXT),
+            Self::SearchText => Style::default().fg(palette::TEXT),
+            Self::GeneratorError => Style::default()
+                .fg(palette::DANGER)
+                .add_modifier(Modifier::BOLD),
 
-            Self::InvertedCursor => Style::default().bg(Color::White).fg(Color::Black),
-            Self::StatusLoading => Style::default().fg(Color::Green),
-            Self::StatusSaving => Style::default().fg(Color::Yellow),
-            Self::StatusSaveFailed => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            Self::StatusInfo => Style::default().fg(Color::White),
+            Self::InvertedCursor => Style::default()
+                .bg(palette::INVERSE_BG)
+                .fg(palette::INVERSE_FG),
+            Self::StatusLoading => Style::default().fg(palette::STATUS_LOADING),
+            Self::StatusSaving => Style::default().fg(palette::STATUS_SAVING),
+            Self::StatusSaveFailed => Style::default().fg(palette::STATUS_FAILED),
+            Self::StatusInfo => Style::default().fg(palette::TEXT),
             Self::FbPathBar => Style::default()
-                .fg(Color::White)
+                .fg(palette::TEXT)
                 .add_modifier(Modifier::BOLD)
-                .bg(Color::DarkGray),
-            Self::FbDirName => Style::default().fg(Color::Blue),
-            Self::FbAgeFileName => Style::default().fg(Color::Cyan),
-            Self::FbRegularFileName => Style::default().fg(Color::White),
-            Self::FbSelectionOverlay => Style::default().bg(Color::DarkGray).fg(Color::White),
-            Self::FbPwdMarker => Style::default().fg(Color::Cyan),
-            Self::FbPwdMarkerSelected => Style::default().fg(Color::White).bg(Color::DarkGray),
-            Self::FbPrefix => Style::default().fg(Color::White),
-            Self::FbEmptyText => Style::default().fg(Color::DarkGray),
-            Self::FbHintText => Style::default().fg(Color::DarkGray),
-            Self::HomeSelected => Style::default().bg(Color::DarkGray).fg(Color::White),
-            Self::HomeNormal => Style::default().fg(Color::White),
-            Self::HomeBlockBorder => Style::default().fg(Color::Cyan),
-            Self::HomeSectionHeader => Style::default().fg(Color::DarkGray),
-            Self::HomeOverlayBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
-            Self::HomeDeleteBlock => Style::default().bg(Color::Black).fg(Color::Red),
-            Self::HomeChangePwBlock => Style::default().bg(Color::Black).fg(Color::Yellow),
-            Self::HomeNoPassBlock => Style::default().bg(Color::Black).fg(Color::Yellow),
-            Self::HomePassBlock => Style::default().bg(Color::Black).fg(Color::Cyan),
-            Self::HomeAlertBlock => Style::default().bg(Color::Black).fg(Color::Red),
-            Self::HomeErrorBar => Style::default().bg(Color::Red).fg(Color::White),
-            Self::HomePassLabel => Style::default().fg(Color::Cyan),
-            Self::HomeFieldLabel => Style::default().fg(Color::White),
-            Self::CursorLabel => Style::default().fg(Color::DarkGray),
-            Self::CursorDimmed => Style::default().fg(Color::DarkGray),
-            Self::CursorNormalText => Style::default().fg(Color::White),
+                .bg(palette::PATH_BAR_BG),
+            Self::FbDirName => Style::default().fg(palette::DIR_NAME),
+            Self::FbAgeFileName => Style::default().fg(palette::ACCENT),
+            Self::FbRegularFileName => Style::default().fg(palette::TEXT),
+            Self::FbSelectionOverlay => {
+                Style::default().bg(palette::SELECTION_BG).fg(palette::TEXT)
+            }
+            Self::FbPwdMarker => Style::default().fg(palette::ACCENT),
+            Self::FbPwdMarkerSelected => {
+                Style::default().fg(palette::TEXT).bg(palette::SELECTION_BG)
+            }
+            Self::FbPrefix => Style::default().fg(palette::TEXT),
+            Self::FbEmptyText => Style::default().fg(palette::TEXT_FAINT),
+            Self::FbHintText => Style::default().fg(palette::TEXT_FAINT),
+            Self::HomeSelected => Style::default().bg(palette::SELECTION_BG).fg(palette::TEXT),
+            Self::HomeNormal => Style::default().fg(palette::TEXT),
+            Self::HomeBlockBorder => Style::default().fg(palette::ACCENT),
+            Self::HomeSectionHeader => Style::default().fg(palette::TEXT_HEADER),
+            Self::HomeOverlayBlock => Style::default().bg(palette::SURFACE).fg(palette::ACCENT),
+            Self::HomeDeleteBlock => Style::default().bg(palette::SURFACE).fg(palette::DANGER),
+            Self::HomeChangePwBlock => Style::default().bg(palette::SURFACE).fg(palette::WARNING),
+            Self::HomeNoPassBlock => Style::default().bg(palette::SURFACE).fg(palette::WARNING),
+            Self::HomePassBlock => Style::default().bg(palette::SURFACE).fg(palette::ACCENT),
+            Self::HomeAlertBlock => Style::default().bg(palette::SURFACE).fg(palette::DANGER),
+            Self::HomeErrorBar => Style::default().bg(palette::DANGER).fg(palette::TEXT),
+            Self::HomePassLabel => Style::default().fg(palette::ACCENT),
+            Self::HomeFieldLabel => Style::default().fg(palette::TEXT),
+            Self::CursorLabel => Style::default().fg(palette::CURSOR_DIM),
+            Self::CursorDimmed => Style::default().fg(palette::CURSOR_DIM),
+            Self::CursorNormalText => Style::default().fg(palette::TEXT),
         }
     }
 }

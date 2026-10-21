@@ -45,7 +45,8 @@ mod tests {
     use super::*;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use ratatui::style::Color;
+
+    use crate::theming::palette;
 
     fn render_to_string(mode_str: &str, hint: &str) -> String {
         let mut terminal = Terminal::new(TestBackend::new(40, 1)).unwrap();
@@ -102,7 +103,7 @@ mod tests {
         // Cell 0 is the padding space, cell 1 the first glyph of the badge.
         let cell = terminal.backend().buffer().content[1].clone();
         assert_eq!(cell.symbol(), "C");
-        assert_eq!(cell.style().bg, Some(Color::Red));
+        assert_eq!(cell.style().bg, Some(palette::DANGER));
         assert!(cell.style().add_modifier.contains(Modifier::BOLD));
     }
 }
