@@ -1,7 +1,8 @@
 # Theming
 
 Centralized presentation layer: UI strings, styles, icons, key bindings, and the
-shared status-bar renderer. Depends on nothing else in the project.
+shared status-bar and Base background renderers. Depends on nothing else in the
+project.
 
 ## Language
 
@@ -23,13 +24,18 @@ The passive key binding text shown after the Mode badge on the Status bar. It
 describes the keys available in the current mode.
 _Avoid_: Help text, keybinding bar, help bar
 
-**Default colour scheme**:
-The named TrueColor RGB palette (`theming/palette_default.rs`) from which every
-UI colour is drawn. It never uses the terminal's re-mappable ANSI slots, so the
-UI renders identically in every terminal. `ElementStyle` is the only thing that
-maps these colours onto UI elements. Alternatives re-tune the same roles:
-**Cyber Orchid** (`theming/palette_cyber_orchid.rs`) is a warm scheme, and
-**Astro Dark** (`theming/palette_astro_dark.rs`) is a cold scheme derived from
-the VS Code Astro Dark theme. The active one is chosen by the `pub use … as
-palette` line in `theming.rs` — currently Astro Dark.
+**Base background**:
+The colour the app paints across the entire screen before drawing anything, so
+no cell ever falls through to the terminal's own background. One shared renderer
+does this for every screen, and the colour is the active scheme's `BASE_BG` —
+the surface every panel sits on.
+_Avoid_: Canvas, wallpaper, terminal background
+
+**Default Dark colour scheme**:
+The named TrueColor RGB palette (`theming/palette_default_dark.rs`) from which
+every UI colour is drawn. It never uses the terminal's re-mappable ANSI slots, so
+the UI renders identically in every terminal. `ElementStyle` is the only thing
+that maps these colours onto UI elements. It is derived from the VS Code Astro
+Dark theme, with its surfaces re-tuned to mid greys, and is exposed as `palette`
+by the `pub use … as palette` line in `theming.rs`.
 _Avoid_: Theme, colours, style

@@ -4,6 +4,12 @@ use super::palette;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ElementStyle {
+    /// Base fill painted across the entire screen before anything else, so the
+    /// terminal's own background never shows through (see
+    /// [`paint_background`](super::paint_background)). The canvas is
+    /// [`BASE_BG`](palette::BASE_BG); the [`SURFACE`](palette::SURFACE) panels sit
+    /// on it, above or below it depending on the scheme.
+    AppBackground,
     TreeBorder,
     TreeRow,
     /// Selected row inside a list-style popup (Detail, field-type picker, …).
@@ -79,6 +85,7 @@ pub enum ElementStyle {
 impl ElementStyle {
     pub fn style(self) -> Style {
         match self {
+            Self::AppBackground => Style::default().bg(palette::BASE_BG),
             Self::TreeBorder => Style::default().fg(palette::ACCENT),
             Self::TreeRow => Style::default().fg(palette::TEXT),
             Self::ListRowSelected => Style::default().bg(palette::SELECTION_BG).fg(palette::TEXT),

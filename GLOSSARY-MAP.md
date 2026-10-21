@@ -5,7 +5,7 @@
 - [Secrets Tree](./src/tree/GLOSSARY.md): the data model and workspace for organizing secrets in a hierarchical tree
 - [Vault](./src/vault/GLOSSARY.md): vault lifecycle — opening, creating, browsing for, configuring, and exchanging secret files
 - [Cursor](./src/cursor/GLOSSARY.md): UTF-8-aware text editing primitives operating on byte offsets and TUI cursor field rendering
-- [Theming](./src/theming/GLOSSARY.md): shared presentation layer — strings, styles, and the Status bar drawn by every screen
+- [Theming](./src/theming/GLOSSARY.md): shared presentation layer — strings, styles, and the Status bar and Base background drawn by every screen
 
 ## Relationships
 

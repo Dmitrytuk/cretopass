@@ -16,7 +16,9 @@ use crate::file_browser::{
 use crate::file_handling;
 use crate::generator::PasswordParams;
 use crate::theming::Action;
-use crate::theming::{ElementStyle, Icon, SPINNER_TICK, Spinner, Status, render_status_bar, texts};
+use crate::theming::{
+    ElementStyle, Icon, SPINNER_TICK, Spinner, Status, paint_background, render_status_bar, texts,
+};
 use crate::tree::app_tree::SaveTarget;
 use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils::{self, Configuration};
@@ -1582,6 +1584,10 @@ fn handle_create_secret_file_key<B: Backend>(
 // ── Rendering ──
 
 fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
+    // Own the background: paint SURFACE across the whole screen first so the
+    // terminal's own background never shows through.
+    paint_background(frame, area);
+
     render_home_window(frame, area, state);
 
     // The file browser renderer maintains its viewport offsets, so it needs
@@ -2298,5 +2304,57 @@ fn home_status_parts(state: &HomeState) -> (&'static str, ElementStyle, Cow<'_, 
             ElementStyle::ModeFieldType,
             Cow::Borrowed(texts::HINT_EXPORT_CONFIRM),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
+
+    /// Renders the home screen — including any modal `state` carries — into a
+    /// test backend, and asserts that no cell falls through to the terminal's own
+    /// background (see [ADR 0018](../../../docs/adr/0018-app-owned-background-fill.md)).
+    fn assert_no_terminal_background(state: &mut HomeState) {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, state);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        for (i, cell) in buffer.content.iter().enumerate() {
+            assert_ne!(
+                cell.style().bg,
+                Some(Color::Reset),
+                "cell {i} ({:?}) fell through to the terminal background",
+                cell.symbol()
+            );
+        }
+    }
+
+    #[test]
+    fn home_screen_paints_every_cell() {
+        let mut state = HomeState::new();
+        assert_no_terminal_background(&mut state);
+    }
+
+    /// The File Browser is the largest `Clear` user; the base fill plus its
+    /// styled blocks must keep every cell off the terminal background.
+    #[test]
+    fn file_browser_modal_paints_every_cell() {
+        let mut state = HomeState::new();
+        let mut browser = file_browser::FileBrowserState::new(
+            file_browser::FileBrowserMode::OpenFile,
+            &file_browser::FileBrowserSession::default(),
+        );
+        browser.current_dir = PathBuf::from("/tmp");
+        browser.entries = file_handling::list_dir(std::path::Path::new("/tmp")).unwrap();
+        state.modal = Some(HomeModal::FileBrowser(browser));
+
+        assert_no_terminal_background(&mut state);
     }
 }
