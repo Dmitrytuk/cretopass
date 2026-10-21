@@ -36,7 +36,7 @@ roles.
 | `SUCCESS` | `#23ebc0` | mint |
 | `WARNING` | `#ffd493` | warm gold |
 | `DANGER` / `STATUS_FAILED` | `#e06c75` | soft red |
-| `INFO` | `#c055e0` | magenta |
+| `INFO` | `#6c5e8a` | muted violet |
 | `STATUS_LOADING` | `#23ebc0` | mint |
 | `STATUS_SAVING` | `#ffd493` | warm gold |
 | `INVERSE_FG` / `INVERSE_BG` | `#0f1014` / `#b0b0be` | = SURFACE / TEXT |

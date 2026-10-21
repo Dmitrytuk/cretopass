@@ -11,8 +11,8 @@
 //! The scheme is derived from the *VS Code Astro Dark* theme: near-black
 //! surfaces (`#0f1014`), a brighter grey-blue foreground (`#b0b0be`), a periwinkle
 //! structural accent (`#acaaff`), sky-blue directories (`#5cc9f5`), mint
-//! success (`#23ebc0`), warm-gold warning (`#ffd493`) and magenta information
-//! (`#c055e0`). The recommended terminal background is [`SURFACE`]
+//! success (`#23ebc0`), warm-gold warning (`#ffd493`) and muted-violet
+//! information (`#6c5e8a`). The recommended terminal background is [`SURFACE`]
 //! (`#0f1014`); the app also paints it behind every block and modal.
 //!
 //! Nothing outside [`ElementStyle`](super::ElementStyle) maps these colours onto
@@ -60,8 +60,8 @@ pub const SUCCESS: Color = Color::Rgb(0x23, 0xEB, 0xC0);
 pub const WARNING: Color = Color::Rgb(0xFF, 0xD4, 0x93);
 /// Danger / destructive. (soft red)
 pub const DANGER: Color = Color::Rgb(0xE0, 0x6C, 0x75);
-/// Search / informational (active input). (magenta)
-pub const INFO: Color = Color::Rgb(0xC0, 0x55, 0xE0);
+/// Search / informational (active input). (muted violet)
+pub const INFO: Color = Color::Rgb(0x6C, 0x5E, 0x8A);
 
 // ── Status (title bar) ───────────────────────────────────────────────────
 
