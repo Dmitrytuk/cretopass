@@ -10,9 +10,10 @@
 //! scheme defines its own RGB values instead.
 //!
 //! The scheme is cool-toned: near-black indigo surfaces, soft off-white text
-//! and a cyan structural accent. [`SURFACE`] (`#1a1b2e`) is painted across the
+//! and a cyan structural accent. [`BASE_BG`] (`#141526`) is painted across the
 //! entire screen before anything else, so the terminal's own background never
-//! shows through; blocks, modals and popups paint it as well.
+//! shows through; [`SURFACE`] (`#1a1b2e`) sits above it as the background of
+//! every block, modal and popup.
 //!
 //! Nothing outside [`ElementStyle`](super::ElementStyle) maps these colours onto
 //! UI elements.
@@ -21,7 +22,10 @@ use ratatui::style::Color;
 
 // ── Surfaces ─────────────────────────────────────────────────────────────
 
-/// Background of the whole screen and of blocks, modals and popups.
+/// Background of the whole screen, behind every panel: the Base background.
+/// The darkest surface in the scheme, so panels read as raised above it.
+pub const BASE_BG: Color = Color::Rgb(0x14, 0x15, 0x26);
+/// Background of blocks, modals and popups. (brighter than [`BASE_BG`])
 pub const SURFACE: Color = Color::Rgb(0x1a, 0x1b, 0x2e);
 /// Background of a highlighted row (selected, matched or focused).
 pub const SELECTION_BG: Color = Color::Rgb(0x3a, 0x40, 0x55);

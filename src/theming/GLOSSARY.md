@@ -27,7 +27,8 @@ _Avoid_: Help text, keybinding bar, help bar
 **Base background**:
 The colour the app paints across the entire screen before drawing anything, so
 no cell ever falls through to the terminal's own background. One shared renderer
-does this for every screen, and the colour is the active scheme's `SURFACE`.
+does this for every screen, and the colour is the active scheme's `BASE_BG` —
+the darkest surface, below the `SURFACE` panels.
 _Avoid_: Canvas, wallpaper, terminal background
 
 **Default colour scheme**:

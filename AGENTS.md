@@ -55,4 +55,4 @@ map and cross-module data flow.
 - [0015 — Default colour scheme](./docs/adr/0015-default-color-scheme.md) — terminal-independent TrueColor palette, brighter status glyphs, muted hints
 - [0016 — Cyber Orchid colour scheme](./docs/adr/0016-cyber-orchid-colour-scheme.md) — alternative warm scheme, compile-time `pub use` switch
 - [0017 — Astro Dark colour scheme](./docs/adr/0017-astro-dark-colour-scheme.md) — alternative cold scheme from the VS Code Astro Dark theme
-- [0018 — App-owned background fill](./docs/adr/0018-app-owned-background-fill.md) — `paint_background` paints `SURFACE` across every screen, so the terminal background never shows
+- [0018 — App-owned background fill](./docs/adr/0018-app-owned-background-fill.md) — `paint_background` paints the darkest surface `BASE_BG` across every screen, so the terminal background never shows; panels stay `SURFACE`

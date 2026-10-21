@@ -6,7 +6,8 @@ use super::palette;
 pub enum ElementStyle {
     /// Base fill painted across the entire screen before anything else, so the
     /// terminal's own background never shows through (see
-    /// [`paint_background`](super::paint_background)). Currently [`SURFACE`](palette::SURFACE).
+    /// [`paint_background`](super::paint_background)). The darkest surface,
+    /// [`BASE_BG`](palette::BASE_BG), behind the [`SURFACE`](palette::SURFACE) panels.
     AppBackground,
     TreeBorder,
     TreeRow,
@@ -83,7 +84,7 @@ pub enum ElementStyle {
 impl ElementStyle {
     pub fn style(self) -> Style {
         match self {
-            Self::AppBackground => Style::default().bg(palette::SURFACE),
+            Self::AppBackground => Style::default().bg(palette::BASE_BG),
             Self::TreeBorder => Style::default().fg(palette::ACCENT),
             Self::TreeRow => Style::default().fg(palette::TEXT),
             Self::ListRowSelected => Style::default().bg(palette::SELECTION_BG).fg(palette::TEXT),

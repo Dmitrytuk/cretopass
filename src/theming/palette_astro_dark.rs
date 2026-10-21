@@ -12,9 +12,10 @@
 //! surfaces (`#0f1014`), a brighter grey-blue foreground (`#b0b0be`), a periwinkle
 //! structural accent (`#9ea1c8`), sky-blue directories (`#5cc9f5`), mint
 //! success (`#23ebc0`), warm-gold warning (`#ffd493`) and muted-violet
-//! information (`#6c5e8a`). [`SURFACE`] (`#0f1014`) is painted across the entire
+//! information (`#6c5e8a`). [`BASE_BG`] (`#0a0b0e`) is painted across the entire
 //! screen before anything else, so the terminal's own background never shows
-//! through; blocks, modals and popups paint it as well.
+//! through; [`SURFACE`] (`#0f1014`) sits above it as the background of every
+//! block, modal and popup.
 //!
 //! Nothing outside [`ElementStyle`](super::ElementStyle) maps these colours onto
 //! UI elements.
@@ -23,7 +24,11 @@ use ratatui::style::Color;
 
 // ── Surfaces ─────────────────────────────────────────────────────────────
 
-/// Background of the whole screen and of blocks, modals and popups. (editor background)
+/// Background of the whole screen, behind every panel: the Base background.
+/// The darkest surface in the scheme, so panels read as raised above it.
+pub const BASE_BG: Color = Color::Rgb(0x0A, 0x0B, 0x0E);
+/// Background of blocks, modals and popups. (editor background; brighter than
+/// [`BASE_BG`])
 pub const SURFACE: Color = Color::Rgb(0x0F, 0x10, 0x14);
 /// Background of a highlighted row (selected, matched or focused) and of the
 /// neutral status-bar badges (`NORMAL` / `DETAIL` / `HELP`).
