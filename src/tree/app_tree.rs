@@ -969,8 +969,8 @@ fn picker_items(_form: &FormState) -> Vec<PickerItem> {
     vec![
         PickerItem::Login,
         PickerItem::Password,
-        PickerItem::Custom,
         PickerItem::Desc,
+        PickerItem::Custom,
     ]
 }
 
@@ -985,7 +985,7 @@ fn handle_custom_field_name(key: event::KeyEvent, state: &mut TreeState) {
 
     match Action::from_custom_field_name(&key) {
         Action::Cancel => {
-            state.mode = InputMode::SelectFieldType { form, selected: 2 };
+            state.mode = InputMode::SelectFieldType { form, selected: 3 };
         }
         Action::Confirm => {
             let label = if input.is_empty() {
@@ -2653,14 +2653,17 @@ mod tests {
         handle_form(key(KeyCode::Enter), &mut state);
         assert!(matches!(state.mode, InputMode::SelectFieldType { .. }));
 
-        // Description is offered last.
+        // Custom is offered last; Description sits before it.
         let items = match &state.mode {
             InputMode::SelectFieldType { form, .. } => picker_items(form),
             _ => unreachable!(),
         };
-        assert_eq!(items.last(), Some(&PickerItem::Desc));
+        assert_eq!(items.last(), Some(&PickerItem::Custom));
 
-        let desc_index = items.len() - 1;
+        let desc_index = items
+            .iter()
+            .position(|item| *item == PickerItem::Desc)
+            .expect("Desc offered");
         if let InputMode::SelectFieldType {
             ref mut selected, ..
         } = state.mode
