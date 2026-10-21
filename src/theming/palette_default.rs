@@ -1,7 +1,7 @@
 //! The **Default** colour scheme — one of the selectable sources of every colour
 //! in the UI. Which module is active is chosen by the `pub use … as palette`
-//! line in [`theming`](super); the other scheme (`palette_cyber_orchid`) is an
-//! alternative that renders the same roles in a warmer palette.
+//! line in [`theming`](super); the other schemes (`palette_cyber_orchid`,
+//! `palette_astro_dark`) render the same roles in different palettes.
 //!
 //! Every value is a TrueColor RGB colour, so the interface renders identically
 //! in every terminal and never depends on the terminal's own ANSI palette.

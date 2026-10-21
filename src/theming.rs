@@ -1,5 +1,6 @@
 pub mod icon;
 pub mod key;
+pub mod palette_astro_dark;
 pub mod palette_cyber_orchid;
 pub mod palette_default;
 pub mod spinner;
@@ -9,9 +10,10 @@ pub mod style;
 pub mod texts;
 
 // ── Active colour scheme ───────────────────────────────────────────────────
-// Switch the whole UI theme by swapping the two `pub use` lines below:
-// comment the active scheme and uncomment the alternative.
-pub use palette_cyber_orchid as palette;
+// Switch the whole UI theme by swapping the `pub use` lines below: comment the
+// active scheme and uncomment one of the alternatives.
+pub use palette_astro_dark as palette;
+// pub use palette_cyber_orchid as palette;
 // pub use palette_default as palette;
 
 pub use icon::Icon;

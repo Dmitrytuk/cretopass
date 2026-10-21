@@ -1,8 +1,9 @@
-//! The **Cyber Orchid** colour scheme — the source of every colour in the UI
-//! currently selected by the `pub use … as palette` line in
-//! [`theming`](super); [`palette_default`](super::palette_default) is the
-//! cool-toned alternative. It exposes the exact same roles as the Default
-//! scheme, so `ElementStyle` maps them onto UI elements unchanged.
+//! The **Cyber Orchid** colour scheme — one of the selectable sources of every
+//! colour in the UI. Which module is active is chosen by the `pub use … as
+//! palette` line in [`theming`](super); the other schemes (`palette_default`,
+//! `palette_astro_dark`) render the same roles in different palettes. It exposes
+//! the exact same roles as the other schemes, so `ElementStyle` maps them onto UI
+//! elements unchanged.
 //!
 //! Every value is a TrueColor RGB colour, so the interface renders identically
 //! in every terminal and never depends on the terminal's own ANSI palette.

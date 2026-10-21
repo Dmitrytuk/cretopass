@@ -1,0 +1,78 @@
+//! The **Astro Dark** colour scheme — a source of every colour in the UI.
+//! Which module is active is chosen by the `pub use … as palette` line in
+//! [`theming`](super); the other schemes (`palette_default`,
+//! `palette_cyber_orchid`) render the same roles in different palettes. It
+//! exposes the exact same roles as the other schemes, so `ElementStyle` maps
+//! them onto UI elements unchanged.
+//!
+//! Every value is a TrueColor RGB colour, so the interface renders identically
+//! in every terminal and never depends on the terminal's own ANSI palette.
+//!
+//! The scheme is derived from the *VS Code Astro Dark* theme: near-black
+//! surfaces (`#0f1014`), a muted grey-blue foreground (`#9898a2`), a periwinkle
+//! structural accent (`#acaaff`), sky-blue directories (`#5cc9f5`), mint
+//! success (`#23ebc0`), warm-gold warning (`#ffd493`) and magenta information
+//! (`#da68fb`). The recommended terminal background is [`SURFACE`]
+//! (`#0f1014`); the app also paints it behind every block and modal.
+//!
+//! Nothing outside [`ElementStyle`](super::ElementStyle) maps these colours onto
+//! UI elements.
+
+use ratatui::style::Color;
+
+// ── Surfaces ─────────────────────────────────────────────────────────────
+
+/// Background of blocks, modals and popups. (editor background)
+pub const SURFACE: Color = Color::Rgb(0x0F, 0x10, 0x14);
+/// Background of a highlighted row (selected, matched or focused).
+pub const SELECTION_BG: Color = Color::Rgb(0x1A, 0x1B, 0x24);
+/// Background of the file-browser path bar. (between SURFACE and SELECTION_BG)
+pub const PATH_BAR_BG: Color = Color::Rgb(0x13, 0x15, 0x1A);
+
+// ── Text ─────────────────────────────────────────────────────────────────
+
+/// Primary foreground text. (editor foreground)
+pub const TEXT: Color = Color::Rgb(0x98, 0x98, 0xA2);
+/// Passive, de-emphasised text such as status-bar hints.
+pub const TEXT_MUTED: Color = Color::Rgb(0x68, 0x69, 0x74);
+/// Faintest text: empty states and secondary details.
+pub const TEXT_FAINT: Color = Color::Rgb(0x43, 0x44, 0x4D);
+/// Section-header text.
+pub const TEXT_HEADER: Color = Color::Rgb(0x68, 0x69, 0x74);
+/// Dimmed cursor label.
+pub const CURSOR_DIM: Color = Color::Rgb(0x81, 0x7C, 0x9C);
+
+// ── Accents ──────────────────────────────────────────────────────────────
+
+/// Structural accent: block borders, password markers, passphrase labels.
+/// (periwinkle)
+pub const ACCENT: Color = Color::Rgb(0xAC, 0xAF, 0xFF);
+/// Directory names in the file browser. (sky blue)
+pub const DIR_NAME: Color = Color::Rgb(0x5C, 0xC9, 0xF5);
+
+// ── Semantics ────────────────────────────────────────────────────────────
+
+/// Success / affirmative (copied, add). (mint)
+pub const SUCCESS: Color = Color::Rgb(0x23, 0xEB, 0xC0);
+/// Warning / edit. (warm gold)
+pub const WARNING: Color = Color::Rgb(0xFF, 0xD4, 0x93);
+/// Danger / destructive. (near-white)
+pub const DANGER: Color = Color::Rgb(0xEE, 0xF0, 0xF9);
+/// Search / informational (active input). (magenta)
+pub const INFO: Color = Color::Rgb(0xDA, 0x68, 0xFB);
+
+// ── Status (title bar) ───────────────────────────────────────────────────
+
+/// A blocking load (decrypt / open) is running. (mint)
+pub const STATUS_LOADING: Color = Color::Rgb(0x23, 0xEB, 0xC0);
+/// A save is running. (warm gold)
+pub const STATUS_SAVING: Color = Color::Rgb(0xFF, 0xD4, 0x93);
+/// The latest save attempt failed. (near-white)
+pub const STATUS_FAILED: Color = Color::Rgb(0xEE, 0xF0, 0xF9);
+
+// ── Inverse ──────────────────────────────────────────────────────────────
+
+/// Foreground drawn on a bright badge or on the inverted cursor. (= SURFACE)
+pub const INVERSE_FG: Color = Color::Rgb(0x0F, 0x10, 0x14);
+/// Background of the inverted cursor. (= TEXT)
+pub const INVERSE_BG: Color = Color::Rgb(0x98, 0x98, 0xA2);
