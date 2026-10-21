@@ -24,8 +24,10 @@ describes the keys available in the current mode.
 _Avoid_: Help text, keybinding bar, help bar
 
 **Default colour scheme**:
-The single, named TrueColor RGB palette (`theming/palette.rs`) from which every
+The named TrueColor RGB palette (`theming/palette_default.rs`) from which every
 UI colour is drawn. It never uses the terminal's re-mappable ANSI slots, so the
 UI renders identically in every terminal. `ElementStyle` is the only thing that
-maps these colours onto UI elements.
+maps these colours onto UI elements. An alternative scheme, **Cyber Orchid**
+(`theming/palette_cyber_orchid.rs`), re-tunes the same roles; the active one is
+chosen by the `pub use … as palette` line in `theming.rs`.
 _Avoid_: Theme, colours, style

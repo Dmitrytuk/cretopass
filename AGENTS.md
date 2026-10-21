@@ -53,3 +53,4 @@ map and cross-module data flow.
 - [0013 — Login word generator](./docs/adr/0013-login-word-generator.md) — syllable-assembled `Login` words, type-dispatched `Ctrl+G`, coalescing undo
 - [0014 — Unified status bar](./docs/adr/0014-status-bar-unification.md) — one renderer, `[MODE] hints`, cross-screen badge colour vocabulary
 - [0015 — Default colour scheme](./docs/adr/0015-default-color-scheme.md) — terminal-independent TrueColor palette, brighter status glyphs, muted hints
+- [0016 — Cyber Orchid colour scheme](./docs/adr/0016-cyber-orchid-colour-scheme.md) — alternative warm scheme, compile-time `pub use` switch

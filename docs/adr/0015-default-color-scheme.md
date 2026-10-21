@@ -10,11 +10,15 @@ whose theme assigns brighter values to those slots. The app looked different —
 and sometimes broken — in every terminal.
 
 **Decision:** define one named, terminal-independent colour scheme, **Default**,
-as TrueColor RGB constants in `theming/palette.rs`, and route every UI colour
-through it. `ElementStyle` ([ADR 0004](../src/theming/docs/adr/0004-theming.md))
+as TrueColor RGB constants in `theming/palette_default.rs`, and route every UI
+colour through it. `ElementStyle` ([ADR 0004](../src/theming/docs/adr/0004-theming.md))
 is the only thing that maps those colours onto UI elements; no module defines a
 colour inline. The scheme is cool-toned: near-black indigo surfaces, soft
 off-white text, a cyan structural accent, and brighter semantic accents.
+
+A second scheme, **Cyber Orchid**, lives alongside it in
+`theming/palette_cyber_orchid.rs` and re-tunes the same roles to a warmer palette
+([ADR 0016](0016-cyber-orchid-colour-scheme.md)).
 
 ## Palette
 
@@ -44,7 +48,7 @@ off-white text, a cyan structural accent, and brighter semantic accents.
 | # | Decision | Rationale |
 |---|----------|-----------|
 | 1 | **TrueColor RGB, not ANSI.** Every colour is an explicit `Color::Rgb` value. | The terminal cannot re-map RGB, so the app renders identically everywhere. |
-| 2 | **One named scheme in `theming/palette.rs`.** | A single place to change how the app looks; `ElementStyle` stays the semantic mapping layer. |
+| 2 | **One named scheme per module in `theming/palette_default.rs`.** | A single place to change how the app looks; `ElementStyle` stays the semantic mapping layer. A second scheme lives in its own module ([ADR 0016](0016-cyber-orchid-colour-scheme.md)). |
 | 3 | **Brighten the status glyphs and drop their bold.** Loading/Saving/SaveFailed use bright RGB without `Modifier::BOLD`. | The spinner was meant to draw the eye; bold muddied the glyph and the label. |
 | 4 | **Hints are `TEXT_MUTED` (`#9aaec9`).** | Visible on the surface, but quieter than body text so hints never steal focus from the mode badge. |
 | 5 | **Mode-badge colour coding is unchanged.** Destructive red, attention yellow, active input blue, generator cyan, add green, passive selection. Only the concrete shades move to RGB. | [ADR 0014](0014-status-bar-unification.md) made badge colour a cross-screen vocabulary; the scheme preserves it. |
@@ -54,8 +58,8 @@ off-white text, a cyan structural accent, and brighter semantic accents.
 
 - The app no longer depends on the terminal's palette: the same colours render
   in PowerShell, Alacritty, Kitty, Windows Terminal and VSCode.
-- `theming` stays a strict leaf: `palette.rs` depends only on `ratatui`, and
-  `ElementStyle` is still the only consumer.
+- `theming` stays a strict leaf: `palette_default.rs` depends only on `ratatui`,
+  and `ElementStyle` is still the only consumer.
 - The `status_bar` unit test that asserted the `CUT` badge was `Color::Red` now
   asserts `palette::DANGER`, so the badge test tracks the scheme instead of a
   palette slot.
@@ -69,5 +73,7 @@ off-white text, a cyan structural accent, and brighter semantic accents.
   terminal-dependent; exact hues would keep drifting per theme.
 - **Inline RGB values in each `ElementStyle` arm.** Scatters the scheme across
   seventy arms with no single place to read or change it.
-- **Runtime theme switching.** There is no second theme to switch to yet; a
-  registry would be premature. The named module leaves room to add one later.
+- **Runtime theme switching.** When this scheme was defined there was no second
+  theme yet; a registry would have been premature, so the named module left room
+  to add one later. The second scheme ([ADR 0016](0016-cyber-orchid-colour-scheme.md))
+  is still selected at compile time, not run time.
