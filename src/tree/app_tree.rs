@@ -1575,11 +1575,7 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
     }
 
     match &state.mode {
-        InputMode::Normal => (
-            texts::MODE_NAV,
-            ElementStyle::ModeNormal,
-            texts::HINT_TREE,
-        ),
+        InputMode::Normal => (texts::MODE_NAV, ElementStyle::ModeNormal, texts::HINT_TREE),
         InputMode::Search => (
             texts::MODE_SEARCH,
             ElementStyle::ModeSearch,

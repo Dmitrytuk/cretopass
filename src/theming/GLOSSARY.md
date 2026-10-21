@@ -22,3 +22,10 @@ _Avoid_: Mode indicator, mode chip, mode tag
 The passive key binding text shown after the Mode badge on the Status bar. It
 describes the keys available in the current mode.
 _Avoid_: Help text, keybinding bar, help bar
+
+**Default colour scheme**:
+The single, named TrueColor RGB palette (`theming/palette.rs`) from which every
+UI colour is drawn. It never uses the terminal's re-mappable ANSI slots, so the
+UI renders identically in every terminal. `ElementStyle` is the only thing that
+maps these colours onto UI elements.
+_Avoid_: Theme, colours, style

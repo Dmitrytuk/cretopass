@@ -1,5 +1,6 @@
 pub mod icon;
 pub mod key;
+pub mod palette;
 pub mod spinner;
 pub mod status;
 pub mod status_bar;
