@@ -18,7 +18,8 @@ off-white text, a cyan structural accent, and brighter semantic accents.
 
 A second scheme, **Cyber Orchid**, lives alongside it in
 `theming/palette_cyber_orchid.rs` and re-tunes the same roles to a warmer palette
-([ADR 0016](0016-cyber-orchid-colour-scheme.md)).
+([ADR 0016](0016-cyber-orchid-colour-scheme.md)); it is the scheme currently
+selected in `theming.rs`. This document describes the Default scheme.
 
 ## Palette
 

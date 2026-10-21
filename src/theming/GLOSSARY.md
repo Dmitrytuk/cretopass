@@ -29,5 +29,6 @@ UI colour is drawn. It never uses the terminal's re-mappable ANSI slots, so the
 UI renders identically in every terminal. `ElementStyle` is the only thing that
 maps these colours onto UI elements. An alternative scheme, **Cyber Orchid**
 (`theming/palette_cyber_orchid.rs`), re-tunes the same roles; the active one is
-chosen by the `pub use … as palette` line in `theming.rs`.
+chosen by the `pub use … as palette` line in `theming.rs` — currently Cyber
+Orchid.
 _Avoid_: Theme, colours, style

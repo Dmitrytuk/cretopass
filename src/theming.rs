@@ -9,8 +9,8 @@ pub mod style;
 pub mod texts;
 
 // ── Active colour scheme ───────────────────────────────────────────────────
-// Switch the whole UI theme by changing the line below to
-// `pub use palette_cyber_orchid as palette;`.
+// Switch the whole UI theme by swapping the two `pub use` lines below:
+// comment the active scheme and uncomment the alternative.
 pub use palette_cyber_orchid as palette;
 // pub use palette_default as palette;
 
