@@ -28,6 +28,7 @@ pub const BROWSER_OPEN: &str = " Open File ";
 pub const BROWSER_CREATE: &str = " Create New Secret File ";
 pub const BROWSER_IMPORT: &str = " Import File ";
 pub const OVERLAY_NEW_FILE: &str = " New File ";
+pub const OVERLAY_NEW_DIR: &str = " New Folder ";
 pub const OVERLAY_RENAME: &str = " Rename ";
 pub const OVERLAY_LOCATIONS: &str = " Locations ";
 pub const LOCATION_HOME: &str = "Home";

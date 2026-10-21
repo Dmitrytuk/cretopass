@@ -49,10 +49,16 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
     // Transient prompts are centered popups stacked over the browser:
     // the active input / delete confirmation first, the error on top.
     if state.mode == FileBrowserMode::CreateFile && state.focus == FocusTarget::Input {
+        // `af` creates a file, `ad` creates a directory — match the title to it.
+        let input_title = if state.creating_is_dir {
+            texts::OVERLAY_NEW_DIR
+        } else {
+            texts::OVERLAY_NEW_FILE
+        };
         render_input_popup(
             frame,
             overlay_area,
-            texts::OVERLAY_NEW_FILE,
+            input_title,
             texts::LABEL_NAME_INLINE,
             &state.creating_name,
             state.creating_cursor,
@@ -682,6 +688,23 @@ mod tests {
         assert!(
             text.contains("New File"),
             "name input should render as a titled popup:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_create_dir_name_input_titled_new_folder() {
+        let mut state = new_state(FileBrowserMode::CreateFile);
+        populate_tmp(&mut state);
+        state.focus = FocusTarget::Input;
+        state.creating_is_dir = true;
+        let text = render_to_text(&mut state);
+        assert!(
+            text.contains("New Folder"),
+            "the `ad` name input should be titled as a folder:\n{text}"
+        );
+        assert!(
+            !text.contains("New File"),
+            "the `ad` name input must not be titled as a file:\n{text}"
         );
     }
 
