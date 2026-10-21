@@ -47,7 +47,7 @@ Password fields (`PassphraseInput`, `ChangePwInput`, `CreateSecretFile`) mask in
 
 - Stored at `~/.config/cretopass/config.pwd` (XDG_CONFIG_HOME respected, `CRETOPASS_CONFIG_DIR` override).
 - Serialized with `rkyv` (zero-copy binary format). Different strategy from JSON+age used for vault data — config is local-only, never encrypted, never exported.
-- `Configuration` fields: `recent_files: Vec<String>`, `last_opened_file: Option<String>`, `display_full_path: bool`, `open_last_opened_file_on_startup: bool`.
+- `Configuration` fields: `recent_files: Vec<String>`, `last_opened_file: Option<String>`, `display_full_path: bool`, `open_last_opened_file_on_startup: bool`, `palette_name: String` (active colour scheme, applied on startup; see [0019](../../../docs/adr/0019-runtime-colour-scheme-switching.md)).
 - Legacy migration: reads old `settings.pwd` format, writes config in new format.
 
 ## Quirks & edge cases

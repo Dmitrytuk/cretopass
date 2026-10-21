@@ -43,6 +43,10 @@ pub struct Configuration {
     pub display_full_path: bool,
     /// If `true`, automatically open the last-opened file on startup.
     pub open_last_opened_file_on_startup: bool,
+    /// Canonical name of the active colour scheme (see
+    /// [`theming::SCHEME_DARK`](crate::theming::SCHEME_DARK) and
+    /// [`theming::SCHEME_LIGHT`](crate::theming::SCHEME_LIGHT)).
+    pub palette_name: String,
 }
 
 impl Default for Configuration {
@@ -52,6 +56,7 @@ impl Default for Configuration {
             last_opened_file: None,
             display_full_path: true,
             open_last_opened_file_on_startup: true,
+            palette_name: crate::theming::SCHEME_DARK.to_string(),
         }
     }
 }
@@ -224,6 +229,7 @@ mod tests {
             last_opened_file: Some("/home/user/vault.age".to_string()),
             display_full_path: false,
             open_last_opened_file_on_startup: true,
+            palette_name: crate::theming::SCHEME_LIGHT.to_string(),
         };
         save_config(&config).unwrap();
         let loaded = load_config();
@@ -236,6 +242,7 @@ mod tests {
             Some("/home/user/vault.age".to_string())
         );
         assert!(!loaded.display_full_path);
+        assert_eq!(loaded.palette_name, crate::theming::SCHEME_LIGHT);
     }
 
     #[test]
@@ -245,6 +252,7 @@ mod tests {
         assert!(config.open_last_opened_file_on_startup);
         assert!(config.recent_files.is_empty());
         assert!(config.last_opened_file.is_none());
+        assert_eq!(config.palette_name, crate::theming::SCHEME_DARK);
     }
 
     #[test]
@@ -287,6 +295,7 @@ mod tests {
             last_opened_file: None,
             display_full_path: true,
             open_last_opened_file_on_startup: true,
+            palette_name: crate::theming::SCHEME_DARK.to_string(),
         };
         push_recent_secret_file(&mut config, "/beta.age").unwrap();
 

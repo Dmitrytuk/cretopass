@@ -103,7 +103,7 @@ mod tests {
         // Cell 0 is the padding space, cell 1 the first glyph of the badge.
         let cell = terminal.backend().buffer().content[1].clone();
         assert_eq!(cell.symbol(), "C");
-        assert_eq!(cell.style().bg, Some(palette::DANGER));
+        assert_eq!(cell.style().bg, Some(palette().danger));
         assert!(cell.style().add_modifier.contains(Modifier::BOLD));
     }
 }

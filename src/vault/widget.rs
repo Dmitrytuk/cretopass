@@ -17,7 +17,8 @@ use crate::file_handling;
 use crate::generator::PasswordParams;
 use crate::theming::Action;
 use crate::theming::{
-    ElementStyle, Icon, SPINNER_TICK, Spinner, Status, paint_background, render_status_bar, texts,
+    ElementStyle, Icon, Palette, SPINNER_TICK, Spinner, Status, paint_background,
+    render_status_bar, scheme_label, set_palette, texts, toggled_scheme,
 };
 use crate::tree::app_tree::SaveTarget;
 use crate::vault::active_file::ActiveVaultState;
@@ -101,6 +102,8 @@ impl Default for HomeState {
 impl HomeState {
     pub fn new() -> Self {
         let config = utils::load_config();
+        // Apply the persisted colour scheme before the first frame is drawn.
+        set_palette(Palette::from_name(&config.palette_name));
         let modal = if config.open_last_opened_file_on_startup {
             config.last_opened_file.as_ref().and_then(|path| {
                 file_handling::validate_encrypted_file(path)
@@ -610,7 +613,7 @@ fn handle_config_key(key: event::KeyEvent, state: &mut HomeState) {
                 ref mut setting_idx,
             }) = state.modal
             {
-                *setting_idx = (*setting_idx + 1).min(1);
+                *setting_idx = (*setting_idx + 1).min(2);
             }
         }
         Action::NavUp => {
@@ -626,11 +629,20 @@ fn handle_config_key(key: event::KeyEvent, state: &mut HomeState) {
                 Some(HomeModal::Configuration { setting_idx }) => *setting_idx,
                 _ => return,
             };
-            if idx == 0 {
-                state.config.display_full_path = !state.config.display_full_path;
-            } else {
-                state.config.open_last_opened_file_on_startup =
-                    !state.config.open_last_opened_file_on_startup;
+            match idx {
+                0 => state.config.display_full_path = !state.config.display_full_path,
+                1 => {
+                    state.config.open_last_opened_file_on_startup =
+                        !state.config.open_last_opened_file_on_startup;
+                }
+                _ => {
+                    // Apply the scheme the moment it changes, so the user sees
+                    // the new colours while the modal stays open; it is still
+                    // persisted only on save (`Enter`), like the other settings.
+                    state.config.palette_name =
+                        toggled_scheme(&state.config.palette_name).to_string();
+                    set_palette(Palette::from_name(&state.config.palette_name));
+                }
             }
         }
         Action::SaveConfig => {
@@ -1739,7 +1751,7 @@ fn render_config_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
         _ => 0,
     };
 
-    let overlay_area = make_overlay(area, 9);
+    let overlay_area = make_overlay(area, 10);
     let block = Block::default()
         .title(texts::CONFIG_TITLE)
         .borders(Borders::ALL)
@@ -1780,6 +1792,29 @@ fn render_config_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
             Span::styled(*label, style),
         ]));
     }
+
+    // The colour scheme is a cyclic choice, not an on/off flag, so it shows its
+    // current value instead of a checkbox.
+    let palette_selected = setting_idx == rows.len();
+    let style = if palette_selected {
+        ElementStyle::HomeSelected.style()
+    } else {
+        ElementStyle::HomeNormal.style()
+    };
+    let prefix = if palette_selected {
+        Icon::SelectionArrow.as_str()
+    } else {
+        Icon::SelectionPad.as_str()
+    };
+    lines.push(Line::from(Span::styled(
+        format!(
+            "{}{}: {}",
+            prefix,
+            texts::SETTING_PALETTE,
+            scheme_label(&state.config.palette_name)
+        ),
+        style,
+    )));
 
     lines.push(Line::from(""));
 

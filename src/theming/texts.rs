@@ -45,6 +45,9 @@ pub const MENU_ITEMS: &[&str] = &[
 
 pub const SETTING_FULL_PATH: &str = "Display full path in title bar";
 pub const SETTING_LAST_FILE: &str = "Start with last file";
+pub const SETTING_PALETTE: &str = "Colour scheme";
+pub const PALETTE_DARK: &str = "Dark";
+pub const PALETTE_LIGHT: &str = "Light";
 
 pub const FIELD_ITEM_CUSTOM: &str = "Custom Field";
 pub const FIELD_ITEM_DESC: &str = "Description";

@@ -31,11 +31,17 @@ does this for every screen, and the colour is the active scheme's `BASE_BG` —
 the surface every panel sits on.
 _Avoid_: Canvas, wallpaper, terminal background
 
-**Default Dark colour scheme**:
-The named TrueColor RGB palette (`theming/palette_default_dark.rs`) from which
-every UI colour is drawn. It never uses the terminal's re-mappable ANSI slots, so
-the UI renders identically in every terminal. `ElementStyle` is the only thing
-that maps these colours onto UI elements. It is derived from the VS Code Astro
-Dark theme, with its surfaces re-tuned to mid greys, and is exposed as `palette`
-by the `pub use … as palette` line in `theming.rs`.
+**Default Dark colour scheme** / **Default Light colour scheme**:
+The two named TrueColor RGB palettes (`theming/palette_default_dark.rs`,
+`theming/palette_default_light.rs`) from which every UI colour is drawn. Neither
+uses the terminal's re-mappable ANSI slots, so the UI renders identically in every
+terminal. `ElementStyle` is the only thing that maps these colours onto UI
+elements. Default Dark is a cool mid-grey scheme derived from the VS Code Astro
+Dark theme; Default Light is its warm off-white counterpart.
 _Avoid_: Theme, colours, style
+
+**Active colour scheme**:
+The one scheme the app is currently rendering with, held in a process-wide cell
+and swapped at runtime from the Home Configuration modal. The choice is persisted
+as `palette_name`; Default Dark is active until the user picks another.
+_Avoid_: Current theme, selected palette

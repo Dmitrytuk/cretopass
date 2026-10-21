@@ -19,8 +19,10 @@ impossible without touching every module.
 | `background.rs` | The app's Base background renderer: `paint_background(frame, area)` paints `ElementStyle::AppBackground` (`BASE_BG`) across a whole screen before anything else, so no cell falls through to the terminal's own background ([0018](../../../../docs/adr/0018-app-owned-background-fill.md)). |
 | `icon.rs` | `Icon` enum (7 variants: selection arrow, expand/collapse, checkboxes, password marker). Renders to `&'static str`. |
 | `key.rs` | `Action` enum with per-mode dispatch methods (`from_normal`, `from_search`, `from_pending_cut`, `from_pending_paste`, `from_pending_add`, etc.). Converts `KeyEvent` → semantic `Action`. |
-| `palette_default_dark.rs` | The single **Default Dark** colour scheme: one TrueColor RGB constant per colour role — including the `BASE_BG` canvas and the `SURFACE` panels — the cold scheme derived from the VS Code Astro Dark theme ([0015](../../../../docs/adr/0015-default-dark-colour-scheme.md)). Exposed as `palette` by the `pub use … as palette` line in `theming.rs`. |
-| `style.rs` | `ElementStyle` enum (67 variants) organized by UI area (Tree, Mode, FileBrowser, Home, Cursor, etc.). Each resolves to a concrete `ratatui::style::Style` built from `palette`. |
+| `palette_default_dark.rs` | The **Default Dark** colour scheme: a `Palette` value defining every colour role — including the `base_bg` canvas and the `surface` panels — the cold scheme derived from the VS Code Astro Dark theme ([0015](../../../../docs/adr/0015-default-dark-colour-scheme.md)). |
+| `palette_default_light.rs` | The **Default Light** colour scheme: the warm, off-white counterpart of Default Dark, the same roles with light values ([0019](../../../../docs/adr/0019-runtime-colour-scheme-switching.md)). |
+| `theming.rs` | Owns the `Palette` type, the scheme-name constants, and the active-scheme cell (`palette()` / `set_palette()`); a scheme swap is one write ([0019](../../../../docs/adr/0019-runtime-colour-scheme-switching.md)). |
+| `style.rs` | `ElementStyle` enum (67 variants) organized by UI area (Tree, Mode, FileBrowser, Home, Cursor, etc.). Each resolves to a concrete `ratatui::style::Style` built from the active colour scheme. |
 | `status_bar.rs` | The single shared status-bar renderer: `render_status_bar(frame, area, mode_str, mode_style, hint)` draws `[MODE] hints` for every screen (see [0014](../../../docs/adr/0014-status-bar-unification.md)). |
 | `texts.rs` | All UI string constants: labels, hints, mode names, messages, menu items, keyboard help. ~178 lines. |
 
