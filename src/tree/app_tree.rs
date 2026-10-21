@@ -1581,7 +1581,15 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
     }
 
     match &state.mode {
-        InputMode::Normal => (texts::MODE_NAV, ElementStyle::ModeNormal, texts::HINT_TREE),
+        InputMode::Normal => (
+            texts::MODE_NAV,
+            ElementStyle::ModeNormal,
+            if state.cut_buffer.is_some() {
+                texts::HINT_TREE_PASTE
+            } else {
+                texts::HINT_TREE
+            },
+        ),
         InputMode::Search => (
             texts::MODE_SEARCH,
             ElementStyle::ModeSearch,
@@ -2047,7 +2055,13 @@ fn form_hint(form: &FormState, root: &Node) -> &'static str {
     }
     match form.current_row(root) {
         FormRow::AddButton => texts::HINT_FORM_ADD,
-        FormRow::Extra(_) => texts::HINT_FORM_EXTRA,
+        FormRow::Extra(_) => {
+            if form.field_cut_buffer.is_some() {
+                texts::HINT_FORM_EXTRA_PASTE
+            } else {
+                texts::HINT_FORM_EXTRA
+            }
+        }
         FormRow::Name => texts::HINT_FORM,
     }
 }
@@ -2798,6 +2812,15 @@ mod tests {
     }
 
     #[test]
+    fn normal_hint_advertises_paste_only_with_a_cut_buffer() {
+        let mut state = TreeState::new(Node::new("Root"));
+        assert_eq!(status_bar_parts(&state).2, texts::HINT_TREE);
+
+        state.cut_buffer = Some(Node::new("X"));
+        assert_eq!(status_bar_parts(&state).2, texts::HINT_TREE_PASTE);
+    }
+
+    #[test]
     fn confirm_delete_removes_the_field_and_clamps_selection() {
         let mut state = editing_state_with_fields();
         select_row(&mut state, 2); // second extra field
@@ -3324,6 +3347,23 @@ mod tests {
         let mut name = editing_state();
         select_row(&mut name, 0);
         assert_eq!(form_hint(form_of(&name), &name.root), texts::HINT_FORM);
+    }
+
+    #[test]
+    fn form_extra_hint_advertises_paste_only_with_a_field_buffer() {
+        let mut state = editing_state_with_fields();
+        select_row(&mut state, 1);
+        assert_eq!(
+            form_hint(form_of(&state), &state.root),
+            texts::HINT_FORM_EXTRA
+        );
+
+        handle_form(key(KeyCode::Char('d')), &mut state);
+        handle_form(key(KeyCode::Char('d')), &mut state);
+        assert_eq!(
+            form_hint(form_of(&state), &state.root),
+            texts::HINT_FORM_EXTRA_PASTE
+        );
     }
 
     fn open_login_row(state: &mut TreeState) {
