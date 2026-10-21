@@ -6,8 +6,9 @@ use super::palette;
 pub enum ElementStyle {
     /// Base fill painted across the entire screen before anything else, so the
     /// terminal's own background never shows through (see
-    /// [`paint_background`](super::paint_background)). The darkest surface,
-    /// [`BASE_BG`](palette::BASE_BG), behind the [`SURFACE`](palette::SURFACE) panels.
+    /// [`paint_background`](super::paint_background)). The canvas is
+    /// [`BASE_BG`](palette::BASE_BG); the [`SURFACE`](palette::SURFACE) panels sit
+    /// on it, above or below it depending on the scheme.
     AppBackground,
     TreeBorder,
     TreeRow,

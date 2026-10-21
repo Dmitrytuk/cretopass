@@ -16,7 +16,7 @@ impossible without touching every module.
 
 | File | Responsibility |
 |------|---------------|
-| `background.rs` | The app's Base background renderer: `paint_background(frame, area)` paints `ElementStyle::AppBackground` (`BASE_BG`, the darkest surface) across a whole screen before anything else, so no cell falls through to the terminal's own background ([0018](../../../../docs/adr/0018-app-owned-background-fill.md)). |
+| `background.rs` | The app's Base background renderer: `paint_background(frame, area)` paints `ElementStyle::AppBackground` (`BASE_BG`) across a whole screen before anything else, so no cell falls through to the terminal's own background ([0018](../../../../docs/adr/0018-app-owned-background-fill.md)). |
 | `icon.rs` | `Icon` enum (7 variants: selection arrow, expand/collapse, checkboxes, password marker). Renders to `&'static str`. |
 | `key.rs` | `Action` enum with per-mode dispatch methods (`from_normal`, `from_search`, `from_pending_cut`, `from_pending_paste`, `from_pending_add`, etc.). Converts `KeyEvent` → semantic `Action`. |
 | `palette_default.rs` | The named **Default** colour scheme: one TrueColor RGB constant per colour role — including the `BASE_BG` canvas and the `SURFACE` panels — the cool-toned source of every colour ([0015](../../../../docs/adr/0015-default-color-scheme.md)). |

@@ -8,14 +8,15 @@
 //! Every value is a TrueColor RGB colour, so the interface renders identically
 //! in every terminal and never depends on the terminal's own ANSI palette.
 //!
-//! The scheme is derived from the *VS Code Astro Dark* theme: near-black
-//! surfaces (`#0f1014`), a brighter grey-blue foreground (`#b0b0be`), a periwinkle
-//! structural accent (`#9ea1c8`), sky-blue directories (`#5cc9f5`), mint
-//! success (`#23ebc0`), warm-gold warning (`#ffd493`) and muted-violet
-//! information (`#6c5e8a`). [`BASE_BG`] (`#0a0b0e`) is painted across the entire
-//! screen before anything else, so the terminal's own background never shows
-//! through; [`SURFACE`] (`#0f1014`) sits above it as the background of every
-//! block, modal and popup.
+//! The scheme started from the *VS Code Astro Dark* theme, but its surfaces have
+//! been re-tuned to mid greys: a light canvas (`#2c2c2c`) with darker panels
+//! (`#202020`) recessed into it. The rest is derived from that theme — a brighter
+//! grey-blue foreground (`#b0b0be`), a periwinkle structural accent (`#9ea1c8`),
+//! sky-blue directories (`#5cc9f5`), mint success (`#23ebc0`), warm-gold warning
+//! (`#ffd493`) and muted-violet information (`#6c5e8a`). [`BASE_BG`] (`#2c2c2c`)
+//! is painted across the entire screen before anything else, so the terminal's
+//! own background never shows through; [`SURFACE`] (`#202020`) sits *below* it,
+//! so every block, modal and popup reads as recessed into the canvas.
 //!
 //! Nothing outside [`ElementStyle`](super::ElementStyle) maps these colours onto
 //! UI elements.
@@ -25,21 +26,23 @@ use ratatui::style::Color;
 // ── Surfaces ─────────────────────────────────────────────────────────────
 
 /// Background of the whole screen, behind every panel: the Base background.
-/// The darkest surface in the scheme, so panels read as raised above it.
+/// The lighter of the two main surfaces here, so blocks, modals and popups read
+/// as recessed into it.
 pub const BASE_BG: Color = Color::Rgb(0x2C, 0x2C, 0x2C);
-/// Background of blocks, modals and popups. (editor background; brighter than
-/// [`BASE_BG`])
+/// Background of blocks, modals and popups. (a darker grey than [`BASE_BG`], so
+/// the panels it fills read as recessed into the canvas)
 pub const SURFACE: Color = Color::Rgb(0x20, 0x20, 0x20);
 /// Background of a highlighted row (selected, matched or focused) and of the
 /// neutral status-bar badges (`NORMAL` / `DETAIL` / `HELP`).
 pub const SELECTION_BG: Color = Color::Rgb(0x3A, 0x3D, 0x4E);
-/// Background of the file-browser path bar. (between SURFACE and SELECTION_BG)
+/// Background of the file-browser path bar. (darker than both [`SURFACE`] and
+/// [`SELECTION_BG`])
 pub const PATH_BAR_BG: Color = Color::Rgb(0x13, 0x15, 0x1A);
 
 // ── Text ─────────────────────────────────────────────────────────────────
 
 /// Primary foreground text: brighter than the editor's own foreground so menu
-/// and tree rows stay legible over [`SURFACE`].
+/// and tree rows stay legible over the [`BASE_BG`] canvas.
 pub const TEXT: Color = Color::Rgb(0xB0, 0xB0, 0xBE);
 /// Passive, de-emphasised text such as status-bar hints.
 pub const TEXT_MUTED: Color = Color::Rgb(0x68, 0x69, 0x74);
@@ -80,7 +83,8 @@ pub const STATUS_FAILED: Color = Color::Rgb(0xE0, 0x6C, 0x75);
 
 // ── Inverse ──────────────────────────────────────────────────────────────
 
-/// Foreground drawn on a bright badge or on the inverted cursor. (= SURFACE)
+/// Foreground drawn on a bright badge or on the inverted cursor. (near-black ink,
+/// deliberately not `SURFACE` now that the panels are mid grey)
 pub const INVERSE_FG: Color = Color::Rgb(0x0F, 0x10, 0x14);
 /// Background of the inverted cursor. (= TEXT)
 pub const INVERSE_BG: Color = Color::Rgb(0xB0, 0xB0, 0xBE);

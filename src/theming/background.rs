@@ -2,9 +2,9 @@
 //!
 //! Each screen calls [`paint_background`] once, over its full area, before it
 //! draws anything else. The fill is the palette's [`BASE_BG`](crate::theming::palette::BASE_BG)
-//! — the darkest surface, below the [`SURFACE`](crate::theming::palette::SURFACE)
-//! panels (see [ADR 0018](../../../../docs/adr/0018-app-owned-background-fill.md))
-//! — so no cell falls through to the terminal's own background and the interface
+//! — the canvas the [`SURFACE`](crate::theming::palette::SURFACE) panels sit on
+//! (see [ADR 0018](../../../../docs/adr/0018-app-owned-background-fill.md)) — so
+//! no cell falls through to the terminal's own background and the interface
 //! renders identically in every terminal: the same promise the palettes make for
 //! the foreground.
 

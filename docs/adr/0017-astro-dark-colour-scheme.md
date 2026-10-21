@@ -20,13 +20,15 @@ pub use palette_astro_dark as palette;  // Astro Dark (active)
 ## Palette
 
 Every value is taken from the VS Code *Astro Dark* theme, mapped onto the scheme's
-roles.
+roles, except the surface pair (`BASE_BG` / `SURFACE`), which has since been
+re-tuned to mid greys.
 
 | Role | Value | Source |
 |------|-------|--------|
-| `SURFACE` | `#0f1014` | editor background |
+| `BASE_BG` | `#2c2c2c` | canvas; re-tuned to a mid grey, lighter than `SURFACE` |
+| `SURFACE` | `#202020` | block / modal / popup background; re-tuned to a mid grey, recessed below `BASE_BG` |
 | `SELECTION_BG` | `#3a3d4e` | selection over `SURFACE`, brightened for badge / row legibility |
-| `PATH_BAR_BG` | `#13151a` | between the two |
+| `PATH_BAR_BG` | `#13151a` | darker than both `SURFACE` and `SELECTION_BG` |
 | `TEXT` | `#b0b0be` | editor foreground, brightened for legibility |
 | `TEXT_MUTED` / `TEXT_HEADER` | `#686974` | comments |
 | `TEXT_FAINT` | `#43444d` | whitespace guides |
@@ -39,10 +41,14 @@ roles.
 | `INFO` | `#6c5e8a` | muted violet |
 | `STATUS_LOADING` | `#ffd493` | warm gold |
 | `STATUS_SAVING` | `#ff9e93` | salmon |
-| `INVERSE_FG` / `INVERSE_BG` | `#0f1014` / `#b0b0be` | = SURFACE / TEXT |
+| `INVERSE_FG` / `INVERSE_BG` | `#0f1014` / `#b0b0be` | near-black ink / `TEXT` |
 
 ## Consequences
 
 - Both other schemes still compile; the inactive ones are `pub`, so no dead-code
   warning. Astro Dark is the scheme that ships.
 - Switching schemes is a one-line edit plus a rebuild; no other file changes.
+- The surface pair is a deviation from the source theme, and Astro Dark is the
+  only scheme whose canvas is lighter than its panels
+  ([ADR 0018](0018-app-owned-background-fill.md)), so panels here read as
+  recessed rather than raised.
