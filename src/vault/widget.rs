@@ -2211,7 +2211,7 @@ fn render_create_secret_file_modal(frame: &mut Frame, area: Rect, state: &HomeSt
 fn render_alert_modal(frame: &mut Frame, area: Rect, message: &str) {
     let overlay_area = make_overlay(area, 5);
     let block = Block::default()
-        .title(texts::HOME_ALERT)
+        .title(texts::ALERT_TITLE)
         .borders(Borders::ALL)
         .style(ElementStyle::HomeAlertBlock.style());
 

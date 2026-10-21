@@ -20,7 +20,6 @@ pub const HOME_CHANGE_PASSWORD: &str = " Change Password ";
 pub const HOME_CREATE_SECRET: &str = " Create Secret File ";
 pub const HOME_NO_PASSPHRASE: &str = " No Passphrase ";
 pub const HOME_ENTER_PASSPHRASE: &str = " Enter Passphrase ";
-pub const HOME_ALERT: &str = " Alert ";
 pub const ALERT_TITLE: &str = " Alert ";
 pub const HOME_DELETE_CONFIRM: &str = " Confirm Delete ";
 
@@ -134,7 +133,7 @@ pub const HINT_PASSPHRASE: &str = "Enter:confirm  Ctrl+S:show  Esc:cancel";
 pub const HINT_CREATE_SECRET: &str = "Tab/↑/↓:switch  Ctrl+S:show  Enter:create  Esc:cancel";
 pub const HINT_ALERT: &str = "Press any key to dismiss";
 pub const HINT_HELP: &str = "Press any key to close";
-pub const HINT_SAVE_ERROR_BLOCKED: &str = "r:retry  q:quit without saving  any other key:stay";
+pub const HINT_SAVE_EXIT_BLOCKED: &str = "r:retry  q:quit without saving  any other key:stay";
 pub const HINT_DISCARD_CONFIRM: &str = "y:quit without saving  any other key:stay";
 
 pub const TREE_HELP_KEY_BINDINGS: &[&str] = &[
@@ -162,7 +161,6 @@ pub const PROMPT_CHANGE_PW: &str = "Are you sure you want to change the password
 pub const PROMPT_NO_PASSPHRASE: &str = "You are creating the secret file without password?";
 
 pub const OVERLAY_EXPORT_NODE: &str = " Export Node ";
-pub const OVERLAY_EXPORT_FORMAT: &str = " Select Export Format ";
 pub const EXPORT_NODE_OPTIONS: [&str; 2] =
     ["1. Export this node", "2. Export this node with children"];
 pub const HINT_EXPORT_NODE_SELECT: &str = "j/k:nav  Enter:choose  Esc:cancel";

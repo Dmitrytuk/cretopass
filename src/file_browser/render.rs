@@ -465,7 +465,7 @@ fn render_error_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
 
     let popup_area = centered_popup(area, 4);
     let block = Block::default()
-        .title(texts::HOME_ALERT)
+        .title(texts::ALERT_TITLE)
         .borders(Borders::ALL)
         .style(ElementStyle::HomeAlertBlock.style());
 

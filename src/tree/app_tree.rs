@@ -1566,7 +1566,7 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
             return ("", ElementStyle::ModeNormal, texts::HINT_DISCARD_CONFIRM);
         }
         SaveExit::Blocked => {
-            return ("", ElementStyle::ModeNormal, texts::HINT_SAVE_ERROR_BLOCKED);
+            return ("", ElementStyle::ModeNormal, texts::HINT_SAVE_EXIT_BLOCKED);
         }
         SaveExit::None => {}
     }
@@ -1764,7 +1764,7 @@ fn render_export_node_format_overlay(frame: &mut Frame, area: Rect, state: &Tree
     };
 
     let block = Block::default()
-        .title(texts::OVERLAY_EXPORT_FORMAT)
+        .title(texts::EXPORT_SELECT_TITLE)
         .borders(Borders::ALL)
         .style(ElementStyle::FieldTypeBlock.style());
 
