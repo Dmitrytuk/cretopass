@@ -22,11 +22,13 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
         state.pending = AddPrefix::None;
         match key.code {
             KeyCode::Char('f') => {
+                state.creating_is_dir = false;
                 state.focus = FocusTarget::Input;
                 return None;
             }
             KeyCode::Char('d') => {
-                create_new_folder(state);
+                state.creating_is_dir = true;
+                state.focus = FocusTarget::Input;
                 return None;
             }
             _ => {}
@@ -113,6 +115,7 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
         KeyCode::Esc if state.focus == FocusTarget::Input => {
             // In the name input Esc steps back to the list, keeping the draft.
             state.focus = FocusTarget::List;
+            state.creating_is_dir = false;
             return None;
         }
         KeyCode::Esc if state.focus != FocusTarget::Rename => {
@@ -378,6 +381,14 @@ fn handle_input_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileB
                 state.error = Some(texts::MSG_FILE_EXISTS.to_string());
                 return None;
             }
+            if state.creating_is_dir {
+                create_dir_named(state, &name);
+                state.creating_is_dir = false;
+                state.creating_name.clear();
+                state.creating_cursor = 0;
+                state.focus = FocusTarget::List;
+                return None;
+            }
             Some(FileBrowserAction::Selected(
                 full_path.to_string_lossy().to_string(),
             ))
@@ -468,15 +479,11 @@ fn go_to_parent(state: &mut FileBrowserState) {
     }
 }
 
-fn create_new_folder(state: &mut FileBrowserState) {
-    let mut name = texts::NEW_FOLDER_DEFAULT.to_string();
-    let mut counter = 1;
-    while state.current_dir.join(&name).exists() {
-        counter += 1;
-        name = format!("{} ({})", texts::NEW_FOLDER_DEFAULT, counter);
-    }
-
-    let new_path = state.current_dir.join(&name);
+/// Creates a directory named `name` in the current directory, refreshes the
+/// listing, and selects the new entry.  Reports I/O errors through the error
+/// popup.
+fn create_dir_named(state: &mut FileBrowserState, name: &str) {
+    let new_path = state.current_dir.join(name);
     match file_handling::create_dir(&new_path) {
         Ok(()) => {
             let dir = state.current_dir.clone();
@@ -546,7 +553,7 @@ mod tests {
     }
 
     #[test]
-    fn test_a_prefix_then_d_creates_folder() {
+    fn test_a_prefix_then_d_focuses_input_for_new_folder() {
         let mut state = make_state(FileBrowserMode::CreateFile);
         let before = state.entries.len();
 
@@ -554,12 +561,77 @@ mod tests {
         assert_eq!(handle_key(key(KeyCode::Char('d')), &mut state), None);
 
         assert_eq!(state.pending, AddPrefix::None);
+        assert_eq!(state.focus, FocusTarget::Input);
+        assert!(state.creating_is_dir, "`ad` targets a directory");
+
+        // Type the directory name and confirm.
+        for c in "myfolder".chars() {
+            handle_key(key(KeyCode::Char(c)), &mut state);
+        }
+        let result = handle_key(key(KeyCode::Enter), &mut state);
+
+        assert_eq!(result, None, "creating a folder stays in the browser");
         assert_eq!(state.focus, FocusTarget::List);
-        let created = state.current_dir.join(texts::NEW_FOLDER_DEFAULT);
+        assert!(!state.creating_is_dir);
+        assert!(state.creating_name.is_empty());
+        let created = state.current_dir.join("myfolder");
         assert!(created.is_dir(), "folder should have been created");
         assert_eq!(state.entries.len(), before + 1);
 
         let _ = std::fs::remove_dir(&created);
+    }
+
+    #[test]
+    fn test_ad_existing_name_shows_error_and_stays_in_input() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        let existing = state.current_dir.join("taken_dir");
+        let _ = std::fs::remove_dir_all(&existing);
+        std::fs::create_dir_all(&existing).unwrap();
+
+        handle_key(key(KeyCode::Char('a')), &mut state);
+        handle_key(key(KeyCode::Char('d')), &mut state);
+        for c in "taken_dir".chars() {
+            handle_key(key(KeyCode::Char(c)), &mut state);
+        }
+        let result = handle_key(key(KeyCode::Enter), &mut state);
+
+        assert_eq!(result, None);
+        assert_eq!(state.error.as_deref(), Some(texts::MSG_FILE_EXISTS));
+        assert_eq!(
+            state.focus,
+            FocusTarget::Input,
+            "stays in the input on error"
+        );
+
+        let _ = std::fs::remove_dir(&existing);
+    }
+
+    #[test]
+    fn test_esc_in_input_clears_dir_flag() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        handle_key(key(KeyCode::Char('a')), &mut state);
+        handle_key(key(KeyCode::Char('d')), &mut state);
+        assert!(state.creating_is_dir);
+
+        handle_key(key(KeyCode::Esc), &mut state);
+
+        assert_eq!(state.focus, FocusTarget::List);
+        assert!(!state.creating_is_dir);
+    }
+
+    #[test]
+    fn test_af_after_ad_creates_file_not_dir() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+
+        handle_key(key(KeyCode::Char('a')), &mut state);
+        handle_key(key(KeyCode::Char('d')), &mut state);
+        handle_key(key(KeyCode::Esc), &mut state);
+
+        handle_key(key(KeyCode::Char('a')), &mut state);
+        handle_key(key(KeyCode::Char('f')), &mut state);
+
+        assert!(!state.creating_is_dir, "`af` must clear the directory flag");
+        assert_eq!(state.focus, FocusTarget::Input);
     }
 
     #[test]

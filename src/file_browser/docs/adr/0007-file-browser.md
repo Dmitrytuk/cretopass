@@ -48,7 +48,7 @@ file listing UX to vault-specific modal logic, preventing reuse.
 | `h` | Go up one directory (or Esc to cancel in CreateFile/ImportFile mode) |
 | `r` | Rename focused entry |
 | `d` / `Delete` | Delete with confirmation (`y` confirms) |
-| `a` | Prefix: `af` → focus name input (add file), `ad` → new folder (CreateFile mode) |
+| `a` | Prefix: `af` → focus name input (add file), `ad` → focus name input (add directory) (CreateFile mode) |
 | `f` / `d` | (CreateFile mode) second keys of the `a` prefix: `f` → add file, `d` → add directory |
 | `f` | Toggle filter: all files / `.pwd` only |
 | `Esc` | Cancel/close browser (in the name input: return to the list, keeping the draft; in the rename input: cancel the rename and discard edits, keeping the browser open; in the Locations overlay: close the overlay) |

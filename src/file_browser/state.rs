@@ -90,6 +90,10 @@ pub struct FileBrowserState {
     pub search_active: bool,
     pub creating_name: String,
     pub creating_cursor: usize,
+    /// Whether Enter in the name input should create a directory rather than
+    /// hand the chosen path back to the caller (add file). Set by the `ad`
+    /// prefix and cleared when the input closes or a directory is created.
+    pub creating_is_dir: bool,
     pub focus: FocusTarget,
     pub error: Option<String>,
     pub rename_name: String,
@@ -131,6 +135,7 @@ impl FileBrowserState {
             search_active: false,
             creating_name: String::new(),
             creating_cursor: 0,
+            creating_is_dir: false,
             focus: FocusTarget::List,
             error: None,
             rename_name: String::new(),
