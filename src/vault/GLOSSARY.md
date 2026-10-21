@@ -43,7 +43,7 @@ _Avoid_: Dirty, Unsaved
 **Busy indicator**: The animated glyph plus label shown in the title bar while a blocking operation runs. Loading and Saving are busy and spin; Save failed is not busy and shows a static label.
 _Avoid_: Spinner, Throbber, Progress
 
-**Configuration**: Persistent app preferences stored as a binary file in the config directory. Contains Recent secret files, last opened vault path, display preferences, and auto-open-on-startup behavior.
+**Configuration**: Persistent app preferences stored as a binary file in the config directory. Contains Recent secret files, last opened vault path, display preferences, the Active colour scheme, and auto-open-on-startup behavior.
 _Avoid_: AppSettings, Preferences, App configuration
 
 **Recent secret files**: A deduplicated, most-recent-first list of previously opened secret file paths. Displayed in Home below the main actions. Selecting one skips the File Browser and opens the master password prompt directly.
