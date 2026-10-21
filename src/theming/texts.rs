@@ -104,6 +104,9 @@ pub const STATUS_SAVE_FAILED: &str = "Save failed";
 
 pub const HINT_TREE: &str =
     "j/↓ k/↑:up-down  h/← l/→:collaps-expand  H:home  /:search  ?:help  q:quit";
+/// Tree hint shown while the cut buffer holds a node ready to paste.
+pub const HINT_TREE_PASTE: &str =
+    "j/↓ k/↑:up-down  h/← l/→:collaps-expand  p:paste  H:home  /:search  ?:help  q:quit";
 pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
 pub const HINT_PENDING_CUT: &str = "d:cut  Esc:cancel";
 pub const HINT_PASTE: &str = "p:after  P:before  l/→:child  Esc:cancel";
@@ -112,6 +115,9 @@ pub const HINT_DETAIL: &str = "j/k/Tab:navigate  c/y:copy  i/Enter:edit  Esc:clo
 pub const HINT_DETAIL_ALERT: &str = "Press any key to continue";
 pub const HINT_FORM: &str = "j/k:field  i/Enter:edit  u/r:undo/redo  Esc:close";
 pub const HINT_FORM_EXTRA: &str =
+    "j/k:field  i/Enter:edit  dd:cut  Del:delete  u/r:undo/redo  Esc:close";
+/// Form hint shown while the field cut buffer holds a field ready to paste.
+pub const HINT_FORM_EXTRA_PASTE: &str =
     "j/k:field  i/Enter:edit  dd:cut  p:paste  Del:delete  u/r:undo/redo  Esc:close";
 pub const HINT_FORM_ADD: &str = "Enter:add field  Esc:cancel";
 pub const HINT_FORM_INPUT: &str = "Type to edit  Enter/Esc:done";
