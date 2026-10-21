@@ -11,10 +11,10 @@
 //! `#331a84`, Beyond Blue `#6a26f2`, Deep White `#f5f1e6`, Awesome `#e941fb` and
 //! Raspberry `#e8114e` — re-tuned to a warmer look: warm off-white text, a vivid
 //! purple-blue structural accent, and magenta/raspberry for attention and danger.
-//! The surface is a neutral grey rather than the palette's own indigo, so the
-//! panel background does not assume an indigo terminal. The recommended terminal
-//! background is [`SURFACE`] (`#3a3a3a`); the app also paints it behind every
-//! block and modal.
+//! The surface family (`SURFACE`, `SELECTION_BG`, `PATH_BAR_BG`, `INVERSE_FG`) is
+//! neutral grey rather than the palette's own indigo, so panels and the cursor do
+//! not assume an indigo terminal. The recommended terminal background is
+//! [`SURFACE`] (`#3a3a3a`); the app also paints it behind every block and modal.
 //!
 //! Nothing outside [`ElementStyle`](super::ElementStyle) maps these colours onto
 //! UI elements.
@@ -25,10 +25,10 @@ use ratatui::style::Color;
 
 /// Background of blocks, modals and popups. (neutral grey)
 pub const SURFACE: Color = Color::Rgb(0x3A, 0x3A, 0x3A);
-/// Background of a highlighted row (selected, matched or focused).
-pub const SELECTION_BG: Color = Color::Rgb(0x4a, 0x24, 0x98);
-/// Background of the file-browser path bar.
-pub const PATH_BAR_BG: Color = Color::Rgb(0x3f, 0x1e, 0x8a);
+/// Background of a highlighted row (selected, matched or focused). (lighter grey)
+pub const SELECTION_BG: Color = Color::Rgb(0x4A, 0x4A, 0x4A);
+/// Background of the file-browser path bar. (grey, between SURFACE and SELECTION_BG)
+pub const PATH_BAR_BG: Color = Color::Rgb(0x42, 0x42, 0x42);
 
 // ── Text ─────────────────────────────────────────────────────────────────
 
@@ -73,7 +73,7 @@ pub const STATUS_FAILED: Color = Color::Rgb(0xe8, 0x11, 0x4e);
 
 // ── Inverse ──────────────────────────────────────────────────────────────
 
-/// Foreground drawn on a bright badge or on the inverted cursor. (Supreme Indigo)
-pub const INVERSE_FG: Color = Color::Rgb(0x33, 0x1a, 0x84);
+/// Foreground drawn on a bright badge or on the inverted cursor. (= SURFACE)
+pub const INVERSE_FG: Color = Color::Rgb(0x3A, 0x3A, 0x3A);
 /// Background of the inverted cursor. (= TEXT)
 pub const INVERSE_BG: Color = Color::Rgb(0xf5, 0xf1, 0xe6);

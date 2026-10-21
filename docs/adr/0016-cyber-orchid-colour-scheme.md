@@ -23,13 +23,14 @@ resolve through this re-export, so switching the line re-skins the whole app.
 
 Built from the *Cyber Orchid* palette (Supreme Indigo `#331a84`, Beyond Blue
 `#6a26f2`, Deep White `#f5f1e6`, Awesome `#e941fb`, Raspberry `#e8114e`); the
-remaining roles are tints in the same gamut, except the surface (decision 5).
+remaining roles are tints in the same gamut, except the surface family, which is
+neutral grey (decision 5).
 
 | Role | Value | Notes |
 |------|-------|-------|
-| `SURFACE` | `#3a3a3a` | Neutral grey, not the palette indigo |
-| `SELECTION_BG` | `#4a2498` | Lightened surface |
-| `PATH_BAR_BG` | `#3f1e8a` | Surface nuance |
+| `SURFACE` | `#3a3a3a` | Neutral grey |
+| `SELECTION_BG` | `#4a4a4a` | Lighter grey |
+| `PATH_BAR_BG` | `#424242` | Grey between the two |
 | `TEXT` | `#f5f1e6` | Deep White |
 | `TEXT_MUTED` | `#9a8bc4` | Tint |
 | `TEXT_FAINT` | `#6b5c94` | Tint |
@@ -44,7 +45,7 @@ remaining roles are tints in the same gamut, except the surface (decision 5).
 | `STATUS_LOADING` | `#5ce0a8` | Mint-cyan |
 | `STATUS_SAVING` | `#f0c84a` | Warm gold |
 | `STATUS_FAILED` | `#e8114e` | Raspberry |
-| `INVERSE_FG` / `INVERSE_BG` | `#331a84` / `#f5f1e6` | Supreme Indigo / Deep White |
+| `INVERSE_FG` / `INVERSE_BG` | `#3a3a3a` / `#f5f1e6` | = SURFACE / TEXT |
 
 ## Decisions
 
@@ -52,9 +53,9 @@ remaining roles are tints in the same gamut, except the surface (decision 5).
 |---|----------|-----------|
 | 1 | **Same constants, second module.** `palette_cyber_orchid.rs` mirrors every name in `palette_default.rs`. | `ElementStyle` and every consumer stay untouched; the schemes are drop-in interchangeable. |
 | 2 | **Compile-time switch via one `pub use … as palette` line.** | No runtime registry, no new dependency, no state to thread through the app — matches the "no theme UI" requirement. |
-| 3 | **Missing roles derived as tints of the five source colours.** | The palette has five colours but the scheme has ~20 roles; green/amber are added as complementary hues so success/warning stay legible on the indigo surface. |
+| 3 | **Missing roles derived as tints of the five source colours.** | The palette has five colours but the scheme has ~20 roles; green/amber are added as complementary hues so success/warning stay legible on the grey surface. |
 | 4 | **`INFO` takes Awesome (`#e941fb`), `DANGER`/`STATUS_FAILED` take Raspberry.** | Preserves the cross-screen badge vocabulary of [ADR 0014](0014-status-bar-unification.md) while giving the cyber look its magenta attention colour. |
-| 5 | **`SURFACE` is a neutral grey (`#3a3a3a`), not the palette's indigo.** | Overlays and modals paint `SURFACE`; a neutral grey keeps them legible against any terminal background instead of assuming an indigo one. The indigo stays in the accents (`ACCENT`, `SELECTION_BG`, `PATH_BAR_BG`, `INVERSE_FG`). |
+| 5 | **The surface family is neutral grey, not the palette's indigo.** `SURFACE` `#3a3a3a`, `SELECTION_BG` `#4a4a4a`, `PATH_BAR_BG` `#424242`, `INVERSE_FG` `#3a3a3a`. | Overlays and modals paint `SURFACE`; grey keeps them legible against any terminal background instead of assuming an indigo one. The indigo stays only where colour carries meaning — the structural accent (`ACCENT`, `DIR_NAME`) and the semantic hues. |
 
 ## Consequences
 
