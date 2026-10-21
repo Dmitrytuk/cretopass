@@ -2,6 +2,7 @@ pub mod background;
 pub mod icon;
 pub mod key;
 pub mod palette_default_dark;
+pub mod palette_default_light;
 pub mod spinner;
 pub mod status;
 pub mod status_bar;
