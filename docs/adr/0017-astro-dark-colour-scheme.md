@@ -31,7 +31,7 @@ roles.
 | `TEXT_MUTED` / `TEXT_HEADER` | `#686974` | comments |
 | `TEXT_FAINT` | `#43444d` | whitespace guides |
 | `CURSOR_DIM` | `#817c9c` | muted grey-purple |
-| `ACCENT` | `#acaaff` | periwinkle |
+| `ACCENT` | `#8a8db0` | muted slate-lavender |
 | `DIR_NAME` | `#5cc9f5` | sky blue |
 | `SUCCESS` | `#23ebc0` | mint |
 | `WARNING` | `#ffd493` | warm gold |

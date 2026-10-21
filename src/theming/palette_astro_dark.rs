@@ -10,7 +10,7 @@
 //!
 //! The scheme is derived from the *VS Code Astro Dark* theme: near-black
 //! surfaces (`#0f1014`), a brighter grey-blue foreground (`#b0b0be`), a periwinkle
-//! structural accent (`#acaaff`), sky-blue directories (`#5cc9f5`), mint
+//! structural accent (`#8a8db0`), sky-blue directories (`#5cc9f5`), mint
 //! success (`#23ebc0`), warm-gold warning (`#ffd493`) and muted-violet
 //! information (`#6c5e8a`). The recommended terminal background is [`SURFACE`]
 //! (`#0f1014`); the app also paints it behind every block and modal.
@@ -47,8 +47,8 @@ pub const CURSOR_DIM: Color = Color::Rgb(0x81, 0x7C, 0x9C);
 // ── Accents ──────────────────────────────────────────────────────────────
 
 /// Structural accent: block borders, password markers, passphrase labels.
-/// (periwinkle)
-pub const ACCENT: Color = Color::Rgb(0xAC, 0xAF, 0xFF);
+/// (muted slate-lavender)
+pub const ACCENT: Color = Color::Rgb(0x8A, 0x8D, 0xB0);
 /// Directory names in the file browser. (sky blue)
 pub const DIR_NAME: Color = Color::Rgb(0x5C, 0xC9, 0xF5);
 
