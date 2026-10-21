@@ -969,8 +969,8 @@ fn picker_items(_form: &FormState) -> Vec<PickerItem> {
     vec![
         PickerItem::Login,
         PickerItem::Password,
-        PickerItem::Custom,
         PickerItem::Desc,
+        PickerItem::Custom,
     ]
 }
 
@@ -985,7 +985,7 @@ fn handle_custom_field_name(key: event::KeyEvent, state: &mut TreeState) {
 
     match Action::from_custom_field_name(&key) {
         Action::Cancel => {
-            state.mode = InputMode::SelectFieldType { form, selected: 2 };
+            state.mode = InputMode::SelectFieldType { form, selected: 3 };
         }
         Action::Confirm => {
             let label = if input.is_empty() {
@@ -1566,7 +1566,7 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
             return ("", ElementStyle::ModeNormal, texts::HINT_DISCARD_CONFIRM);
         }
         SaveExit::Blocked => {
-            return ("", ElementStyle::ModeNormal, texts::HINT_SAVE_ERROR_BLOCKED);
+            return ("", ElementStyle::ModeNormal, texts::HINT_SAVE_EXIT_BLOCKED);
         }
         SaveExit::None => {}
     }
@@ -1576,7 +1576,7 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
 
     match &state.mode {
         InputMode::Normal => (
-            texts::MODE_NORMAL,
+            texts::MODE_NAV,
             ElementStyle::ModeNormal,
             texts::HINT_TREE,
         ),
@@ -1764,7 +1764,7 @@ fn render_export_node_format_overlay(frame: &mut Frame, area: Rect, state: &Tree
     };
 
     let block = Block::default()
-        .title(texts::OVERLAY_EXPORT_FORMAT)
+        .title(texts::EXPORT_SELECT_TITLE)
         .borders(Borders::ALL)
         .style(ElementStyle::FieldTypeBlock.style());
 
@@ -2653,14 +2653,17 @@ mod tests {
         handle_form(key(KeyCode::Enter), &mut state);
         assert!(matches!(state.mode, InputMode::SelectFieldType { .. }));
 
-        // Description is offered last.
+        // Custom is offered last; Description sits before it.
         let items = match &state.mode {
             InputMode::SelectFieldType { form, .. } => picker_items(form),
             _ => unreachable!(),
         };
-        assert_eq!(items.last(), Some(&PickerItem::Desc));
+        assert_eq!(items.last(), Some(&PickerItem::Custom));
 
-        let desc_index = items.len() - 1;
+        let desc_index = items
+            .iter()
+            .position(|item| *item == PickerItem::Desc)
+            .expect("Desc offered");
         if let InputMode::SelectFieldType {
             ref mut selected, ..
         } = state.mode

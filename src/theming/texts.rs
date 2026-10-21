@@ -20,7 +20,6 @@ pub const HOME_CHANGE_PASSWORD: &str = " Change Password ";
 pub const HOME_CREATE_SECRET: &str = " Create Secret File ";
 pub const HOME_NO_PASSPHRASE: &str = " No Passphrase ";
 pub const HOME_ENTER_PASSPHRASE: &str = " Enter Passphrase ";
-pub const HOME_ALERT: &str = " Alert ";
 pub const ALERT_TITLE: &str = " Alert ";
 pub const HOME_DELETE_CONFIRM: &str = " Confirm Delete ";
 
@@ -28,6 +27,7 @@ pub const BROWSER_OPEN: &str = " Open File ";
 pub const BROWSER_CREATE: &str = " Create New Secret File ";
 pub const BROWSER_IMPORT: &str = " Import File ";
 pub const OVERLAY_NEW_FILE: &str = " New File ";
+pub const OVERLAY_NEW_DIR: &str = " New Folder ";
 pub const OVERLAY_RENAME: &str = " Rename ";
 pub const OVERLAY_LOCATIONS: &str = " Locations ";
 pub const LOCATION_HOME: &str = "Home";
@@ -73,6 +73,7 @@ pub const LABEL_GENERATOR_SYMBOLS: &str = "Special characters";
 pub const LABEL_GENERATOR_RUN: &str = "Generate";
 
 pub const MODE_NORMAL: &str = "NORMAL";
+pub const MODE_NAV: &str = "NAV";
 pub const MODE_SEARCH: &str = "SEARCH";
 pub const MODE_PENDING_CUT: &str = "CUT";
 pub const MODE_PASTE: &str = "PASTE";
@@ -101,7 +102,8 @@ pub const STATUS_LOADING: &str = "Loading";
 pub const STATUS_SAVING: &str = "Saving";
 pub const STATUS_SAVE_FAILED: &str = "Save failed";
 
-pub const HINT_TREE: &str = "H:home  /:search  ?:help  q:quit";
+pub const HINT_TREE: &str =
+    "j/↓ k/↑:up-down  h/← l/→:collaps-expand  H:home  /:search  ?:help  q:quit";
 pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
 pub const HINT_PENDING_CUT: &str = "d:cut  Esc:cancel";
 pub const HINT_PASTE: &str = "p:after  P:before  l/→:child  Esc:cancel";
@@ -133,7 +135,7 @@ pub const HINT_PASSPHRASE: &str = "Enter:confirm  Ctrl+S:show  Esc:cancel";
 pub const HINT_CREATE_SECRET: &str = "Tab/↑/↓:switch  Ctrl+S:show  Enter:create  Esc:cancel";
 pub const HINT_ALERT: &str = "Press any key to dismiss";
 pub const HINT_HELP: &str = "Press any key to close";
-pub const HINT_SAVE_ERROR_BLOCKED: &str = "r:retry  q:quit without saving  any other key:stay";
+pub const HINT_SAVE_EXIT_BLOCKED: &str = "r:retry  q:quit without saving  any other key:stay";
 pub const HINT_DISCARD_CONFIRM: &str = "y:quit without saving  any other key:stay";
 
 pub const TREE_HELP_KEY_BINDINGS: &[&str] = &[
@@ -161,7 +163,6 @@ pub const PROMPT_CHANGE_PW: &str = "Are you sure you want to change the password
 pub const PROMPT_NO_PASSPHRASE: &str = "You are creating the secret file without password?";
 
 pub const OVERLAY_EXPORT_NODE: &str = " Export Node ";
-pub const OVERLAY_EXPORT_FORMAT: &str = " Select Export Format ";
 pub const EXPORT_NODE_OPTIONS: [&str; 2] =
     ["1. Export this node", "2. Export this node with children"];
 pub const HINT_EXPORT_NODE_SELECT: &str = "j/k:nav  Enter:choose  Esc:cancel";
@@ -206,10 +207,10 @@ pub const FIELD_PASSWORD: &str = "Password";
 pub const FB_HINT_FILTER: &str = " [f] ";
 pub const FB_HINT_IMPORT_TYPES: &str = " [json/csv/xml] ";
 pub const FB_HINT_SEARCH: &str = " [/]search ";
-pub const FB_HINT_NEW: &str = " [n]new ";
+pub const FB_HINT_NEW: &str = " [a]add ";
 pub const FB_HINT_RENAME: &str = " [r]rename ";
 pub const FB_HINT_DELETE: &str = " [d]delete ";
-pub const FB_PROMPT_NEW: &str = " n:new file  N:new folder  Esc:cancel ";
+pub const FB_PROMPT_NEW: &str = " f:add file  d:add dir  Esc:cancel ";
 pub const FB_HINT_CONFIRM: &str = "Enter:confirm";
 pub const FB_HINT_CANCEL: &str = "Esc:cancel";
 pub const FB_HINT_DELETE_CONFIRM: &str = "y/Enter:confirm  any key:cancel";

@@ -3,7 +3,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use super::state::{FileBrowserMode, FileBrowserState, FileFilter, FocusTarget, NewFilePrefix};
+use super::state::{AddPrefix, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget};
 use crate::cursor::cursor_field_spans;
 use crate::theming::{ElementStyle, Icon, texts};
 
@@ -49,10 +49,16 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
     // Transient prompts are centered popups stacked over the browser:
     // the active input / delete confirmation first, the error on top.
     if state.mode == FileBrowserMode::CreateFile && state.focus == FocusTarget::Input {
+        // `af` creates a file, `ad` creates a directory — match the title to it.
+        let input_title = if state.creating_is_dir {
+            texts::OVERLAY_NEW_DIR
+        } else {
+            texts::OVERLAY_NEW_FILE
+        };
         render_input_popup(
             frame,
             overlay_area,
-            texts::OVERLAY_NEW_FILE,
+            input_title,
             texts::LABEL_NAME_INLINE,
             &state.creating_name,
             state.creating_cursor,
@@ -225,8 +231,8 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBrowserState)
 ///
 /// Transient overlays (error, delete confirmation, Locations picker, rename /
 /// name input) capture keys, so they own the hint while shown. The list hint is
-/// otherwise dynamic: while searching it is the query prompt, while the `n`
-/// prefix is armed it is the new-file prompt, and otherwise it is the set of
+/// otherwise dynamic: while searching it is the query prompt, while the `a`
+/// prefix is armed it is the add-file prompt, and otherwise it is the set of
 /// advertised keys.
 ///
 /// The badge is the browser mode (`OPEN`/`CREATE`/`IMPORT`) unless the
@@ -271,7 +277,7 @@ pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementSt
 
     let hint = if state.search_active {
         format!("Search: {}█", state.search_query)
-    } else if state.pending == NewFilePrefix::Pending {
+    } else if state.pending == AddPrefix::Pending {
         texts::FB_PROMPT_NEW.to_string()
     } else if state.focus == FocusTarget::Input {
         fb_input_hint()
@@ -459,7 +465,7 @@ fn render_error_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
 
     let popup_area = centered_popup(area, 4);
     let block = Block::default()
-        .title(texts::HOME_ALERT)
+        .title(texts::ALERT_TITLE)
         .borders(Borders::ALL)
         .style(ElementStyle::HomeAlertBlock.style());
 
@@ -686,6 +692,23 @@ mod tests {
     }
 
     #[test]
+    fn test_render_create_dir_name_input_titled_new_folder() {
+        let mut state = new_state(FileBrowserMode::CreateFile);
+        populate_tmp(&mut state);
+        state.focus = FocusTarget::Input;
+        state.creating_is_dir = true;
+        let text = render_to_text(&mut state);
+        assert!(
+            text.contains("New Folder"),
+            "the `ad` name input should be titled as a folder:\n{text}"
+        );
+        assert!(
+            !text.contains("New File"),
+            "the `ad` name input must not be titled as a file:\n{text}"
+        );
+    }
+
+    #[test]
     fn test_render_rename_input_is_popup() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
@@ -796,8 +819,8 @@ mod tests {
         populate_tmp(&mut state);
         let (_, _, hint) = status_parts(&state);
         assert!(
-            hint.contains("[n]new"),
-            "CreateFile should advertise the new file/folder hint: {hint}"
+            hint.contains("[a]add"),
+            "CreateFile should advertise the add file/folder hint: {hint}"
         );
     }
 
@@ -807,8 +830,8 @@ mod tests {
         populate_tmp(&mut state);
         let (_, _, hint) = status_parts(&state);
         assert!(
-            !hint.contains("[n]new"),
-            "OpenFile must not advertise the new file/folder hint: {hint}"
+            !hint.contains("[a]add"),
+            "OpenFile must not advertise the add file/folder hint: {hint}"
         );
     }
 
@@ -816,11 +839,11 @@ mod tests {
     fn status_parts_pending_prefix_shows_new_file_prompt() {
         let mut state = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut state);
-        state.pending = NewFilePrefix::Pending;
+        state.pending = AddPrefix::Pending;
         let (_, _, hint) = status_parts(&state);
         assert!(
-            hint.contains("n:new file") && hint.contains("N:new folder"),
-            "the pending n-prefix prompt should be the hint: {hint}"
+            hint.contains("f:add file") && hint.contains("d:add dir"),
+            "the pending a-prefix prompt should be the hint: {hint}"
         );
     }
 
