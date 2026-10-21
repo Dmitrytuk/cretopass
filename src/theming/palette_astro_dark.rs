@@ -65,10 +65,10 @@ pub const INFO: Color = Color::Rgb(0x6C, 0x5E, 0x8A);
 
 // ── Status (title bar) ───────────────────────────────────────────────────
 
-/// A blocking load (decrypt / open) is running. (mint)
-pub const STATUS_LOADING: Color = Color::Rgb(0x23, 0xEB, 0xC0);
-/// A save is running. (warm gold)
-pub const STATUS_SAVING: Color = Color::Rgb(0xFF, 0xD4, 0x93);
+/// A blocking load (decrypt / open) is running. (warm gold)
+pub const STATUS_LOADING: Color = Color::Rgb(0xFF, 0xD4, 0x93);
+/// A save is running. (salmon)
+pub const STATUS_SAVING: Color = Color::Rgb(0xFF, 0x9E, 0x93);
 /// The latest save attempt failed. (soft red)
 pub const STATUS_FAILED: Color = Color::Rgb(0xE0, 0x6C, 0x75);
 

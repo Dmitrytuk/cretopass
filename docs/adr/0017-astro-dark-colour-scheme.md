@@ -37,8 +37,8 @@ roles.
 | `WARNING` | `#ffd493` | warm gold |
 | `DANGER` / `STATUS_FAILED` | `#e06c75` | soft red |
 | `INFO` | `#6c5e8a` | muted violet |
-| `STATUS_LOADING` | `#23ebc0` | mint |
-| `STATUS_SAVING` | `#ffd493` | warm gold |
+| `STATUS_LOADING` | `#ffd493` | warm gold |
+| `STATUS_SAVING` | `#ff9e93` | salmon |
 | `INVERSE_FG` / `INVERSE_BG` | `#0f1014` / `#b0b0be` | = SURFACE / TEXT |
 
 ## Consequences
