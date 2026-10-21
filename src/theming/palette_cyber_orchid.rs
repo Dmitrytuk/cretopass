@@ -10,7 +10,7 @@
 //! The scheme is built from the *Cyber Orchid* palette and is warmer than the
 //! Default: deep indigo surfaces, a warm off-white text and a vivid purple-blue
 //! structural accent, with magenta and raspberry for attention and danger. The
-//! five source colours are Supreme Indigo `#331a84`, Beyond Blue `#6a26f2`,
+//! five source colours are Supreme Indigo `#3a3a3a`, Beyond Blue `#6a26f2`,
 //! Deep White `#f5f1e6`, Awesome `#e941fb` and Raspberry `#e8114e`; the remaining
 //! roles are tints of those that fit the same gamut. The recommended terminal
 //! background is [`SURFACE`] (`#331a84`); the app also paints it behind every
@@ -24,7 +24,7 @@ use ratatui::style::Color;
 // ── Surfaces ─────────────────────────────────────────────────────────────
 
 /// Background of blocks, modals and popups. (Supreme Indigo)
-pub const SURFACE: Color = Color::Rgb(0x33, 0x1a, 0x84);
+pub const SURFACE: Color = Color::Rgb(0x3A, 0x3A, 0x3A);
 /// Background of a highlighted row (selected, matched or focused).
 pub const SELECTION_BG: Color = Color::Rgb(0x4a, 0x24, 0x98);
 /// Background of the file-browser path bar.
