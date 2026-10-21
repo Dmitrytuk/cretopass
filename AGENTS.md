@@ -52,7 +52,5 @@ map and cross-module data flow.
 - [0012 — Password generator](./docs/adr/0012-password-generator.md) — strict-leaf generator, `Ctrl+G` modal, symbol checklist, session settings
 - [0013 — Login word generator](./docs/adr/0013-login-word-generator.md) — syllable-assembled `Login` words, type-dispatched `Ctrl+G`, coalescing undo
 - [0014 — Unified status bar](./docs/adr/0014-status-bar-unification.md) — one renderer, `[MODE] hints`, cross-screen badge colour vocabulary
-- [0015 — Default colour scheme](./docs/adr/0015-default-color-scheme.md) — terminal-independent TrueColor palette, brighter status glyphs, muted hints
-- [0016 — Cyber Orchid colour scheme](./docs/adr/0016-cyber-orchid-colour-scheme.md) — alternative warm scheme, compile-time `pub use` switch
-- [0017 — Astro Dark colour scheme](./docs/adr/0017-astro-dark-colour-scheme.md) — alternative cold scheme from the VS Code Astro Dark theme
+- [0015 — Default Dark colour scheme](./docs/adr/0015-default-dark-colour-scheme.md) — the single terminal-independent TrueColor palette, derived from the VS Code Astro Dark theme
 - [0018 — App-owned background fill](./docs/adr/0018-app-owned-background-fill.md) — `paint_background` paints the `BASE_BG` canvas across every screen so the terminal background never shows, with `SURFACE` panels above or below it

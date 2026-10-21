@@ -1,13 +1,11 @@
 # 0018 — App-owned background fill
 
-The colour schemes ([0015](0015-default-color-scheme.md),
-[0016](0016-cyber-orchid-colour-scheme.md),
-[0017](0017-astro-dark-colour-scheme.md)) defined `SURFACE` and called it "the
-recommended terminal background": blocks, modals and popups painted it, but the
-Tree and Home screens styled text with a foreground only. The largest area on
-screen — the tree gutter, the menu gutter, the whole status-bar row — was
-therefore still the *terminal's* own background, so the promise that the UI
-"renders identically in every terminal" held only for the foreground.
+The colour scheme ([0015](0015-default-dark-colour-scheme.md)) defined `SURFACE`
+and called it "the recommended terminal background": blocks, modals and popups
+painted it, but the Tree and Home screens styled text with a foreground only. The
+largest area on screen — the tree gutter, the menu gutter, the whole status-bar
+row — was therefore still the *terminal's* own background, so the promise that
+the UI "renders identically in every terminal" held only for the foreground.
 
 **Decision:** the app owns its background, and that background is its own
 surface. One shared renderer, `theming::paint_background`, paints
@@ -18,15 +16,12 @@ Browser and every modal) each call it exactly once. `SURFACE` goes back to
 meaning what its name says: the background of blocks, modals and popups, always a
 *different* colour from the canvas.
 
-The schemes disagree about which of the two is lighter, and nothing in the code
-depends on that: Default and Cyber Orchid put the canvas below the panels (raised
-overlays), while Astro Dark puts it above them (recessed overlays).
+The scheme puts the canvas above the panels, and nothing in the code depends on
+which of the two is lighter:
 
 | Scheme | `BASE_BG` (canvas) | `SURFACE` (panels) | Panels read as |
 |--------|--------------------|--------------------|----------------|
-| Default | `#141526` | `#1a1b2e` | raised |
-| Cyber Orchid | `#303030` | `#3a3a3a` | raised |
-| Astro Dark | `#2c2c2c` | `#202020` | recessed |
+| Default Dark | `#2c2c2c` | `#202020` | recessed |
 
 ## Consequences
 
@@ -49,7 +44,7 @@ overlays), while Astro Dark puts it above them (recessed overlays).
   background.
 - The terminal background is no longer a *requirement* on the user; setting it to
   `BASE_BG` is merely cosmetic now.
-- In Astro Dark the canvas is a mid grey (`#2c2c2c`) while `TEXT_MUTED`,
+- In Default Dark the canvas is a mid grey (`#2c2c2c`) while `TEXT_MUTED`,
   `TEXT_FAINT`, `TEXT_HEADER`, `SELECTION_BG` and `PATH_BAR_BG` were tuned
   against the near-black panel the canvas used to share. Elements drawn straight
   onto the canvas — tree rows, the Home menu, the status-bar hints, the

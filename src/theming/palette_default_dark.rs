@@ -1,9 +1,7 @@
-//! The **Astro Dark** colour scheme — a source of every colour in the UI.
-//! Which module is active is chosen by the `pub use … as palette` line in
-//! [`theming`](super); the other schemes (`palette_default`,
-//! `palette_cyber_orchid`) render the same roles in different palettes. It
-//! exposes the exact same roles as the other schemes, so `ElementStyle` maps
-//! them onto UI elements unchanged.
+//! The **Default Dark** colour scheme — the single source of every colour in the
+//! UI, exposed as `palette` by the `pub use … as palette` line in
+//! [`theming`](super). It defines every colour role, so `ElementStyle` maps them
+//! onto UI elements directly.
 //!
 //! Every value is a TrueColor RGB colour, so the interface renders identically
 //! in every terminal and never depends on the terminal's own ANSI palette.
