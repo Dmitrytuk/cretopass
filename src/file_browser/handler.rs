@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::state::{
-    FileBrowserAction, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget, NewFilePrefix,
+    AddPrefix, FileBrowserAction, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget,
     build_locations, list_entries, preselect_location,
 };
 use crate::file_handling;
@@ -17,15 +17,15 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
         return None;
     }
 
-    // ── New file / new folder prefix (`n`) in CreateFile mode ──
-    if state.pending == NewFilePrefix::Pending {
-        state.pending = NewFilePrefix::None;
+    // ── Add file / add directory prefix (`a`) in CreateFile mode ──
+    if state.pending == AddPrefix::Pending {
+        state.pending = AddPrefix::None;
         match key.code {
-            KeyCode::Char('n') => {
+            KeyCode::Char('f') => {
                 state.focus = FocusTarget::Input;
                 return None;
             }
-            KeyCode::Char('N') => {
+            KeyCode::Char('d') => {
                 create_new_folder(state);
                 return None;
             }
@@ -225,8 +225,8 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
                 };
                 None
             }
-            KeyCode::Char('n') if state.mode == FileBrowserMode::CreateFile => {
-                state.pending = NewFilePrefix::Pending;
+            KeyCode::Char('a') if state.mode == FileBrowserMode::CreateFile => {
+                state.pending = AddPrefix::Pending;
                 None
             }
             _ => None,
@@ -289,8 +289,8 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
             state.clamp_selection();
             None
         }
-        KeyCode::Char('n') if state.mode == FileBrowserMode::CreateFile => {
-            state.pending = NewFilePrefix::Pending;
+        KeyCode::Char('a') if state.mode == FileBrowserMode::CreateFile => {
+            state.pending = AddPrefix::Pending;
             None
         }
         KeyCode::Char('r') => {
@@ -528,32 +528,32 @@ mod tests {
         }
     }
 
-    // ── `n` prefix in CreateFile mode ──
+    // ── `a` prefix in CreateFile mode ──
 
     #[test]
-    fn test_n_prefix_then_n_focuses_input() {
+    fn test_a_prefix_then_f_focuses_input() {
         let mut state = make_state(FileBrowserMode::CreateFile);
         assert_eq!(state.focus, FocusTarget::List);
 
-        assert_eq!(handle_key(key(KeyCode::Char('n')), &mut state), None);
-        assert_eq!(state.pending, NewFilePrefix::Pending);
+        assert_eq!(handle_key(key(KeyCode::Char('a')), &mut state), None);
+        assert_eq!(state.pending, AddPrefix::Pending);
         // Still on the list — the prefix waits for the follow-up key.
         assert_eq!(state.focus, FocusTarget::List);
 
-        assert_eq!(handle_key(key(KeyCode::Char('n')), &mut state), None);
-        assert_eq!(state.pending, NewFilePrefix::None);
+        assert_eq!(handle_key(key(KeyCode::Char('f')), &mut state), None);
+        assert_eq!(state.pending, AddPrefix::None);
         assert_eq!(state.focus, FocusTarget::Input);
     }
 
     #[test]
-    fn test_n_prefix_then_upper_n_creates_folder() {
+    fn test_a_prefix_then_d_creates_folder() {
         let mut state = make_state(FileBrowserMode::CreateFile);
         let before = state.entries.len();
 
-        assert_eq!(handle_key(key(KeyCode::Char('n')), &mut state), None);
-        assert_eq!(handle_key(key(KeyCode::Char('N')), &mut state), None);
+        assert_eq!(handle_key(key(KeyCode::Char('a')), &mut state), None);
+        assert_eq!(handle_key(key(KeyCode::Char('d')), &mut state), None);
 
-        assert_eq!(state.pending, NewFilePrefix::None);
+        assert_eq!(state.pending, AddPrefix::None);
         assert_eq!(state.focus, FocusTarget::List);
         let created = state.current_dir.join(texts::NEW_FOLDER_DEFAULT);
         assert!(created.is_dir(), "folder should have been created");
@@ -563,20 +563,20 @@ mod tests {
     }
 
     #[test]
-    fn test_n_prefix_other_key_cancels() {
+    fn test_a_prefix_other_key_cancels() {
         let mut state = make_state(FileBrowserMode::CreateFile);
 
-        handle_key(key(KeyCode::Char('n')), &mut state);
-        assert_eq!(state.pending, NewFilePrefix::Pending);
+        handle_key(key(KeyCode::Char('a')), &mut state);
+        assert_eq!(state.pending, AddPrefix::Pending);
 
         let result = handle_key(key(KeyCode::Char('x')), &mut state);
         assert_eq!(result, None);
-        assert_eq!(state.pending, NewFilePrefix::None);
+        assert_eq!(state.pending, AddPrefix::None);
         assert_eq!(state.focus, FocusTarget::List);
     }
 
     #[test]
-    fn test_n_prefix_switches_to_input_on_empty_list() {
+    fn test_a_prefix_switches_to_input_on_empty_list() {
         let mut state =
             FileBrowserState::new(FileBrowserMode::CreateFile, &FileBrowserSession::default());
         state.current_dir = std::path::PathBuf::from("/tmp/__empty_test_dir__");
@@ -584,8 +584,8 @@ mod tests {
         state.entries = file_handling::list_dir(&state.current_dir).unwrap();
         assert_eq!(state.filtered_len(), 0);
 
-        handle_key(key(KeyCode::Char('n')), &mut state);
-        let result = handle_key(key(KeyCode::Char('n')), &mut state);
+        handle_key(key(KeyCode::Char('a')), &mut state);
+        let result = handle_key(key(KeyCode::Char('f')), &mut state);
         assert_eq!(result, None);
         assert_eq!(state.focus, FocusTarget::Input);
 
@@ -593,14 +593,14 @@ mod tests {
     }
 
     #[test]
-    fn test_n_arms_no_prefix_in_open_file_mode() {
+    fn test_a_arms_no_prefix_in_open_file_mode() {
         let mut state = make_state(FileBrowserMode::OpenFile);
         assert_eq!(state.focus, FocusTarget::List);
 
-        handle_key(key(KeyCode::Char('n')), &mut state);
+        handle_key(key(KeyCode::Char('a')), &mut state);
 
-        // `n` only works in CreateFile mode.
-        assert_eq!(state.pending, NewFilePrefix::None);
+        // `a` only works in CreateFile mode.
+        assert_eq!(state.pending, AddPrefix::None);
         assert_eq!(state.focus, FocusTarget::List);
     }
 
@@ -701,9 +701,9 @@ mod tests {
         state.current_dir = dir.clone();
         state.entries = file_handling::list_dir(&dir).unwrap_or_default();
 
-        // Step 1: n n → focus becomes Input
-        handle_key(key(KeyCode::Char('n')), &mut state);
-        handle_key(key(KeyCode::Char('n')), &mut state);
+        // Step 1: a f → focus becomes Input
+        handle_key(key(KeyCode::Char('a')), &mut state);
+        handle_key(key(KeyCode::Char('f')), &mut state);
         assert_eq!(state.focus, FocusTarget::Input);
 
         // Step 2: type filename
@@ -782,16 +782,16 @@ mod tests {
     }
 
     #[test]
-    fn test_typing_n_in_input_is_text() {
+    fn test_typing_prefix_chars_in_input_is_text() {
         let mut state = make_state(FileBrowserMode::CreateFile);
         state.focus = FocusTarget::Input;
 
-        // `n` / `N` are typed as text while the name input is focused.
-        handle_key(key(KeyCode::Char('n')), &mut state);
-        handle_key(key(KeyCode::Char('N')), &mut state);
+        // `a` / `f` are typed as text while the name input is focused.
+        handle_key(key(KeyCode::Char('a')), &mut state);
+        handle_key(key(KeyCode::Char('f')), &mut state);
 
-        assert_eq!(state.creating_name, "nN");
-        assert_eq!(state.pending, NewFilePrefix::None);
+        assert_eq!(state.creating_name, "af");
+        assert_eq!(state.pending, AddPrefix::None);
     }
 
     #[test]

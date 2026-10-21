@@ -28,17 +28,17 @@ pub enum FocusTarget {
     Locations,
 }
 
-/// Transient prefix state for the `n` key in `CreateFile` mode.
+/// Transient prefix state for the `a` key in `CreateFile` mode.
 ///
-/// The first `n` arms the prefix; the next key decides the action (`n` for a
-/// new file, `N` for a new folder). Any other key cancels. Mirrors the tree's
+/// The first `a` arms the prefix; the next key decides the action (`f` for a
+/// new file, `d` for a new directory). Any other key cancels. Mirrors the tree's
 /// prefix modes (`PendingCut` / `PendingAdd`) without adding an `InputMode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum NewFilePrefix {
+pub enum AddPrefix {
     /// No prefix pending.
     #[default]
     None,
-    /// First `n` seen; waiting for the follow-up key.
+    /// First `a` seen; waiting for the follow-up key.
     Pending,
 }
 
@@ -99,8 +99,8 @@ pub struct FileBrowserState {
     /// If set, the file browser will protect this path from deletion
     /// and report renames so the caller can update its state.
     pub active_vault_path: Option<PathBuf>,
-    /// Prefix state for the `n` key (new file / new folder) in `CreateFile` mode.
-    pub pending: NewFilePrefix,
+    /// Prefix state for the `a` key (add file / add directory) in `CreateFile` mode.
+    pub pending: AddPrefix,
     /// Whether hidden (dot-prefixed) entries are currently listed.
     pub show_hidden: bool,
     /// Rows of the Locations overlay; empty until it is opened.
@@ -138,7 +138,7 @@ impl FileBrowserState {
             rename_target: String::new(),
             confirm_delete: None,
             active_vault_path: None,
-            pending: NewFilePrefix::default(),
+            pending: AddPrefix::default(),
             show_hidden: session.show_hidden,
             locations: Vec::new(),
             location_selected: 0,

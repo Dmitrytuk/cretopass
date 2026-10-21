@@ -18,8 +18,8 @@ file listing UX to vault-specific modal logic, preventing reuse.
 
 | File | Responsibility |
 |------|---------------|
-| `state.rs` | `FileBrowserState`, `FileBrowserMode` (OpenFile/CreateFile/ImportFile), `FileBrowserSession` (last directory + hidden setting), `Location` (Home or mounted disk row), `FocusTarget` (List/Input/Rename/Locations), `NewFilePrefix` (None/Pending), `FileFilter` (All/PwdKeeperOnly), `FileBrowserAction` (Selected/Cancelled/Renamed), viewport offsets (`scroll`, `location_scroll`) |
-| `handler.rs` | `handle_key()` dispatches to list/input/rename/locations handlers. Supports j/k navigation, Enter, search, filter toggle, hidden-entry toggle (`Ctrl+h`), directory traversal, rename, delete, the `n` prefix (new file/folder), text editing |
+| `state.rs` | `FileBrowserState`, `FileBrowserMode` (OpenFile/CreateFile/ImportFile), `FileBrowserSession` (last directory + hidden setting), `Location` (Home or mounted disk row), `FocusTarget` (List/Input/Rename/Locations), `AddPrefix` (None/Pending), `FileFilter` (All/PwdKeeperOnly), `FileBrowserAction` (Selected/Cancelled/Renamed), viewport offsets (`scroll`, `location_scroll`) |
+| `handler.rs` | `handle_key()` dispatches to list/input/rename/locations handlers. Supports j/k navigation, Enter, search, filter toggle, hidden-entry toggle (`Ctrl+h`), directory traversal, rename, delete, the `a` prefix (add file/directory), text editing |
 | `render.rs` | `render_file_browser()` renders the overlay with the path bar and file list (icons, selection, scrolling). It draws no status bar of its own — the owning Home window renders the browser's badge and hints from `status_parts()`, the mode→`(badge, style, hint)` mapping. Centered popups for the name input / rename input / delete confirmation / error, plus the Locations overlay |
 
 ## Contracts
@@ -48,8 +48,8 @@ file listing UX to vault-specific modal logic, preventing reuse.
 | `h` | Go up one directory (or Esc to cancel in CreateFile/ImportFile mode) |
 | `r` | Rename focused entry |
 | `d` / `Delete` | Delete with confirmation (`y` confirms) |
-| `n` | Prefix: `nn` → focus name input, `nN` → new folder (CreateFile mode) |
-| `N` | (CreateFile mode) second key of the `n` prefix → new folder |
+| `a` | Prefix: `af` → focus name input (add file), `ad` → new folder (CreateFile mode) |
+| `f` / `d` | (CreateFile mode) second keys of the `a` prefix: `f` → add file, `d` → add directory |
 | `f` | Toggle filter: all files / `.pwd` only |
 | `Esc` | Cancel/close browser (in the name input: return to the list, keeping the draft; in the rename input: cancel the rename and discard edits, keeping the browser open; in the Locations overlay: close the overlay) |
 
