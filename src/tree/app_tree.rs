@@ -8,7 +8,9 @@ use crate::cursor::{
 use crate::file_handling::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree};
 use crate::generator::{self, PasswordLength, PasswordParams};
 use crate::theming::Action;
-use crate::theming::{ElementStyle, Icon, SPINNER_TICK, render_status_bar, texts};
+use crate::theming::{
+    ElementStyle, Icon, SPINNER_TICK, paint_background, render_status_bar, texts,
+};
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{
     AddPosition, FormFocus, FormPending, FormRow, FormState, GeneratorModal, InputMode, SaveExit,
@@ -1502,6 +1504,10 @@ fn handle_help(key: event::KeyEvent, state: &mut TreeState) {
 fn ui(frame: &mut Frame, state: &mut TreeState) {
     let area = frame.area();
 
+    // Own the background: paint SURFACE across the whole screen first so the
+    // terminal's own background never shows through.
+    paint_background(frame, area);
+
     let layout = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
 
     TreeWidget::render(frame, layout[0], state);
@@ -2333,6 +2339,8 @@ fn render_detail_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -3406,5 +3414,39 @@ mod tests {
         handle_form(key(KeyCode::Esc), &mut state);
         handle_form(key(KeyCode::Char('u')), &mut state);
         assert_eq!(password_value(&state), "old");
+    }
+
+    /// Renders `ui` into a test backend and asserts that no cell falls through
+    /// to the terminal's own background (see
+    /// [ADR 0018](../../../../docs/adr/0018-app-owned-background-fill.md)).
+    fn assert_no_terminal_background(state: &mut TreeState) {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| ui(frame, state)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        for (i, cell) in buffer.content.iter().enumerate() {
+            assert_ne!(
+                cell.style().bg,
+                Some(Color::Reset),
+                "cell {i} ({:?}) fell through to the terminal background",
+                cell.symbol()
+            );
+        }
+    }
+
+    #[test]
+    fn tree_screen_paints_every_cell() {
+        let mut state = TreeState::new(crate::build_demo_tree());
+        assert_no_terminal_background(&mut state);
+    }
+
+    #[test]
+    fn search_overlay_paints_every_cell() {
+        // The Search overlay clears its rect before drawing the block, the path
+        // most likely to expose the terminal background.
+        let mut state = TreeState::new(Node::new("Root"));
+        state.mode = InputMode::Search;
+        state.search_query = "Ro".to_string();
+        assert_no_terminal_background(&mut state);
     }
 }

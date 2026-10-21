@@ -55,7 +55,7 @@ A second scheme, **Cyber Orchid**, lives alongside it in
 | 3 | **Brighten the status glyphs and drop their bold.** Loading/Saving/SaveFailed use bright RGB without `Modifier::BOLD`. | The spinner was meant to draw the eye; bold muddied the glyph and the label. |
 | 4 | **Hints are `TEXT_MUTED` (`#9aaec9`).** | Visible on the surface, but quieter than body text so hints never steal focus from the mode badge. |
 | 5 | **Mode-badge colour coding is unchanged.** Destructive red, attention yellow, active input blue, generator cyan, add green, passive selection. Only the concrete shades move to RGB. | [ADR 0014](0014-status-bar-unification.md) made badge colour a cross-screen vocabulary; the scheme preserves it. |
-| 6 | **Overlays are painted `SURFACE`, not `Black`.** | On a black terminal an ANSI-black panel was invisible; indigo surfaces read as distinct panels. SURFACE doubles as the recommended terminal background. |
+| 6 | **Overlays are painted `SURFACE`, not `Black`.** | On a black terminal an ANSI-black panel was invisible; indigo surfaces read as distinct panels. SURFACE is also the app's Base background, painted across every screen ([0018](0018-app-owned-background-fill.md)). |
 
 ## Consequences
 
@@ -66,9 +66,9 @@ A second scheme, **Cyber Orchid**, lives alongside it in
 - The `status_bar` unit test that asserted the `CUT` badge was `Color::Red` now
   asserts `palette::DANGER`, so the badge test tracks the scheme instead of a
   palette slot.
-- Only overlays and modals paint `SURFACE`; the main Tree and Home screens keep
-  the terminal's own background, so a user who wants the full look sets their
-  terminal background to `#1a1b2e`.
+- Every screen paints `SURFACE` across itself as its Base background, and the
+  overlays and modals keep using it too ([0018](0018-app-owned-background-fill.md)),
+  so the terminal's own background no longer shows anywhere.
 
 ## Rejected alternatives
 

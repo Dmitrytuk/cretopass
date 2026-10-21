@@ -1,3 +1,4 @@
+pub mod background;
 pub mod icon;
 pub mod key;
 pub mod palette_astro_dark;
@@ -16,6 +17,7 @@ pub use palette_astro_dark as palette;
 // pub use palette_cyber_orchid as palette;
 // pub use palette_default as palette;
 
+pub use background::paint_background;
 pub use icon::Icon;
 pub use key::Action;
 pub use spinner::{SPINNER_TICK, Spinner};

@@ -14,8 +14,9 @@
 //! purple-blue structural accent, and magenta/raspberry for attention and danger.
 //! The surface family (`SURFACE`, `SELECTION_BG`, `PATH_BAR_BG`, `INVERSE_FG`) is
 //! neutral grey rather than the palette's own indigo, so panels and the cursor do
-//! not assume an indigo terminal. The recommended terminal background is
-//! [`SURFACE`] (`#3a3a3a`); the app also paints it behind every block and modal.
+//! not assume an indigo terminal. [`SURFACE`] (`#3a3a3a`) is painted across the
+//! entire screen before anything else, so the terminal's own background never
+//! shows through; blocks, modals and popups paint it as well.
 //!
 //! Nothing outside [`ElementStyle`](super::ElementStyle) maps these colours onto
 //! UI elements.
@@ -24,7 +25,7 @@ use ratatui::style::Color;
 
 // ── Surfaces ─────────────────────────────────────────────────────────────
 
-/// Background of blocks, modals and popups. (neutral grey)
+/// Background of the whole screen and of blocks, modals and popups. (neutral grey)
 pub const SURFACE: Color = Color::Rgb(0x3A, 0x3A, 0x3A);
 /// Background of a highlighted row (selected, matched or focused). (lighter grey)
 pub const SELECTION_BG: Color = Color::Rgb(0x4A, 0x4A, 0x4A);

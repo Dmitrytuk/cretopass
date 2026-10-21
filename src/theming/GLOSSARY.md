@@ -1,7 +1,8 @@
 # Theming
 
 Centralized presentation layer: UI strings, styles, icons, key bindings, and the
-shared status-bar renderer. Depends on nothing else in the project.
+shared status-bar and Base background renderers. Depends on nothing else in the
+project.
 
 ## Language
 
@@ -22,6 +23,12 @@ _Avoid_: Mode indicator, mode chip, mode tag
 The passive key binding text shown after the Mode badge on the Status bar. It
 describes the keys available in the current mode.
 _Avoid_: Help text, keybinding bar, help bar
+
+**Base background**:
+The colour the app paints across the entire screen before drawing anything, so
+no cell ever falls through to the terminal's own background. One shared renderer
+does this for every screen, and the colour is the active scheme's `SURFACE`.
+_Avoid_: Canvas, wallpaper, terminal background
 
 **Default colour scheme**:
 The named TrueColor RGB palette (`theming/palette_default.rs`) from which every

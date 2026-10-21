@@ -16,12 +16,13 @@ impossible without touching every module.
 
 | File | Responsibility |
 |------|---------------|
+| `background.rs` | The app's Base background renderer: `paint_background(frame, area)` paints `ElementStyle::AppBackground` across a whole screen before anything else, so no cell falls through to the terminal's own background ([0018](../../../../docs/adr/0018-app-owned-background-fill.md)). |
 | `icon.rs` | `Icon` enum (7 variants: selection arrow, expand/collapse, checkboxes, password marker). Renders to `&'static str`. |
 | `key.rs` | `Action` enum with per-mode dispatch methods (`from_normal`, `from_search`, `from_pending_cut`, `from_pending_paste`, `from_pending_add`, etc.). Converts `KeyEvent` → semantic `Action`. |
 | `palette_default.rs` | The named **Default** colour scheme: one TrueColor RGB constant per colour role, the cool-toned source of every colour ([0015](../../../../docs/adr/0015-default-color-scheme.md)). |
 | `palette_cyber_orchid.rs` | An alternative **Cyber Orchid** warm scheme: the same roles re-tuned to the Cyber Orchid palette ([0016](../../../../docs/adr/0016-cyber-orchid-colour-scheme.md)). |
 | `palette_astro_dark.rs` | The alternative **Astro Dark** cold scheme, derived from the VS Code Astro Dark theme ([0017](../../../../docs/adr/0017-astro-dark-colour-scheme.md)). Which scheme is active is chosen by the `pub use … as palette` line in `theming.rs`; nothing else changes. |
-| `style.rs` | `ElementStyle` enum (66 variants) organized by UI area (Tree, Mode, FileBrowser, Home, Cursor, etc.). Each resolves to a concrete `ratatui::style::Style` built from `palette`. |
+| `style.rs` | `ElementStyle` enum (67 variants) organized by UI area (Tree, Mode, FileBrowser, Home, Cursor, etc.). Each resolves to a concrete `ratatui::style::Style` built from `palette`. |
 | `status_bar.rs` | The single shared status-bar renderer: `render_status_bar(frame, area, mode_str, mode_style, hint)` draws `[MODE] hints` for every screen (see [0014](../../../docs/adr/0014-status-bar-unification.md)). |
 | `texts.rs` | All UI string constants: labels, hints, mode names, messages, menu items, keyboard help. ~178 lines. |
 
