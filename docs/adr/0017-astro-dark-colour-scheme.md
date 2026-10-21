@@ -27,7 +27,7 @@ roles.
 | `SURFACE` | `#0f1014` | editor background |
 | `SELECTION_BG` | `#2e303e` | selection over `SURFACE` |
 | `PATH_BAR_BG` | `#13151a` | between the two |
-| `TEXT` | `#9898a2` | editor foreground |
+| `TEXT` | `#b0b0be` | editor foreground, brightened for legibility |
 | `TEXT_MUTED` / `TEXT_HEADER` | `#686974` | comments |
 | `TEXT_FAINT` | `#43444d` | whitespace guides |
 | `CURSOR_DIM` | `#817c9c` | muted grey-purple |
@@ -39,7 +39,7 @@ roles.
 | `INFO` | `#c055e0` | magenta |
 | `STATUS_LOADING` | `#23ebc0` | mint |
 | `STATUS_SAVING` | `#ffd493` | warm gold |
-| `INVERSE_FG` / `INVERSE_BG` | `#0f1014` / `#9898a2` | = SURFACE / TEXT |
+| `INVERSE_FG` / `INVERSE_BG` | `#0f1014` / `#b0b0be` | = SURFACE / TEXT |
 
 ## Consequences
 

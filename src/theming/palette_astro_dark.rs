@@ -9,7 +9,7 @@
 //! in every terminal and never depends on the terminal's own ANSI palette.
 //!
 //! The scheme is derived from the *VS Code Astro Dark* theme: near-black
-//! surfaces (`#0f1014`), a muted grey-blue foreground (`#9898a2`), a periwinkle
+//! surfaces (`#0f1014`), a brighter grey-blue foreground (`#b0b0be`), a periwinkle
 //! structural accent (`#acaaff`), sky-blue directories (`#5cc9f5`), mint
 //! success (`#23ebc0`), warm-gold warning (`#ffd493`) and magenta information
 //! (`#c055e0`). The recommended terminal background is [`SURFACE`]
@@ -31,8 +31,9 @@ pub const PATH_BAR_BG: Color = Color::Rgb(0x13, 0x15, 0x1A);
 
 // ── Text ─────────────────────────────────────────────────────────────────
 
-/// Primary foreground text. (editor foreground)
-pub const TEXT: Color = Color::Rgb(0x98, 0x98, 0xA2);
+/// Primary foreground text: brighter than the editor's own foreground so menu
+/// and tree rows stay legible over [`SURFACE`].
+pub const TEXT: Color = Color::Rgb(0xB0, 0xB0, 0xBE);
 /// Passive, de-emphasised text such as status-bar hints.
 pub const TEXT_MUTED: Color = Color::Rgb(0x68, 0x69, 0x74);
 /// Faintest text: empty states and secondary details.
@@ -75,4 +76,4 @@ pub const STATUS_FAILED: Color = Color::Rgb(0xE0, 0x6C, 0x75);
 /// Foreground drawn on a bright badge or on the inverted cursor. (= SURFACE)
 pub const INVERSE_FG: Color = Color::Rgb(0x0F, 0x10, 0x14);
 /// Background of the inverted cursor. (= TEXT)
-pub const INVERSE_BG: Color = Color::Rgb(0x98, 0x98, 0xA2);
+pub const INVERSE_BG: Color = Color::Rgb(0xB0, 0xB0, 0xBE);
