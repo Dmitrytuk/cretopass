@@ -819,7 +819,7 @@ mod tests {
         state.pending = AddPrefix::Pending;
         let (_, _, hint) = status_parts(&state);
         assert!(
-            hint.contains("af:add file") && hint.contains("ad:add dir"),
+            hint.contains("f:add file") && hint.contains("d:add dir"),
             "the pending a-prefix prompt should be the hint: {hint}"
         );
     }
