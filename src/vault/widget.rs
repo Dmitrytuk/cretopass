@@ -196,8 +196,8 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 ///
 /// The UI thread keeps redrawing every [`SPINNER_TICK`] until the worker
 /// finishes, draining any input so a stray key cannot trigger a second action
-/// once the wait ends. If a draw fails mid-wait the worker keeps running: the
-/// save/decrypt is *not* cancelled.
+/// once the wait ends. If a draw or a poll fails mid-wait the worker keeps
+/// running: the save/decrypt is *not* cancelled.
 ///
 /// The status is cleared on return (success or error) without a final draw; the
 /// caller sets the next modal and the outer loop's top-of-iteration draw renders
@@ -223,10 +223,13 @@ where
     while !handle.is_finished() {
         state.spinner.advance();
         terminal.draw(|f| render(f, f.area(), state))?;
-        if event::poll(SPINNER_TICK)? {
-            // Drain every pending event so none is reinterpreted afterwards.
-            while event::poll(Duration::ZERO)? {
-                let _ = event::read()?;
+        if event::poll(SPINNER_TICK).unwrap_or(false) {
+            // Drain every pending event so none is reinterpreted afterwards. An
+            // unreadable input source (e.g. stdin is not a terminal) is not fatal
+            // here: there is nothing to drain, and the save/decrypt in flight must
+            // not be cancelled — same rule as a failed draw above.
+            while event::poll(Duration::ZERO).unwrap_or(false) {
+                let _ = event::read();
             }
         }
     }
@@ -2515,5 +2518,77 @@ mod tests {
             Palette::from_name(&state.config.palette_name),
             "cancelling must revert the colours along with the config"
         );
+    }
+
+    /// Minimal importable fixture: one root node with one child.
+    const IMPORT_FIXTURE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<node name="Secrets" description="My vault">
+  <extra_fields>
+    <field type="Note" value="top level note"/>
+  </extra_fields>
+  <children>
+    <node name="Login" description="My email login">
+      <extra_fields>
+        <field type="Password" value="s3cret"/>
+      </extra_fields>
+    </node>
+  </children>
+</node>"#;
+
+    /// Pins the `ImportFile` flow before it moves out of the file-browser handler
+    /// into the orchestrator (plan task 9): selecting an importable file parses
+    /// it, wraps it in a timestamped node under the open Root, saves the vault,
+    /// and reports success in an alert.
+    #[test]
+    fn import_file_selected_wraps_and_saves_under_the_root() {
+        let dir = std::env::temp_dir().join(format!("cretopass-import-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let vault_path = dir.join("vault.age").to_string_lossy().to_string();
+        std::fs::write(dir.join("note.xml"), IMPORT_FIXTURE_XML).unwrap();
+
+        let node = file_handling::create_secret_file(&vault_path, "pw").unwrap();
+        let mut state = HomeState::new();
+        state.active_vault = Some(ActiveVaultState {
+            path: Some(vault_path.clone()),
+            passphrase: zeroize::Zeroizing::new(b"pw".to_vec()),
+            node: Some(node),
+        });
+
+        let mut browser =
+            FileBrowserState::new(FileBrowserMode::ImportFile, &FileBrowserSession::default());
+        browser.current_dir = dir.clone();
+        browser.entries = file_handling::list_dir(&dir).unwrap();
+        browser.selected = browser
+            .entries
+            .iter()
+            .position(|e| e.name == "note.xml")
+            .expect("the fixture must be listed");
+        state.modal = Some(HomeModal::FileBrowser(browser));
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        handle_file_browser_key(
+            event::KeyEvent::from(KeyCode::Enter),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+
+        match &state.modal {
+            Some(HomeModal::Alert { message }) => assert_eq!(message, texts::MSG_IMPORT_SUCCESS),
+            _ => panic!("a successful import must be reported in an alert"),
+        }
+
+        // The import was persisted: re-reading the vault shows the wrapper.
+        let data = file_handling::validate_encrypted_file(&vault_path).unwrap();
+        let saved = file_handling::decrypt_to_node(&data, "pw").unwrap();
+        let wrapper = saved
+            .children
+            .iter()
+            .find(|n| n.name.starts_with("imported_note_"))
+            .expect("the imported tree must be wrapped under the open root");
+        assert_eq!(wrapper.children.len(), 1);
+        assert_eq!(wrapper.children[0].name, "Secrets");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
