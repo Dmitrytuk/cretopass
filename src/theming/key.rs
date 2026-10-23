@@ -289,6 +289,7 @@ impl Action {
             KeyCode::Esc => Self::Back,
             KeyCode::Char('d') | KeyCode::Delete => Self::ConfigDelete,
             KeyCode::Char('H') => Self::ReturnToMenu,
+            KeyCode::Char('?') => Self::OpenHelp,
             _ => Self::None,
         }
     }
@@ -617,6 +618,14 @@ mod tests {
         assert_eq!(Action::from_home(&key(KeyCode::Char('l'))), Action::Confirm);
         assert_eq!(Action::from_home(&key(KeyCode::Right)), Action::Confirm);
         assert_eq!(Action::from_home(&key(KeyCode::Enter)), Action::Confirm);
+    }
+
+    #[test]
+    fn from_home_question_opens_about() {
+        assert_eq!(
+            Action::from_home(&key(KeyCode::Char('?'))),
+            Action::OpenHelp
+        );
     }
 
     fn ctrl(code: KeyCode) -> KeyEvent {

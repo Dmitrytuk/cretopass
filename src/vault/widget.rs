@@ -6,7 +6,7 @@ use std::time::Duration;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::{Frame, Terminal, backend::Backend};
 
 use crate::cursor::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
@@ -74,6 +74,8 @@ enum HomeModal {
     ExportConfirm {
         export_type: String,
     },
+    /// App identity, version, and feedback links, opened with `?` from the menu.
+    About,
 }
 
 pub struct HomeState {
@@ -249,6 +251,9 @@ fn handle_home_key<B: Backend>(
         Action::NavUp => state.select_prev(),
         Action::ReturnToMenu => {
             reopen_tree(state, terminal)?;
+        }
+        Action::OpenHelp => {
+            state.modal = Some(HomeModal::About);
         }
         Action::Back => {
             if state
@@ -1151,6 +1156,13 @@ fn handle_modal_key<B: Backend>(
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
+    // The About overlay is a read-only info card: any key dismisses it, like the
+    // Tree's help overlay.
+    if matches!(state.modal, Some(HomeModal::About)) {
+        state.modal = None;
+        return Ok(());
+    }
+
     let is_passphrase = matches!(
         state.modal,
         Some(HomeModal::PassphraseInput { .. }) | Some(HomeModal::Alert { .. })
@@ -1629,8 +1641,62 @@ fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
         Some(HomeModal::ExportConfirm { export_type }) => {
             render_export_confirm_modal(frame, area, export_type)
         }
+        Some(HomeModal::About) => render_about_modal(frame, area),
         None => {}
     }
+}
+
+/// Renders the About overlay: app identity, version, and feedback links.
+///
+/// The body is built from the shared constants in [`texts`] — the same values
+/// the CLI `--help` footer uses. Any key dismisses it, like the Tree's help
+/// overlay.
+fn render_about_modal(frame: &mut Frame, area: Rect) {
+    let lines = about_lines();
+    let overlay_height = (lines.len() as u16 + 2).min(area.height.saturating_sub(2));
+    let width = area.width.saturating_sub(4);
+    let overlay_area = Rect {
+        x: area.width.saturating_sub(width) / 2,
+        y: area.height.saturating_sub(overlay_height) / 2,
+        width,
+        height: overlay_height,
+    };
+
+    let block = Block::default()
+        .title(texts::OVERLAY_ABOUT)
+        .borders(Borders::ALL)
+        .style(ElementStyle::HelpBlock.style());
+
+    let inner = block.inner(overlay_area);
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(block, overlay_area);
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
+/// Builds the About overlay body from the shared app-identity constants.
+fn about_lines() -> Vec<Line<'static>> {
+    let text = ElementStyle::HelpText.style();
+    let styled = |body: String| Line::from(Span::styled(body, text));
+    vec![
+        styled(format!("{} {}", texts::APP_NAME, texts::APP_VERSION)),
+        styled(texts::APP_TAGLINE.to_string()),
+        Line::from(""),
+        styled(texts::ABOUT_LABEL_BUGS.to_string()),
+        styled(format!("  {}", texts::ISSUES_URL)),
+        Line::from(""),
+        styled(texts::ABOUT_LABEL_SECURITY.to_string()),
+        styled(format!("  {}", texts::SECURITY_ADVISORY_URL)),
+        Line::from(""),
+        styled(format!(
+            "{}{}",
+            texts::ABOUT_LICENSE_PREFIX,
+            texts::LICENSE_NAME
+        )),
+        styled(format!("  {}", texts::LICENSE_URL)),
+    ]
 }
 
 fn render_home_window(frame: &mut Frame, area: Rect, state: &HomeState) {
@@ -2339,6 +2405,11 @@ fn home_status_parts(state: &HomeState) -> (&'static str, ElementStyle, Cow<'_, 
             ElementStyle::ModeFieldType,
             Cow::Borrowed(texts::HINT_EXPORT_CONFIRM),
         ),
+        Some(HomeModal::About) => (
+            texts::MODE_ABOUT,
+            ElementStyle::ModeHelp,
+            Cow::Borrowed(texts::HINT_HELP),
+        ),
     }
 }
 
@@ -2391,5 +2462,27 @@ mod tests {
         state.modal = Some(HomeModal::FileBrowser(browser));
 
         assert_no_terminal_background(&mut state);
+    }
+
+    /// The About overlay is also a `Clear` user; the base fill plus its styled
+    /// block must keep every cell off the terminal background.
+    #[test]
+    fn about_modal_paints_every_cell() {
+        let mut state = HomeState::new();
+        state.modal = Some(HomeModal::About);
+
+        assert_no_terminal_background(&mut state);
+    }
+
+    /// The About overlay carries its own `ABOUT` badge and dismiss hint on the
+    /// shared status bar, like every other Home mode.
+    #[test]
+    fn about_modal_status_bar_parts() {
+        let mut state = HomeState::new();
+        state.modal = Some(HomeModal::About);
+
+        let (mode, _, hint) = home_status_parts(&state);
+        assert_eq!(mode, texts::MODE_ABOUT);
+        assert_eq!(hint.as_ref(), texts::HINT_HELP);
     }
 }
