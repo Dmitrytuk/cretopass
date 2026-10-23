@@ -18,30 +18,43 @@ to reason about.
 
 | File | Responsibility |
 |------|---------------|
+| `widget.rs` | The Home screen: `run()` event loop, modal dispatch, `run_with_spinner`. Re-exports `HomeState`. |
+| `widget/state.rs` | `HomeState` — menu cursor, active vault, busy status and spinner, File Browser session memory, generator settings. |
+| `widget/menu.rs` | The Home menu: `handle_home_key` and the pure `menu_intent`. |
+| `widget/modal.rs` | The contract vocabulary: `Modal` (the one-window slot) and `HomeAction` (what a modal asks for); re-exports the modal types. |
+| `widget/modal/` | One file per modal: `browser.rs`, `unlock.rs`, `create_secret.rs`, `change_password.rs`, `configuration.rs`, `confirmation.rs`, `export.rs`, `alert.rs`, `about.rs`. |
+| `widget/orchestrator.rs` | The one place that performs a `HomeAction`: `execute`, plus the File Browser opener. |
+| `widget/orchestrator/` | One file per flow group: `vault.rs` (unlock, create, re-key, launch Tree), `import.rs`, `recent.rs`, `settings.rs`, `export.rs`. |
+| `widget/render.rs` | Rendering the menu, the modal on top of it, and the status bar. |
+| `widget/secret_field.rs` | `SecretField` / `SecretFieldGroup`: masked multi-field editing, shared by the three password prompts. |
+| `widget/chrome.rs` | Overlay geometry and painting shared by the modals. |
 | `active_file.rs` | `ActiveVaultState` — holds `path: Option<String>`, `passphrase: Zeroizing<Vec<u8>>`, `node: Option<Node>`. Bridge between home and tree. |
-| `widget.rs` | `HomeState`, `HomeModal` (12 variants), `run()` event loop, key handlers, all modal rendering (file browser, passphrase input, create secret file, config, alerts, delete confirm, change password, export) |
 | `utils.rs` | `Configuration` struct, `config_dir()`, `push_recent_secret_file()`, `save_config()`/`load_config()` via rkyv, legacy `settings.pwd` → `config.pwd` migration |
+
+Modals never do I/O and never build one another: they report a `HomeAction` and
+the orchestrator performs it. See [0021](0021-home-intent-contract.md).
 
 ## Home screen flow
 
 1. `cargo run` → `vault::widget::run()`
 2. Menu: "Open secret file", "Create new secret file", "Import from file", recent files list, "Configuration", "Export active file", "Change master password", "Quit"
-3. "Open secret file" → `FileBrowser` modal (OpenFile mode) → validate age header + size → `PassphraseInput` modal → decrypt → `push_recent_secret_file()` → launch tree
-4. "Create new secret file" → `FileBrowser` (CreateFile mode) → Enter on a name hard-blocks if the path already exists → probe writability → `CreateSecretFile` modal (passphrase + confirmation, `Ctrl+S` reveals) → create encrypted file with root `"Secrets"` → launch tree. An all-empty pair falls through to `ConfirmNoPassphrase`.
-5. Auto-open on startup: if config has `open_last_opened_file_on_startup`, validates the file and opens PassphraseInput immediately
+3. "Open secret file" → `BrowserModal` (OpenFile mode) → validate age header + size → `UnlockPrompt` → decrypt → `push_recent_secret_file()` → launch tree
+4. "Create new secret file" → `BrowserModal` (CreateFile mode) → Enter on a name hard-blocks if the path already exists → probe writability → `CreateSecretPrompt` (passphrase + confirmation, `Ctrl+S` reveals) → create encrypted file with root `"Secrets"` → launch tree. An all-empty pair falls through to the `Confirmation` asking for a passwordless file.
+5. Auto-open on startup: if config has `open_last_opened_file_on_startup`, validates the file and opens the unlock prompt immediately
 6. After successful open, path saved to recent secret files (deduplicated, most recent first)
 7. Active vault path shown in window title bar: `" Home — /path/to/file "` / `" Tree — /path/to/file "`
 
-## HomeModal variants
+## Modals
 
-12 variants: `FileBrowser`, `PassphraseInput{file_path, file_data, passphrase, cursor, show, error}`,
-`CreateSecretFile{file_path, passphrase, pass_cursor, confirm, confirm_cursor, focused, show, error}`,
-`Configuration{setting_idx}`, `Alert{message}`, `DeleteConfirm{path}`,
-`ChangePwConfirm`, `ConfirmNoPassphrase{file_path}`,
-`ChangePwInput{current, new_pass, confirm, focused, show, error}`,
-`ExportSelectType{path}`, `ExportConfirm{path, format}`, `ExportDone{message}`.
+Nine `Modal` variants: `FileBrowser`, `Unlock`, `CreateSecret`, `Configuration`,
+`Alert`, `Confirmation` (carrying a `ConfirmKind`), `ChangePassword`, `Export`
+(a two-step `ExportWizard`), `About`.
 
-Password fields (`PassphraseInput`, `ChangePwInput`, `CreateSecretFile`) mask input by default; `Ctrl+S` toggles plaintext via the `show` flag. `CreateSecretFile` validates that passphrase and confirmation match (`MSG_PW_MISMATCH`) before writing. A successful create (`CreateSecretFile` or `ConfirmNoPassphrase`) clears the modal before launching the tree, so returning to home does not re-show the dialog.
+Password fields (`Unlock`, `ChangePassword`, `CreateSecret`) mask input by
+default; `Ctrl+S` toggles plaintext. `CreateSecret` validates that the passphrase
+and its confirmation match (`MSG_PW_MISMATCH`) before writing. A successful create
+(`CreateSecret` or the passwordless `Confirmation`) clears the modal before
+launching the tree, so returning to home does not re-show the dialog.
 
 ## Configuration
 
@@ -55,8 +68,9 @@ Password fields (`PassphraseInput`, `ChangePwInput`, `CreateSecretFile`) mask in
 - Quit sets `state.quit = true` → event loop breaks → `main()` cleanup (LeaveAlternateScreen, disable_raw_mode, show_cursor).
 - `q` in tree quits everything (including home).
 - `H` (shift+h) in tree returns to home screen.
-- Wrong master password in PassphraseInput shows a red error bar; modal stays open.
+- Wrong master password in the unlock prompt shows a red error bar; the prompt stays open with the typed text.
 - Creating a file that already exists is refused before any password prompt (hard block, `MSG_FILE_EXISTS` alert); the file browser also shows an inline error when Enter is pressed on an existing name.
+- An alert is dismissed by any key, as its hint promises; the About card likewise.
 - `j`/`k` are not bound to field navigation while editing passwords, so they can be typed as password characters.
 
 ## Dependencies
@@ -64,8 +78,9 @@ Password fields (`PassphraseInput`, `ChangePwInput`, `CreateSecretFile`) mask in
 - `rkyv` — config serialization
 - `zeroize` — passphrase zeroization
 - `file_handling` — all I/O
-- `file_browser` — directory browser overlay
+- `file_browser` — the directory browser, wrapped as a `Modal` variant
 - `theming` — Action dispatch, strings, styles
-- `cursor` — text editing in modals
+- `cursor` — text editing in `secret_field`
+- `file_browser` — the directory browser, wrapped as a `Modal` variant
 - `tree::node` — Node type for ActiveVaultState
 - `tree::app_tree` — tree screen launch

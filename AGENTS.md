@@ -56,3 +56,4 @@ map and cross-module data flow.
 - [0018 — App-owned background fill](./docs/adr/0018-app-owned-background-fill.md) — `paint_background` paints the `BASE_BG` canvas across every screen so the terminal background never shows, with `SURFACE` panels above or below it
 - [0019 — Runtime colour-scheme switching](./docs/adr/0019-runtime-colour-scheme-switching.md) — a process-wide `Palette` cell swapped from the Home Configuration modal, replacing ADR 0015's compile-time-only scheme choice
 - [0020 — Feedback and issue reporting](./docs/adr/0020-feedback-and-issue-reporting.md) — GitHub Issues as the single feedback channel, Private Vulnerability Reporting for security, and one set of link constants shared by the About overlay (`?`) and `--help`
+- [0021 — Home modals report intents](./src/vault/docs/adr/0021-home-intent-contract.md) — Home modals are pure input returning a `HomeAction`; a single orchestrator performs the I/O and screen transitions
