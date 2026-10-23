@@ -14,9 +14,7 @@ mod modal;
 mod orchestrator;
 mod secret_field;
 
-use crate::file_browser::{
-    self, FileBrowserAction, FileBrowserMode, FileBrowserSession, FileBrowserState,
-};
+use crate::file_browser::{FileBrowserMode, FileBrowserSession};
 use crate::file_handling;
 use crate::generator::PasswordParams;
 use crate::theming::Action;
@@ -29,12 +27,13 @@ use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils::{self, Configuration};
 
 use modal::{
-    About, Alert, ChangePasswordPrompt, ConfigurationModal, Confirmation, CreateSecretPrompt,
-    ExportWizard, HomeAction, UnlockPrompt,
+    About, Alert, BrowserModal, ChangePasswordPrompt, ConfigurationModal, Confirmation,
+    CreateSecretPrompt, ExportWizard, HomeAction, UnlockPrompt,
 };
 
 enum HomeModal {
-    FileBrowser(FileBrowserState),
+    /// The directory browser, which picks a file to unlock, name, or import.
+    FileBrowser(BrowserModal),
     /// Unlock prompt: one masked field for the master password.
     Unlock(UnlockPrompt),
     /// Create a new secret file: the master password and its confirmation.
@@ -74,8 +73,7 @@ impl HomeModal {
             Self::Configuration(modal) => modal.handle_key(key),
             Self::Confirmation(confirmation) => confirmation.handle_key(key),
             Self::Export(wizard) => wizard.handle_key(key),
-            // The File Browser is dispatched on its own, before this point.
-            Self::FileBrowser(_) => None,
+            Self::FileBrowser(browser) => browser.handle_key(key),
         }
     }
 }
@@ -168,15 +166,8 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 continue;
             }
 
-            let is_file_browser = state
-                .modal
-                .as_ref()
-                .is_some_and(|m| matches!(m, HomeModal::FileBrowser(_)));
-
             if state.modal.is_none() {
                 handle_home_key(key, &mut state, terminal)?;
-            } else if is_file_browser {
-                handle_file_browser_key(key, &mut state, terminal)?;
             } else {
                 handle_modal_key(key, &mut state, terminal)?;
             }
@@ -238,6 +229,19 @@ where
 
 // ── Settings menu key handling (no modal active) ──
 
+/// Opens the File Browser on the Home screen, seeded with the session memory and
+/// protecting the open vault from being overwritten or deleted.
+fn open_browser(state: &mut HomeState, mode: FileBrowserMode) {
+    let mut browser = BrowserModal::new(mode, &state.browser_session);
+    browser.set_active_vault_path(
+        state
+            .active_vault
+            .as_ref()
+            .and_then(|active| active.path.as_ref().map(PathBuf::from)),
+    );
+    state.modal = Some(HomeModal::FileBrowser(browser));
+}
+
 fn handle_home_key<B: Backend>(
     key: event::KeyEvent,
     state: &mut HomeState,
@@ -268,25 +272,9 @@ fn handle_home_key<B: Backend>(
         Action::Confirm => {
             let idx = state.selected;
             if idx == 0 {
-                let mut fb =
-                    FileBrowserState::new(FileBrowserMode::OpenFile, &state.browser_session);
-                fb.set_active_vault_path(
-                    state
-                        .active_vault
-                        .as_ref()
-                        .and_then(|af| af.path.as_ref().map(PathBuf::from)),
-                );
-                state.modal = Some(HomeModal::FileBrowser(fb));
+                open_browser(state, FileBrowserMode::OpenFile);
             } else if idx == 1 {
-                let mut fb =
-                    FileBrowserState::new(FileBrowserMode::CreateFile, &state.browser_session);
-                fb.set_active_vault_path(
-                    state
-                        .active_vault
-                        .as_ref()
-                        .and_then(|af| af.path.as_ref().map(PathBuf::from)),
-                );
-                state.modal = Some(HomeModal::FileBrowser(fb));
+                open_browser(state, FileBrowserMode::CreateFile);
             } else if idx == 2 {
                 state.modal = Some(HomeModal::Configuration(ConfigurationModal::new()));
             } else if idx == 3 {
@@ -302,15 +290,7 @@ fn handle_home_key<B: Backend>(
                     state.modal = Some(HomeModal::alert(texts::MSG_NO_OPEN_FILE.to_string()));
                 }
             } else if idx == 5 {
-                let mut fb =
-                    FileBrowserState::new(FileBrowserMode::ImportFile, &state.browser_session);
-                fb.set_active_vault_path(
-                    state
-                        .active_vault
-                        .as_ref()
-                        .and_then(|af| af.path.as_ref().map(PathBuf::from)),
-                );
-                state.modal = Some(HomeModal::FileBrowser(fb));
+                open_browser(state, FileBrowserMode::ImportFile);
             } else {
                 let file_idx = idx - texts::MENU_ITEMS.len();
                 if file_idx < state.config.recent_files.len() {
@@ -445,138 +425,6 @@ fn run_tree<B: Backend>(
     }
 }
 
-// ── File browser key handling ──
-
-fn handle_file_browser_key<B: Backend>(
-    key: event::KeyEvent,
-    state: &mut HomeState,
-    terminal: &mut Terminal<B>,
-) -> io::Result<()> {
-    let mut modal = match state.modal.take() {
-        Some(HomeModal::FileBrowser(b)) => b,
-        _ => return Ok(()),
-    };
-
-    let action = file_browser::handle_key(key, &mut modal);
-    state.browser_session = modal.session();
-
-    match action {
-        None => {
-            state.modal = Some(HomeModal::FileBrowser(modal));
-        }
-        Some(FileBrowserAction::Cancelled) => {}
-        Some(FileBrowserAction::Renamed { from, to }) => {
-            if let Some(ref active_vault) = state.active_vault
-                && active_vault.path.as_deref() == Some(&from)
-            {
-                state.active_vault.as_mut().unwrap().path = Some(to.clone());
-            }
-            if state.config.last_opened_file.as_deref() == Some(&from) {
-                state.config.last_opened_file = Some(to.clone());
-            }
-            for path in state.config.recent_files.iter_mut() {
-                if *path == from {
-                    *path = to.clone();
-                    break;
-                }
-            }
-            let _ = utils::save_config(&state.config);
-            state.modal = Some(HomeModal::FileBrowser(modal));
-        }
-        Some(FileBrowserAction::Selected(path)) => {
-            let creating = modal.mode == FileBrowserMode::CreateFile;
-
-            if modal.mode == FileBrowserMode::ImportFile {
-                match file_handling::import::import_tree(&path) {
-                    Ok(imported_node) => {
-                        let save_target = if let Some(active_vault) = state.active_vault.as_mut() {
-                            match active_vault.node.as_mut() {
-                                Some(root) => {
-                                    let filename = std::path::Path::new(&path)
-                                        .file_stem()
-                                        .map(|s| s.to_string_lossy().to_string())
-                                        .unwrap_or_else(|| texts::IMPORT_NAME_FALLBACK.to_string());
-                                    let date_time =
-                                        chrono::Local::now().format("%Y-%m-%d_%H%M%S").to_string();
-                                    let mut wrapper = crate::tree::node::Node::new(format!(
-                                        "imported_{}_{}",
-                                        filename, date_time
-                                    ));
-                                    wrapper.children = vec![imported_node];
-                                    root.add_child(wrapper);
-
-                                    match active_vault.path.clone() {
-                                        Some(p) => {
-                                            Some((p, active_vault.passphrase.clone(), root.clone()))
-                                        }
-                                        None => {
-                                            state.modal = Some(HomeModal::alert(
-                                                texts::MSG_NO_FILE_PATH.to_string(),
-                                            ));
-                                            return Ok(());
-                                        }
-                                    }
-                                }
-                                None => None,
-                            }
-                        } else {
-                            state.modal =
-                                Some(HomeModal::alert(texts::MSG_IMPORT_NO_OPEN_FILE.to_string()));
-                            return Ok(());
-                        };
-
-                        if let Some((save_path, save_pass, save_node)) = save_target {
-                            let outcome =
-                                run_with_spinner(terminal, state, Status::Saving, move || {
-                                    file_handling::save_tree(&save_node, &save_path, &save_pass)
-                                })?;
-                            match outcome {
-                                Err(e) => {
-                                    state.modal = Some(HomeModal::alert(format!(
-                                        "{}{}",
-                                        texts::MSG_SAVE_FAILED,
-                                        e
-                                    )));
-                                }
-                                Ok(()) => {
-                                    state.modal = Some(HomeModal::alert(
-                                        texts::MSG_IMPORT_SUCCESS.to_string(),
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        state.modal = Some(HomeModal::alert(format!("{e}")));
-                    }
-                }
-            } else if creating {
-                if std::path::Path::new(&path).exists() {
-                    state.modal = Some(HomeModal::alert(texts::MSG_FILE_EXISTS.to_string()));
-                } else if file_handling::probe_path_writable(&path).is_ok() {
-                    state.modal = Some(HomeModal::CreateSecret(CreateSecretPrompt::new(path)));
-                } else {
-                    state.modal = Some(HomeModal::alert(texts::MSG_CANNOT_WRITE.to_string()));
-                }
-            } else {
-                match file_handling::validate_encrypted_file(&path) {
-                    Err(e) => {
-                        state.modal = Some(HomeModal::alert(format!("{e}")));
-                    }
-                    Ok(data) => {
-                        state.modal = Some(HomeModal::Unlock(UnlockPrompt::new(path, data)));
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-// ── Per-modal key handlers ──
-
-// ── Export/Import modal key handlers ──
-
 // ── Modal key handling ──
 
 /// Dispatches a key to the active modal.
@@ -612,10 +460,10 @@ fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
 
     render_home_window(frame, area, state);
 
-    // The file browser renderer maintains its viewport offsets, so it needs
+    // The File Browser renderer keeps its own viewport offsets, so it needs
     // mutable access before the remaining modal arms borrow the state.
     if let Some(HomeModal::FileBrowser(browser)) = &mut state.modal {
-        file_browser::render_file_browser(frame, area, browser);
+        browser.render(frame, area);
         return;
     }
 
@@ -752,10 +600,7 @@ fn home_status_parts(state: &HomeState) -> (&'static str, ElementStyle, Cow<'_, 
             ElementStyle::ModeNormal,
             Cow::Borrowed(texts::HINT_HOME),
         ),
-        Some(HomeModal::FileBrowser(browser)) => {
-            let (mode_str, mode_style, hint) = file_browser::status_parts(browser);
-            (mode_str, mode_style, Cow::Owned(hint))
-        }
+        Some(HomeModal::FileBrowser(browser)) => browser.status_parts(),
         Some(HomeModal::Unlock(prompt)) => prompt.status_parts(),
         Some(HomeModal::CreateSecret(prompt)) => prompt.status_parts(),
         Some(HomeModal::Configuration(modal)) => modal.status_parts(),
@@ -808,12 +653,11 @@ mod tests {
     #[test]
     fn file_browser_modal_paints_every_cell() {
         let mut state = HomeState::new();
-        let mut browser = file_browser::FileBrowserState::new(
-            file_browser::FileBrowserMode::OpenFile,
-            &file_browser::FileBrowserSession::default(),
-        );
-        browser.current_dir = PathBuf::from("/tmp");
-        browser.entries = file_handling::list_dir(std::path::Path::new("/tmp")).unwrap();
+        let mut browser =
+            BrowserModal::new(FileBrowserMode::OpenFile, &FileBrowserSession::default());
+        let inner = browser.state_mut();
+        inner.current_dir = PathBuf::from("/tmp");
+        inner.entries = file_handling::list_dir(std::path::Path::new("/tmp")).unwrap();
         state.modal = Some(HomeModal::FileBrowser(browser));
 
         assert_no_terminal_background(&mut state);
@@ -922,18 +766,21 @@ mod tests {
         });
 
         let mut browser =
-            FileBrowserState::new(FileBrowserMode::ImportFile, &FileBrowserSession::default());
-        browser.current_dir = dir.clone();
-        browser.entries = file_handling::list_dir(&dir).unwrap();
-        browser.selected = browser
-            .entries
-            .iter()
-            .position(|e| e.name == "note.xml")
-            .expect("the fixture must be listed");
+            BrowserModal::new(FileBrowserMode::ImportFile, &FileBrowserSession::default());
+        {
+            let inner = browser.state_mut();
+            inner.current_dir = dir.clone();
+            inner.entries = file_handling::list_dir(&dir).unwrap();
+            inner.selected = inner
+                .entries
+                .iter()
+                .position(|e| e.name == "note.xml")
+                .expect("the fixture must be listed");
+        }
         state.modal = Some(HomeModal::FileBrowser(browser));
 
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        handle_file_browser_key(
+        handle_modal_key(
             event::KeyEvent::from(KeyCode::Enter),
             &mut state,
             &mut terminal,

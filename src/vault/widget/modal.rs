@@ -11,6 +11,7 @@
 
 mod about;
 mod alert;
+mod browser;
 mod change_password;
 mod configuration;
 mod confirmation;
@@ -20,6 +21,7 @@ mod unlock;
 
 pub use about::About;
 pub use alert::Alert;
+pub use browser::BrowserModal;
 pub use change_password::ChangePasswordPrompt;
 pub use configuration::{ConfigurationModal, Setting};
 pub use confirmation::Confirmation;
@@ -60,4 +62,12 @@ pub enum HomeAction {
     ConfirmNoPassphrase { file_path: String },
     /// Re-encrypt the open file with the typed replacement master password.
     ChangeMasterPassword,
+    /// Take `from`'s place in the recent list with `to`.
+    RenameFile { from: String, to: String },
+    /// Merge the tree stored in `import_path` into the open vault.
+    ChoseFileToImport { import_path: String },
+    /// The user picked an empty `file_path` to create a secret file at.
+    ChoseFileToCreate { file_path: String },
+    /// The user picked `file_path` to unlock as a secret file.
+    ChoseFileToOpen { file_path: String },
 }

@@ -21,7 +21,9 @@ use crate::tree::node::Node;
 use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils;
 
-use super::modal::{ChangePasswordPrompt, Confirmation, CreateSecretPrompt, HomeAction, Setting};
+use super::modal::{
+    ChangePasswordPrompt, Confirmation, CreateSecretPrompt, HomeAction, Setting, UnlockPrompt,
+};
 use super::{HomeModal, HomeState, run_tree, run_with_spinner};
 
 /// Performs `action`. The modal that produced it has already been removed from
@@ -34,6 +36,14 @@ pub fn execute<B: Backend>(
     action: HomeAction,
     modal: HomeModal,
 ) -> io::Result<()> {
+    // The File Browser remembers where it was for its next opening, whatever the
+    // action turns out to be. Every key it handles ends up here, so capturing it
+    // once is enough — the last action before it leaves the screen keeps the
+    // directory the user was looking at.
+    if let HomeModal::FileBrowser(browser) = &modal {
+        state.browser_session = browser.session();
+    }
+
     match action {
         HomeAction::Close => Ok(()),
         HomeAction::DeleteRecent { path } => {
@@ -60,6 +70,21 @@ pub fn execute<B: Backend>(
         HomeAction::Unlock => unlock(state, terminal, modal),
         HomeAction::CreateSecret => create_secret(state, terminal, modal),
         HomeAction::ChangeMasterPassword => change_master_password(state, terminal, modal),
+        HomeAction::RenameFile { from, to } => {
+            rename_file(state, &from, &to);
+            // The user stays in the browser to rename something else.
+            state.modal = Some(modal);
+            Ok(())
+        }
+        HomeAction::ChoseFileToImport { import_path } => import(state, terminal, import_path),
+        HomeAction::ChoseFileToCreate { file_path } => {
+            choose_file_to_create(state, file_path);
+            Ok(())
+        }
+        HomeAction::ChoseFileToOpen { file_path } => {
+            choose_file_to_open(state, file_path);
+            Ok(())
+        }
         HomeAction::Export { format } => {
             export(state, format);
             Ok(())
@@ -277,6 +302,134 @@ fn change_master_password<B: Backend>(
             open_tree(state, terminal, node, path, new_password)
         }
     }
+}
+
+/// Takes `from`'s place with `to` everywhere the app remembers the old path: the
+/// open vault, the last-opened file, and the recent list.
+fn rename_file(state: &mut HomeState, from: &str, to: &str) {
+    if state
+        .active_vault
+        .as_ref()
+        .is_some_and(|active| active.path.as_deref() == Some(from))
+    {
+        state.active_vault.as_mut().unwrap().path = Some(to.to_string());
+    }
+    if state.config.last_opened_file.as_deref() == Some(from) {
+        state.config.last_opened_file = Some(to.to_string());
+    }
+    for path in &mut state.config.recent_files {
+        if path == from {
+            *path = to.to_string();
+            break;
+        }
+    }
+    let _ = utils::save_config(&state.config);
+}
+
+/// Merges the tree stored in `import_path` into the open vault and saves it.
+///
+/// The imported tree is filed under a timestamped wrapper node inside the open
+/// Root, so one import never collides with the next.
+fn import<B: Backend>(
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+    import_path: String,
+) -> io::Result<()> {
+    let imported = match file_handling::import::import_tree(&import_path) {
+        Ok(node) => node,
+        Err(e) => {
+            state.modal = Some(HomeModal::alert(format!("{e}")));
+            return Ok(());
+        }
+    };
+
+    let Some((save_path, save_passphrase, save_node)) = wrap_import(state, &import_path, imported)
+    else {
+        return Ok(());
+    };
+
+    let outcome = run_with_spinner(terminal, state, Status::Saving, move || {
+        file_handling::save_tree(&save_node, &save_path, &save_passphrase)
+    })?;
+
+    state.modal = Some(match outcome {
+        Ok(()) => HomeModal::alert(texts::MSG_IMPORT_SUCCESS.to_string()),
+        Err(e) => HomeModal::alert(format!("{}{}", texts::MSG_SAVE_FAILED, e)),
+    });
+    Ok(())
+}
+
+/// Files `imported` under a timestamped wrapper inside the open Root, returning
+/// what to save.
+///
+/// Returns `None` after showing an alert when there is nothing to import into,
+/// or nothing to save to.
+fn wrap_import(
+    state: &mut HomeState,
+    import_path: &str,
+    imported: Node,
+) -> Option<(String, Zeroizing<Vec<u8>>, Node)> {
+    let mut problem = None;
+    let target = match state.active_vault.as_mut() {
+        None => {
+            problem = Some(texts::MSG_IMPORT_NO_OPEN_FILE);
+            None
+        }
+        Some(active) => match active.node.as_mut() {
+            // Defensive: an open vault always carries its tree.
+            None => None,
+            Some(root) => {
+                let mut wrapper = Node::new(wrapper_name(import_path));
+                wrapper.children = vec![imported];
+                root.add_child(wrapper);
+
+                match active.path.clone() {
+                    Some(path) => Some((path, active.passphrase.clone(), root.clone())),
+                    None => {
+                        problem = Some(texts::MSG_NO_FILE_PATH);
+                        None
+                    }
+                }
+            }
+        },
+    };
+
+    if let Some(message) = problem {
+        state.modal = Some(HomeModal::alert(message.to_string()));
+    }
+    target
+}
+
+/// The wrapper node an import is filed under: the imported file's stem and the
+/// local time, so repeated imports of the same file stay apart.
+fn wrapper_name(import_path: &str) -> String {
+    let stem = std::path::Path::new(import_path)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().to_string())
+        .unwrap_or_else(|| texts::IMPORT_NAME_FALLBACK.to_string());
+    let stamp = chrono::Local::now().format("%Y-%m-%d_%H%M%S");
+    format!("imported_{stem}_{stamp}")
+}
+
+/// The user picked where a new secret file should go: ask for its master password,
+/// or report why it cannot be created there.
+fn choose_file_to_create(state: &mut HomeState, file_path: String) {
+    if std::path::Path::new(&file_path).exists() {
+        state.modal = Some(HomeModal::alert(texts::MSG_FILE_EXISTS.to_string()));
+    } else if file_handling::probe_path_writable(&file_path).is_ok() {
+        state.modal = Some(HomeModal::CreateSecret(CreateSecretPrompt::new(file_path)));
+    } else {
+        state.modal = Some(HomeModal::alert(texts::MSG_CANNOT_WRITE.to_string()));
+    }
+}
+
+/// The user picked a file to open: ask for its master password, or report why it
+/// is not a secret file.
+fn choose_file_to_open(state: &mut HomeState, file_path: String) {
+    state.modal = Some(match file_handling::validate_encrypted_file(&file_path) {
+        Ok(data) => HomeModal::Unlock(UnlockPrompt::new(file_path, data)),
+        Err(e) => HomeModal::alert(format!("{e}")),
+    });
 }
 
 /// Creates `file_path` with an empty master password and opens it in the Tree.
