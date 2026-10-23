@@ -658,6 +658,9 @@ fn handle_config_key(key: event::KeyEvent, state: &mut HomeState) {
         }
         Action::Cancel => {
             state.config = utils::load_config();
+            // The scheme is applied live on toggle, so reverting the config must
+            // also restore the colours (ADR 0019: "Enter persists and Esc reverts").
+            set_palette(Palette::from_name(&state.config.palette_name));
             state.modal = None;
         }
         _ => {}
@@ -2486,5 +2489,31 @@ mod tests {
         let (mode, _, hint) = home_status_parts(&state);
         assert_eq!(mode, texts::MODE_ABOUT);
         assert_eq!(hint.as_ref(), texts::HINT_HELP);
+    }
+
+    /// `Esc` in the Configuration modal reverts the live-applied colour scheme
+    /// together with the config ([ADR 0019](../../../docs/adr/0019-runtime-colour-scheme-switching.md)).
+    /// Guards against a cancel that reloads the config but leaves the swapped
+    /// palette on screen until restart.
+    #[test]
+    fn config_cancel_reverts_the_live_colour_scheme() {
+        let mut state = HomeState::new();
+        state.modal = Some(HomeModal::Configuration { setting_idx: 2 });
+
+        // `Space` on the colour-scheme row applies the other scheme at once.
+        handle_config_key(event::KeyEvent::from(KeyCode::Char(' ')), &mut state);
+        assert_eq!(
+            crate::theming::palette(),
+            Palette::from_name(&state.config.palette_name),
+            "toggling must apply the new scheme live"
+        );
+
+        // `Esc` must leave the active scheme matching the reverted config.
+        handle_config_key(event::KeyEvent::from(KeyCode::Esc), &mut state);
+        assert_eq!(
+            crate::theming::palette(),
+            Palette::from_name(&state.config.palette_name),
+            "cancelling must revert the colours along with the config"
+        );
     }
 }
