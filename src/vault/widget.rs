@@ -22,13 +22,13 @@ use crate::generator::PasswordParams;
 use crate::theming::Action;
 use crate::theming::{
     ElementStyle, Icon, Palette, SPINNER_TICK, Spinner, Status, paint_background,
-    render_status_bar, scheme_label, set_palette, texts, toggled_scheme,
+    render_status_bar, set_palette, texts,
 };
 use crate::tree::app_tree::SaveTarget;
 use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils::{self, Configuration};
 
-use modal::{About, Alert, Confirmation, ExportWizard, HomeAction};
+use modal::{About, Alert, ConfigurationModal, Confirmation, ExportWizard, HomeAction};
 use secret_field::{SecretField, SecretFieldGroup, password_field_spans, secret_field_spans};
 
 enum HomeModal {
@@ -46,9 +46,8 @@ enum HomeModal {
         fields: SecretFieldGroup,
         error: Option<String>,
     },
-    Configuration {
-        setting_idx: usize,
-    },
+    /// The persisted Home preferences.
+    Configuration(ConfigurationModal),
     /// A passive message the user acknowledges with any key.
     Alert(Alert),
     /// A yes/no confirmation; the prompt and its consequences follow from the
@@ -80,7 +79,11 @@ impl HomeModal {
     fn uses_intent_contract(&self) -> bool {
         matches!(
             self,
-            Self::Alert(_) | Self::About(_) | Self::Confirmation(_) | Self::Export(_)
+            Self::Alert(_)
+                | Self::About(_)
+                | Self::Confirmation(_)
+                | Self::Export(_)
+                | Self::Configuration(_)
         )
     }
 
@@ -92,6 +95,7 @@ impl HomeModal {
             Self::About(about) => about.handle_key(key),
             Self::Confirmation(confirmation) => confirmation.handle_key(key),
             Self::Export(wizard) => wizard.handle_key(key),
+            Self::Configuration(modal) => modal.handle_key(key),
             _ => None,
         }
     }
@@ -310,7 +314,7 @@ fn handle_home_key<B: Backend>(
                 );
                 state.modal = Some(HomeModal::FileBrowser(fb));
             } else if idx == 2 {
-                state.modal = Some(HomeModal::Configuration { setting_idx: 0 });
+                state.modal = Some(HomeModal::Configuration(ConfigurationModal::new()));
             } else if idx == 3 {
                 if state.active_vault.is_some() {
                     state.modal = Some(HomeModal::Confirmation(Confirmation::change_password()));
@@ -610,60 +614,6 @@ fn handle_file_browser_key<B: Backend>(
 
 // ── Per-modal key handlers ──
 
-fn handle_config_key(key: event::KeyEvent, state: &mut HomeState) {
-    match Action::from_config(&key) {
-        Action::NavDown => {
-            if let Some(HomeModal::Configuration {
-                ref mut setting_idx,
-            }) = state.modal
-            {
-                *setting_idx = (*setting_idx + 1).min(2);
-            }
-        }
-        Action::NavUp => {
-            if let Some(HomeModal::Configuration {
-                ref mut setting_idx,
-            }) = state.modal
-            {
-                *setting_idx = setting_idx.saturating_sub(1);
-            }
-        }
-        Action::ToggleSetting => {
-            let idx = match state.modal.as_ref() {
-                Some(HomeModal::Configuration { setting_idx }) => *setting_idx,
-                _ => return,
-            };
-            match idx {
-                0 => state.config.display_full_path = !state.config.display_full_path,
-                1 => {
-                    state.config.open_last_opened_file_on_startup =
-                        !state.config.open_last_opened_file_on_startup;
-                }
-                _ => {
-                    // Apply the scheme the moment it changes, so the user sees
-                    // the new colours while the modal stays open; it is still
-                    // persisted only on save (`Enter`), like the other settings.
-                    state.config.palette_name =
-                        toggled_scheme(&state.config.palette_name).to_string();
-                    set_palette(Palette::from_name(&state.config.palette_name));
-                }
-            }
-        }
-        Action::SaveConfig => {
-            let _ = utils::save_config(&state.config);
-            state.modal = Some(HomeModal::alert(texts::MSG_CONFIG_SAVED.to_string()));
-        }
-        Action::Cancel => {
-            state.config = utils::load_config();
-            // The scheme is applied live on toggle, so reverting the config must
-            // also restore the colours (ADR 0019: "Enter persists and Esc reverts").
-            set_palette(Palette::from_name(&state.config.palette_name));
-            state.modal = None;
-        }
-        _ => {}
-    }
-}
-
 fn handle_change_pw_input_key<B: Backend>(
     key: event::KeyEvent,
     state: &mut HomeState,
@@ -823,7 +773,7 @@ fn handle_modal_key<B: Backend>(
                 state.modal = Some(modal);
                 Ok(())
             }
-            Some(action) => orchestrator::execute(state, terminal, action),
+            Some(action) => orchestrator::execute(state, terminal, action, modal),
         };
     }
 
@@ -840,12 +790,6 @@ fn legacy_modal_key<B: Backend>(
     let is_unlock = matches!(state.modal, Some(HomeModal::PassphraseInput { .. }));
     if is_unlock {
         return handle_passphrase_key(key, state, terminal);
-    }
-
-    let is_app_settings = matches!(state.modal, Some(HomeModal::Configuration { .. }));
-    if is_app_settings {
-        handle_config_key(key, state);
-        return Ok(());
     }
 
     let is_change_pw_input = matches!(state.modal, Some(HomeModal::ChangePwInput { .. }));
@@ -1114,7 +1058,7 @@ fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
         Some(HomeModal::CreateSecretFile { .. }) => {
             render_create_secret_file_modal(frame, area, state)
         }
-        Some(HomeModal::Configuration { .. }) => render_config_modal(frame, area, state),
+        Some(HomeModal::Configuration(modal)) => modal.render(frame, area, &state.config),
         Some(HomeModal::ChangePwInput { .. }) => render_change_pw_input_modal(frame, area, state),
         Some(HomeModal::Export(wizard)) => wizard.render(frame, area),
         None => {}
@@ -1221,84 +1165,6 @@ fn render_home_window(frame: &mut Frame, area: Rect, state: &HomeState) {
 
     let (mode_str, mode_style, hint) = home_status_parts(state);
     render_status_bar(frame, layout[1], mode_str, mode_style.style(), &hint);
-}
-
-fn render_config_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
-    let setting_idx = match &state.modal {
-        Some(HomeModal::Configuration { setting_idx }) => *setting_idx,
-        _ => 0,
-    };
-
-    let overlay_area = chrome::make_overlay(area, 10);
-    let block = Block::default()
-        .title(texts::CONFIG_TITLE)
-        .borders(Borders::ALL)
-        .style(ElementStyle::HomeOverlayBlock.style());
-
-    let inner = block.inner(overlay_area);
-
-    let rows = [
-        (texts::SETTING_FULL_PATH, state.config.display_full_path),
-        (
-            texts::SETTING_LAST_FILE,
-            state.config.open_last_opened_file_on_startup,
-        ),
-    ];
-
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(""));
-
-    for (i, (label, value)) in rows.iter().enumerate() {
-        let is_selected = i == setting_idx;
-        let style = if is_selected {
-            ElementStyle::HomeSelected.style()
-        } else {
-            ElementStyle::HomeNormal.style()
-        };
-        let prefix = if is_selected {
-            Icon::SelectionArrow.as_str()
-        } else {
-            Icon::SelectionPad.as_str()
-        };
-        let checkbox = if *value {
-            Icon::CheckboxOn.as_str()
-        } else {
-            Icon::CheckboxOff.as_str()
-        };
-        lines.push(Line::from(vec![
-            Span::styled(format!("{}{} ", prefix, checkbox), style),
-            Span::styled(*label, style),
-        ]));
-    }
-
-    // The colour scheme is a cyclic choice, not an on/off flag, so it shows its
-    // current value instead of a checkbox.
-    let palette_selected = setting_idx == rows.len();
-    let style = if palette_selected {
-        ElementStyle::HomeSelected.style()
-    } else {
-        ElementStyle::HomeNormal.style()
-    };
-    let prefix = if palette_selected {
-        Icon::SelectionArrow.as_str()
-    } else {
-        Icon::SelectionPad.as_str()
-    };
-    lines.push(Line::from(Span::styled(
-        format!(
-            "{}{}: {}",
-            prefix,
-            texts::SETTING_PALETTE,
-            scheme_label(&state.config.palette_name)
-        ),
-        style,
-    )));
-
-    lines.push(Line::from(""));
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
 /// Renders the change-master-password dialog: the current, new, and
@@ -1498,11 +1364,7 @@ fn home_status_parts(state: &HomeState) -> (&'static str, ElementStyle, Cow<'_, 
             ElementStyle::ModeEdit,
             Cow::Borrowed(texts::HINT_CREATE_SECRET),
         ),
-        Some(HomeModal::Configuration { .. }) => (
-            texts::MODE_CONFIG,
-            ElementStyle::ModeFieldType,
-            Cow::Borrowed(texts::HINT_CONFIG),
-        ),
+        Some(HomeModal::Configuration(modal)) => modal.status_parts(),
         Some(HomeModal::Alert(alert)) => alert.status_parts(),
         Some(HomeModal::Confirmation(confirmation)) => confirmation.status_parts(),
         Some(HomeModal::ChangePwInput { .. }) => (
@@ -1596,10 +1458,25 @@ mod tests {
     #[test]
     fn config_cancel_reverts_the_live_colour_scheme() {
         let mut state = HomeState::new();
-        state.modal = Some(HomeModal::Configuration { setting_idx: 2 });
+        state.modal = Some(HomeModal::Configuration(ConfigurationModal::new()));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
 
-        // `Space` on the colour-scheme row applies the other scheme at once.
-        handle_config_key(event::KeyEvent::from(KeyCode::Char(' ')), &mut state);
+        // Move to the colour-scheme row, then `Space` applies the other scheme at
+        // once — through the modal, the action it reports and the orchestrator.
+        for _ in 0..2 {
+            handle_modal_key(
+                event::KeyEvent::from(KeyCode::Char('j')),
+                &mut state,
+                &mut terminal,
+            )
+            .unwrap();
+        }
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Char(' ')),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
         assert_eq!(
             crate::theming::palette(),
             Palette::from_name(&state.config.palette_name),
@@ -1607,7 +1484,12 @@ mod tests {
         );
 
         // `Esc` must leave the active scheme matching the reverted config.
-        handle_config_key(event::KeyEvent::from(KeyCode::Esc), &mut state);
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Esc),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
         assert_eq!(
             crate::theming::palette(),
             Palette::from_name(&state.config.palette_name),

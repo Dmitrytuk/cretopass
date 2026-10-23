@@ -11,11 +11,13 @@
 
 mod about;
 mod alert;
+mod configuration;
 mod confirmation;
 mod export;
 
 pub use about::About;
 pub use alert::Alert;
+pub use configuration::{ConfigurationModal, Setting};
 pub use confirmation::Confirmation;
 pub use export::ExportWizard;
 
@@ -38,4 +40,10 @@ pub enum HomeAction {
     CreateWithoutPassword { file_path: String },
     /// Write the open tree to a plain-text file next to the secret file.
     Export { format: ExportFormat },
+    /// Flip `setting` and apply it, keeping the dialog open.
+    ToggleSetting(Setting),
+    /// Persist the configuration as it stands.
+    SaveConfig,
+    /// Reload the stored configuration, discarding the edits.
+    DiscardConfig,
 }

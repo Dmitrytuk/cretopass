@@ -15,22 +15,25 @@ use crate::file_handling;
 use crate::file_handling::export::ExportFormat;
 use crate::theming::Status;
 use crate::theming::texts;
+use crate::theming::{Palette, set_palette, toggled_scheme};
 use crate::tree::app_tree::SaveTarget;
 use crate::tree::node::Node;
 use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils;
 
-use super::modal::HomeAction;
+use super::modal::{HomeAction, Setting};
 use super::secret_field::SecretFieldGroup;
 use super::{HomeModal, HomeState, run_tree, run_with_spinner};
 
 /// Performs `action`. The modal that produced it has already been removed from
-/// [`HomeState`], so "close" means leaving it that way and any other transition
-/// installs the modal it names.
+/// [`HomeState`]: "close" means leaving it that way, a transition installs the
+/// modal it names, and `modal` is handed back for the actions that must leave the
+/// dialog open on screen.
 pub fn execute<B: Backend>(
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
     action: HomeAction,
+    modal: HomeModal,
 ) -> io::Result<()> {
     match action {
         HomeAction::Close => Ok(()),
@@ -59,6 +62,42 @@ pub fn execute<B: Backend>(
         HomeAction::Export { format } => {
             export(state, format);
             Ok(())
+        }
+        HomeAction::ToggleSetting(setting) => {
+            apply_setting(state, setting);
+            // The dialog stays open so the user sees the setting take effect.
+            state.modal = Some(modal);
+            Ok(())
+        }
+        HomeAction::SaveConfig => {
+            let _ = utils::save_config(&state.config);
+            state.modal = Some(HomeModal::alert(texts::MSG_CONFIG_SAVED.to_string()));
+            Ok(())
+        }
+        HomeAction::DiscardConfig => {
+            state.config = utils::load_config();
+            // The scheme is applied live on toggle, so discarding the config must
+            // restore the colours too (ADR 0019: "Enter persists and Esc reverts").
+            set_palette(Palette::from_name(&state.config.palette_name));
+            Ok(())
+        }
+    }
+}
+
+/// Flips one setting. The colour scheme is applied at once, so the user sees it
+/// while the dialog is still open; it is persisted only on save.
+fn apply_setting(state: &mut HomeState, setting: Setting) {
+    match setting {
+        Setting::DisplayFullPath => {
+            state.config.display_full_path = !state.config.display_full_path
+        }
+        Setting::OpenLastFileOnStartup => {
+            state.config.open_last_opened_file_on_startup =
+                !state.config.open_last_opened_file_on_startup;
+        }
+        Setting::ColourScheme => {
+            state.config.palette_name = toggled_scheme(&state.config.palette_name).to_string();
+            set_palette(Palette::from_name(&state.config.palette_name));
         }
     }
 }
