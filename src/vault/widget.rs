@@ -1,151 +1,34 @@
-use std::borrow::Cow;
+//! The Home screen: its event loop, its modal dispatch, and the module tree that
+//! holds the rest of it.
+//!
+//! A key goes to the menu when no modal is open ([`menu`]) and to the active modal
+//! otherwise; either way what it asks for is a [`HomeAction`](modal::HomeAction), performed by the
+//! single [`orchestrator`]. Modals are pure input, and every screen-level effect
+//! lives in the orchestrator.
+
 use std::io;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyEventKind};
-use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::{Frame, Terminal, backend::Backend};
+use ratatui::Terminal;
+use ratatui::backend::Backend;
 
 mod chrome;
+mod menu;
 mod modal;
 mod orchestrator;
+mod render;
 mod secret_field;
+mod state;
 
-use crate::file_browser::FileBrowserSession;
-use crate::file_handling;
-use crate::generator::PasswordParams;
-use crate::theming::Action;
-use crate::theming::{
-    ElementStyle, Icon, Palette, SPINNER_TICK, Spinner, Status, paint_background,
-    render_status_bar, set_palette, texts,
-};
-use crate::vault::active_file::ActiveVaultState;
-use crate::vault::utils::{self, Configuration};
+pub use state::HomeState;
 
-use modal::{
-    About, Alert, BrowserModal, ChangePasswordPrompt, ConfigurationModal, Confirmation,
-    CreateSecretPrompt, ExportWizard, HomeAction, UnlockPrompt,
-};
+use crate::theming::SPINNER_TICK;
+use crate::theming::Status;
 
-enum HomeModal {
-    /// The directory browser, which picks a file to unlock, name, or import.
-    FileBrowser(BrowserModal),
-    /// Unlock prompt: one masked field for the master password.
-    Unlock(UnlockPrompt),
-    /// Create a new secret file: the master password and its confirmation.
-    CreateSecret(CreateSecretPrompt),
-    /// The persisted Home preferences.
-    Configuration(ConfigurationModal),
-    /// A passive message the user acknowledges with any key.
-    Alert(Alert),
-    /// A yes/no confirmation; the prompt and its consequences follow from the
-    /// kind it carries.
-    Confirmation(Confirmation),
-    /// Change master password: current, new, and confirmation.
-    ChangePassword(ChangePasswordPrompt),
-    /// The two-step export flow: pick a format, then confirm it.
-    Export(ExportWizard),
-    /// App identity, version, and feedback links, opened with `?` from the menu.
-    About(About),
-}
-
-impl HomeModal {
-    /// A passive alert carrying `message`.
-    fn alert(message: impl Into<String>) -> Self {
-        Self::Alert(Alert {
-            message: message.into(),
-        })
-    }
-
-    /// Reads a key: `None` means the modal consumed it and stays open, `Some` is
-    /// what the user asked for.
-    fn handle_key(&mut self, key: event::KeyEvent) -> Option<HomeAction> {
-        match self {
-            Self::Alert(alert) => alert.handle_key(key),
-            Self::About(about) => about.handle_key(key),
-            Self::Unlock(prompt) => prompt.handle_key(key),
-            Self::CreateSecret(prompt) => prompt.handle_key(key),
-            Self::ChangePassword(prompt) => prompt.handle_key(key),
-            Self::Configuration(modal) => modal.handle_key(key),
-            Self::Confirmation(confirmation) => confirmation.handle_key(key),
-            Self::Export(wizard) => wizard.handle_key(key),
-            Self::FileBrowser(browser) => browser.handle_key(key),
-        }
-    }
-}
-
-pub struct HomeState {
-    selected: usize,
-    pub config: Configuration,
-    pub quit: bool,
-    pub active_vault: Option<ActiveVaultState>,
-    modal: Option<HomeModal>,
-    /// Title-bar status of a blocking operation, if any.
-    pub status: Option<Status>,
-    /// Frame counter for the animated busy glyph shown next to [`HomeState::status`].
-    spinner: Spinner,
-    /// In-memory memory shared by successive file browser openings.
-    browser_session: FileBrowserSession,
-    /// Password-generator settings for this app run; seeded into each opened
-    /// tree and copied back when it exits. Never persisted to the config file.
-    pub generator: PasswordParams,
-}
-
-impl Default for HomeState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl HomeState {
-    pub fn new() -> Self {
-        let config = utils::load_config();
-        // Apply the persisted colour scheme before the first frame is drawn.
-        set_palette(Palette::from_name(&config.palette_name));
-        let modal = if config.open_last_opened_file_on_startup {
-            config.last_opened_file.as_ref().and_then(|path| {
-                file_handling::validate_encrypted_file(path)
-                    .ok()
-                    .map(|data| HomeModal::Unlock(UnlockPrompt::new(path.clone(), data)))
-            })
-        } else {
-            None
-        };
-        Self {
-            selected: 0,
-            config,
-            quit: false,
-            active_vault: None,
-            modal,
-            status: None,
-            spinner: Spinner::default(),
-            browser_session: FileBrowserSession::default(),
-            generator: PasswordParams::default(),
-        }
-    }
-
-    fn total_navigable(&self) -> usize {
-        texts::MENU_ITEMS.len() + self.config.recent_files.len()
-    }
-
-    fn select_next(&mut self) {
-        let total = self.total_navigable();
-        if total == 0 {
-            return;
-        }
-        self.selected = (self.selected + 1) % total;
-    }
-
-    fn select_prev(&mut self) {
-        let total = self.total_navigable();
-        if total == 0 {
-            return;
-        }
-        self.selected = (self.selected + total - 1) % total;
-    }
-}
+use menu::handle_home_key;
+use modal::Modal;
+use render::render;
 
 pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let mut state = HomeState::new();
@@ -225,69 +108,11 @@ where
     Ok(result)
 }
 
-// ── Settings menu key handling (no modal active) ──
-
-/// Handles a key on the Home menu.
-///
-/// Moving the cursor is pure screen state and handled here; everything else —
-/// quitting, opening a modal, launching the Tree, touching the recent list — is
-/// reported as a [`HomeAction`] and performed by the orchestrator, exactly as the
-/// modals do.
-fn handle_home_key<B: Backend>(
-    key: event::KeyEvent,
-    state: &mut HomeState,
-    terminal: &mut Terminal<B>,
-) -> io::Result<()> {
-    let action = Action::from_home(&key);
-    match &action {
-        Action::NavDown => state.select_next(),
-        Action::NavUp => state.select_prev(),
-        _ => {
-            if let Some(intent) = menu_intent(state, &action) {
-                return orchestrator::execute(state, terminal, intent, None);
-            }
-        }
-    }
-    Ok(())
-}
-
-/// What the Home menu asks for, given the highlighted row.
-///
-/// `None` means the key needs nothing from the orchestrator: it either moved the
-/// cursor or is not bound in this menu.
-fn menu_intent(state: &HomeState, action: &Action) -> Option<HomeAction> {
-    match action {
-        Action::Quit => Some(HomeAction::Quit),
-        Action::ReturnToMenu => Some(HomeAction::LaunchTree),
-        Action::Back => Some(HomeAction::Back),
-        Action::OpenHelp => Some(HomeAction::OpenAbout),
-        Action::Confirm => match state.selected {
-            0 => Some(HomeAction::ChooseFileToOpen),
-            1 => Some(HomeAction::ChooseFileToCreate),
-            2 => Some(HomeAction::OpenConfiguration),
-            3 => Some(HomeAction::BeginChangePassword),
-            4 => Some(HomeAction::BeginExport),
-            5 => Some(HomeAction::ChooseFileToImport),
-            idx => state
-                .config
-                .recent_files
-                .get(idx - texts::MENU_ITEMS.len())
-                .map(|path| HomeAction::OpenRecent { path: path.clone() }),
-        },
-        Action::ConfigDelete => state
-            .selected
-            .checked_sub(texts::MENU_ITEMS.len())
-            .and_then(|idx| state.config.recent_files.get(idx))
-            .map(|path| HomeAction::RequestDeleteRecent { path: path.clone() }),
-        _ => None,
-    }
-}
-
 // ── Modal key handling ──
 
 /// Dispatches a key to the active modal.
 ///
-/// The modal reads the key itself and reports a [`HomeAction`], which
+/// The modal reads the key itself and reports a [`HomeAction`](modal::HomeAction), which
 /// [`orchestrator::execute`] then performs. The File Browser never reaches here:
 /// it owns its own viewport state and is dispatched by the event loop.
 fn handle_modal_key<B: Backend>(
@@ -309,171 +134,15 @@ fn handle_modal_key<B: Backend>(
     }
 }
 
-// ── Rendering ──
-
-fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
-    // Own the background: paint SURFACE across the whole screen first so the
-    // terminal's own background never shows through.
-    paint_background(frame, area);
-
-    render_home_window(frame, area, state);
-
-    // The File Browser renderer keeps its own viewport offsets, so it needs
-    // mutable access before the remaining modal arms borrow the state.
-    if let Some(HomeModal::FileBrowser(browser)) = &mut state.modal {
-        browser.render(frame, area);
-        return;
-    }
-
-    match &state.modal {
-        Some(HomeModal::FileBrowser(_)) => {}
-        Some(HomeModal::Alert(alert)) => alert.render(frame, area),
-        Some(HomeModal::About(about)) => about.render(frame, area),
-        Some(HomeModal::Confirmation(confirmation)) => confirmation.render(frame, area),
-        Some(HomeModal::Unlock(prompt)) => {
-            prompt.render(frame, area, state.config.display_full_path)
-        }
-        Some(HomeModal::CreateSecret(prompt)) => {
-            prompt.render(frame, area, state.config.display_full_path)
-        }
-        Some(HomeModal::Configuration(modal)) => modal.render(frame, area, &state.config),
-        Some(HomeModal::ChangePassword(prompt)) => prompt.render(frame, area),
-        Some(HomeModal::Export(wizard)) => wizard.render(frame, area),
-        None => {}
-    }
-}
-
-fn render_home_window(frame: &mut Frame, area: Rect, state: &HomeState) {
-    let layout = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
-
-    let base_title = state
-        .active_vault
-        .as_ref()
-        .and_then(|af| af.path.as_deref())
-        .map(|p| {
-            if state.config.display_full_path {
-                format!("{} {} ", texts::TITLE_HOME_PREFIX, p)
-            } else {
-                let name = std::path::Path::new(p)
-                    .file_name()
-                    .map(|n| n.to_string_lossy())
-                    .unwrap_or(std::borrow::Cow::Borrowed(p));
-                format!("{} {} ", texts::TITLE_HOME_PREFIX, name)
-            }
-        })
-        .unwrap_or_else(|| texts::TITLE_HOME_DEFAULT.to_string());
-
-    let mut title_spans: Vec<Span> = Vec::new();
-    if let Some(status) = state.status {
-        let mut text = String::new();
-        if status.spins() {
-            text.push_str(state.spinner.glyph());
-            text.push(' ');
-        }
-        text.push_str(status.label());
-        title_spans.push(Span::styled(format!(" {text}  "), status.style().style()));
-    }
-    title_spans.push(Span::raw(base_title));
-
-    let block = Block::default()
-        .title(Line::from(title_spans))
-        .borders(Borders::ALL)
-        .border_style(ElementStyle::HomeBlockBorder.style());
-
-    let inner = block.inner(layout[0]);
-    frame.render_widget(block, layout[0]);
-
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(""));
-
-    for (i, item) in texts::MENU_ITEMS.iter().enumerate() {
-        let is_selected = state.selected == i;
-        let style = if is_selected {
-            ElementStyle::HomeSelected.style()
-        } else {
-            ElementStyle::HomeNormal.style()
-        };
-        let prefix = if is_selected {
-            Icon::SelectionArrow.as_str()
-        } else {
-            Icon::SelectionPad.as_str()
-        };
-        lines.push(Line::from(Span::styled(
-            format!("{}{}", prefix, item),
-            style,
-        )));
-    }
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        texts::SEPARATOR_RECENT_FILES,
-        ElementStyle::HomeSectionHeader.style(),
-    )));
-    lines.push(Line::from(""));
-
-    let menu_len = texts::MENU_ITEMS.len();
-    for (i, file) in state.config.recent_files.iter().enumerate() {
-        let idx = menu_len + i;
-        let is_selected = state.selected == idx;
-        let style = if is_selected {
-            ElementStyle::HomeSelected.style()
-        } else {
-            ElementStyle::HomeNormal.style()
-        };
-        let prefix = if is_selected {
-            Icon::SelectionArrow.as_str()
-        } else {
-            Icon::SelectionPad.as_str()
-        };
-        let display = if state.config.display_full_path {
-            file.clone()
-        } else {
-            std::path::Path::new(file)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| file.clone())
-        };
-        lines.push(Line::from(Span::styled(
-            format!("{}{}", prefix, display),
-            style,
-        )));
-    }
-
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-
-    let (mode_str, mode_style, hint) = home_status_parts(state);
-    render_status_bar(frame, layout[1], mode_str, mode_style.style(), &hint);
-}
-
-/// Maps the active Home modal (or the menu) to the unified status-bar parts:
-/// `(mode label, badge style, context hint)`.
-///
-/// `Alert` has no badge: it is a transient dismissal prompt, not a mode. When
-/// the File Browser is open, the badge and hint mirror the browser's own status
-/// bar so the two never disagree.
-fn home_status_parts(state: &HomeState) -> (&'static str, ElementStyle, Cow<'_, str>) {
-    match &state.modal {
-        None => (
-            texts::MODE_MENU,
-            ElementStyle::ModeNormal,
-            Cow::Borrowed(texts::HINT_HOME),
-        ),
-        Some(HomeModal::FileBrowser(browser)) => browser.status_parts(),
-        Some(HomeModal::Unlock(prompt)) => prompt.status_parts(),
-        Some(HomeModal::CreateSecret(prompt)) => prompt.status_parts(),
-        Some(HomeModal::Configuration(modal)) => modal.status_parts(),
-        Some(HomeModal::Alert(alert)) => alert.status_parts(),
-        Some(HomeModal::Confirmation(confirmation)) => confirmation.status_parts(),
-        Some(HomeModal::ChangePassword(prompt)) => prompt.status_parts(),
-        Some(HomeModal::Export(wizard)) => wizard.status_parts(),
-        Some(HomeModal::About(about)) => about.status_parts(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::file_browser::FileBrowserMode;
+    use crate::file_browser::{FileBrowserMode, FileBrowserSession};
+    use crate::file_handling;
+    use crate::theming::{Palette, texts};
+    use crate::vault::active_file::ActiveVaultState;
+    use crate::vault::widget::modal::{About, BrowserModal, ConfigurationModal};
+    use crate::vault::widget::render::home_status_parts;
     use crossterm::event::KeyCode;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
@@ -518,7 +187,7 @@ mod tests {
         let inner = browser.state_mut();
         inner.current_dir = PathBuf::from("/tmp");
         inner.entries = file_handling::list_dir(std::path::Path::new("/tmp")).unwrap();
-        state.modal = Some(HomeModal::FileBrowser(browser));
+        state.modal = Some(Modal::FileBrowser(browser));
 
         assert_no_terminal_background(&mut state);
     }
@@ -528,7 +197,7 @@ mod tests {
     #[test]
     fn about_modal_paints_every_cell() {
         let mut state = HomeState::new();
-        state.modal = Some(HomeModal::About(About));
+        state.modal = Some(Modal::About(About));
 
         assert_no_terminal_background(&mut state);
     }
@@ -538,7 +207,7 @@ mod tests {
     #[test]
     fn about_modal_status_bar_parts() {
         let mut state = HomeState::new();
-        state.modal = Some(HomeModal::About(About));
+        state.modal = Some(Modal::About(About));
 
         let (mode, _, hint) = home_status_parts(&state);
         assert_eq!(mode, texts::MODE_ABOUT);
@@ -552,7 +221,7 @@ mod tests {
     #[test]
     fn config_cancel_reverts_the_live_colour_scheme() {
         let mut state = HomeState::new();
-        state.modal = Some(HomeModal::Configuration(ConfigurationModal::new()));
+        state.modal = Some(Modal::Configuration(ConfigurationModal::new()));
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
 
         // Move to the colour-scheme row, then `Space` applies the other scheme at
@@ -637,7 +306,7 @@ mod tests {
                 .position(|e| e.name == "note.xml")
                 .expect("the fixture must be listed");
         }
-        state.modal = Some(HomeModal::FileBrowser(browser));
+        state.modal = Some(Modal::FileBrowser(browser));
 
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         handle_modal_key(
@@ -648,7 +317,7 @@ mod tests {
         .unwrap();
 
         match &state.modal {
-            Some(HomeModal::Alert(alert)) => {
+            Some(Modal::Alert(alert)) => {
                 assert_eq!(alert.message, texts::MSG_IMPORT_SUCCESS)
             }
             _ => panic!("a successful import must be reported in an alert"),

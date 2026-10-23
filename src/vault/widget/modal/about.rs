@@ -11,8 +11,8 @@ use ratatui::layout::{Alignment, Rect};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
+use super::HomeAction;
 use crate::theming::{ElementStyle, texts};
-use crate::vault::widget::HomeAction;
 use crate::vault::widget::chrome::paint_overlay;
 
 /// The app identity card, opened with `?` from the Home menu.

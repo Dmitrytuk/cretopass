@@ -17,8 +17,8 @@ use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
+use super::HomeAction;
 use crate::theming::{Action, ElementStyle, texts};
-use crate::vault::widget::HomeAction;
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
 
 /// Which confirmation is being asked, and the data its prompt needs.

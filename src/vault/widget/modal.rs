@@ -29,6 +29,8 @@ pub use create_secret::CreateSecretPrompt;
 pub use export::ExportWizard;
 pub use unlock::UnlockPrompt;
 
+use crossterm::event::KeyEvent;
+
 use crate::file_handling::export::ExportFormat;
 
 /// What the active modal asks the Home screen to do.
@@ -94,4 +96,52 @@ pub enum HomeAction {
     OpenRecent { path: String },
     /// Confirm dropping `path` from the recent list.
     RequestDeleteRecent { path: String },
+}
+
+/// The Home screen's modal slot: at most one at a time, over the menu.
+pub enum Modal {
+    /// The directory browser, which picks a file to unlock, name, or import.
+    FileBrowser(BrowserModal),
+    /// Unlock prompt: one masked field for the master password.
+    Unlock(UnlockPrompt),
+    /// Create a new secret file: the master password and its confirmation.
+    CreateSecret(CreateSecretPrompt),
+    /// The persisted Home preferences.
+    Configuration(ConfigurationModal),
+    /// A passive message the user acknowledges with any key.
+    Alert(Alert),
+    /// A yes/no confirmation; the prompt and its consequences follow from the
+    /// kind it carries.
+    Confirmation(Confirmation),
+    /// Change master password: current, new, and confirmation.
+    ChangePassword(ChangePasswordPrompt),
+    /// The two-step export flow: pick a format, then confirm it.
+    Export(ExportWizard),
+    /// App identity, version, and feedback links, opened with `?` from the menu.
+    About(About),
+}
+
+impl Modal {
+    /// A passive alert carrying `message`.
+    pub fn alert(message: impl Into<String>) -> Self {
+        Self::Alert(Alert {
+            message: message.into(),
+        })
+    }
+
+    /// Reads a key: `None` means the modal consumed it and stays open, `Some` is
+    /// what the user asked for.
+    pub fn handle_key(&mut self, key: KeyEvent) -> Option<HomeAction> {
+        match self {
+            Self::Alert(alert) => alert.handle_key(key),
+            Self::About(about) => about.handle_key(key),
+            Self::Unlock(prompt) => prompt.handle_key(key),
+            Self::CreateSecret(prompt) => prompt.handle_key(key),
+            Self::ChangePassword(prompt) => prompt.handle_key(key),
+            Self::Configuration(modal) => modal.handle_key(key),
+            Self::Confirmation(confirmation) => confirmation.handle_key(key),
+            Self::Export(wizard) => wizard.handle_key(key),
+            Self::FileBrowser(browser) => browser.handle_key(key),
+        }
+    }
 }

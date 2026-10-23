@@ -13,11 +13,11 @@ use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
+use super::HomeAction;
 use crate::file_browser::{
     self, FileBrowserAction, FileBrowserMode, FileBrowserSession, FileBrowserState,
 };
 use crate::theming::ElementStyle;
-use crate::vault::widget::HomeAction;
 
 /// The directory browser overlay, as one of the Home modals.
 pub struct BrowserModal {
