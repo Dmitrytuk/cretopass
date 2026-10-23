@@ -6,11 +6,13 @@
 //! to be shallow, because all it does is perform intentions.
 
 use std::io;
+use std::path::PathBuf;
 
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 use zeroize::Zeroizing;
 
+use crate::file_browser::FileBrowserMode;
 use crate::file_handling;
 use crate::file_handling::export::ExportFormat;
 use crate::theming::Status;
@@ -22,25 +24,26 @@ use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils;
 
 use super::modal::{
-    ChangePasswordPrompt, Confirmation, CreateSecretPrompt, HomeAction, Setting, UnlockPrompt,
+    About, BrowserModal, ChangePasswordPrompt, ConfigurationModal, Confirmation,
+    CreateSecretPrompt, ExportWizard, HomeAction, Setting, UnlockPrompt,
 };
-use super::{HomeModal, HomeState, run_tree, run_with_spinner};
+use super::{HomeModal, HomeState, run_with_spinner};
 
-/// Performs `action`. The modal that produced it has already been removed from
-/// [`HomeState`]: "close" means leaving it that way, a transition installs the
-/// modal it names, and `modal` is handed back for the actions that must leave the
-/// dialog open on screen.
+/// Performs `action`. `modal` is the modal that produced it, if it came from one:
+/// the Home menu is the screen itself, so it passes `None` and has nothing to put
+/// back on screen. "Close" leaves the screen without a modal, and a transition
+/// installs the modal it names.
 pub fn execute<B: Backend>(
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
     action: HomeAction,
-    modal: HomeModal,
+    modal: Option<HomeModal>,
 ) -> io::Result<()> {
     // The File Browser remembers where it was for its next opening, whatever the
     // action turns out to be. Every key it handles ends up here, so capturing it
     // once is enough — the last action before it leaves the screen keeps the
     // directory the user was looking at.
-    if let HomeModal::FileBrowser(browser) = &modal {
+    if let Some(HomeModal::FileBrowser(browser)) = &modal {
         state.browser_session = browser.session();
     }
 
@@ -72,17 +75,85 @@ pub fn execute<B: Backend>(
         HomeAction::ChangeMasterPassword => change_master_password(state, terminal, modal),
         HomeAction::RenameFile { from, to } => {
             rename_file(state, &from, &to);
-            // The user stays in the browser to rename something else.
-            state.modal = Some(modal);
+            // The user stays in the prompt to rename something else.
+            state.modal = modal;
             Ok(())
         }
-        HomeAction::ChoseFileToImport { import_path } => import(state, terminal, import_path),
-        HomeAction::ChoseFileToCreate { file_path } => {
+        HomeAction::ImportFileChosen { import_path } => import(state, terminal, import_path),
+        HomeAction::CreateFileChosen { file_path } => {
             choose_file_to_create(state, file_path);
             Ok(())
         }
-        HomeAction::ChoseFileToOpen { file_path } => {
+        HomeAction::OpenFileChosen { file_path } => {
             choose_file_to_open(state, file_path);
+            Ok(())
+        }
+        HomeAction::Quit => {
+            state.quit = true;
+            Ok(())
+        }
+        HomeAction::Back => {
+            if state
+                .active_vault
+                .as_ref()
+                .is_some_and(|active| active.node.is_some())
+            {
+                launch_tree(state, terminal)
+            } else {
+                state.quit = true;
+                Ok(())
+            }
+        }
+        HomeAction::LaunchTree => launch_tree(state, terminal),
+        HomeAction::ChooseFileToOpen => {
+            open_browser(state, FileBrowserMode::OpenFile);
+            Ok(())
+        }
+        HomeAction::ChooseFileToCreate => {
+            open_browser(state, FileBrowserMode::CreateFile);
+            Ok(())
+        }
+        HomeAction::ChooseFileToImport => {
+            open_browser(state, FileBrowserMode::ImportFile);
+            Ok(())
+        }
+        HomeAction::OpenAbout => {
+            state.modal = Some(HomeModal::About(About));
+            Ok(())
+        }
+        HomeAction::OpenConfiguration => {
+            state.modal = Some(HomeModal::Configuration(ConfigurationModal::new()));
+            Ok(())
+        }
+        HomeAction::BeginChangePassword => {
+            state.modal = Some(if state.active_vault.is_some() {
+                HomeModal::Confirmation(Confirmation::change_password())
+            } else {
+                HomeModal::alert(texts::MSG_NO_OPEN_FILE.to_string())
+            });
+            Ok(())
+        }
+        HomeAction::BeginExport => {
+            state.modal = Some(if state.active_vault.is_some() {
+                HomeModal::Export(ExportWizard::new())
+            } else {
+                HomeModal::alert(texts::MSG_NO_OPEN_FILE.to_string())
+            });
+            Ok(())
+        }
+        HomeAction::OpenRecent { path } => open_recent(state, terminal, path),
+        HomeAction::RequestDeleteRecent { path } => {
+            let is_open = state
+                .active_vault
+                .as_ref()
+                .and_then(|active| active.path.as_deref())
+                == Some(path.as_str());
+
+            state.modal = Some(if is_open {
+                HomeModal::alert(texts::MSG_CANNOT_DELETE_OPEN.to_string())
+            } else {
+                HomeModal::Confirmation(Confirmation::delete_recent(path))
+            });
             Ok(())
         }
         HomeAction::Export { format } => {
@@ -92,7 +163,7 @@ pub fn execute<B: Backend>(
         HomeAction::ToggleSetting(setting) => {
             apply_setting(state, setting);
             // The dialog stays open so the user sees the setting take effect.
-            state.modal = Some(modal);
+            state.modal = modal;
             Ok(())
         }
         HomeAction::SaveConfig => {
@@ -165,9 +236,9 @@ fn delete_recent(state: &mut HomeState, path: &str) {
 fn unlock<B: Backend>(
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
-    modal: HomeModal,
+    modal: Option<HomeModal>,
 ) -> io::Result<()> {
-    let HomeModal::Unlock(mut prompt) = modal else {
+    let Some(HomeModal::Unlock(mut prompt)) = modal else {
         return Ok(());
     };
 
@@ -193,7 +264,7 @@ fn unlock<B: Backend>(
                 node: Some(node.clone()),
             });
             let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
-            open_tree(state, terminal, node, file_path, passphrase)
+            open_tree(state, terminal, node, Some(file_path), passphrase)
         }
     }
 }
@@ -204,9 +275,9 @@ fn unlock<B: Backend>(
 fn create_secret<B: Backend>(
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
-    modal: HomeModal,
+    modal: Option<HomeModal>,
 ) -> io::Result<()> {
-    let HomeModal::CreateSecret(mut prompt) = modal else {
+    let Some(HomeModal::CreateSecret(mut prompt)) = modal else {
         return Ok(());
     };
 
@@ -232,7 +303,7 @@ fn create_secret<B: Backend>(
                 node: Some(node.clone()),
             });
             let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
-            open_tree(state, terminal, node, file_path, passphrase)
+            open_tree(state, terminal, node, Some(file_path), passphrase)
         }
     }
 }
@@ -246,9 +317,9 @@ fn create_secret<B: Backend>(
 fn change_master_password<B: Backend>(
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
-    modal: HomeModal,
+    modal: Option<HomeModal>,
 ) -> io::Result<()> {
-    let HomeModal::ChangePassword(mut prompt) = modal else {
+    let Some(HomeModal::ChangePassword(mut prompt)) = modal else {
         return Ok(());
     };
 
@@ -299,7 +370,7 @@ fn change_master_password<B: Backend>(
         }
         Ok(()) => {
             state.active_vault.as_mut().unwrap().passphrase = new_password.clone();
-            open_tree(state, terminal, node, path, new_password)
+            open_tree(state, terminal, node, Some(path), new_password)
         }
     }
 }
@@ -456,12 +527,12 @@ fn create_without_password<B: Backend>(
                 node: Some(node.clone()),
             });
             let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
-            open_tree(state, terminal, node, file_path, passphrase)
+            open_tree(state, terminal, node, Some(file_path), passphrase)
         }
     }
 }
 
-/// Opens `node` in the Tree screen, autosaving it back to `path`.
+/// Opens `node` in the Tree screen, autosaving it back to `path` when it has one.
 ///
 /// Every Home flow that ends up in the Tree goes through here, so the tree is
 /// always seeded from the same place.
@@ -469,16 +540,113 @@ pub fn open_tree<B: Backend>(
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
     node: Node,
-    path: String,
+    path: Option<String>,
     passphrase: Zeroizing<Vec<u8>>,
 ) -> io::Result<()> {
+    let target = path.map(|path| SaveTarget { path, passphrase });
     let mut tree_state = crate::tree::widget::TreeState::new(node);
     tree_state.display_full_path = state.config.display_full_path;
     tree_state.generator = state.generator;
-    run_tree(
-        state,
-        terminal,
-        tree_state,
-        Some(SaveTarget { path, passphrase }),
-    )
+    run_tree(state, terminal, tree_state, target)
+}
+
+/// Reopens the already-decrypted vault in the Tree, if there is one.
+fn launch_tree<B: Backend>(state: &mut HomeState, terminal: &mut Terminal<B>) -> io::Result<()> {
+    let Some((node, path, passphrase)) = state.active_vault.as_ref().and_then(|active| {
+        Some((
+            active.node.clone()?,
+            active.path.clone(),
+            active.passphrase.clone(),
+        ))
+    }) else {
+        return Ok(());
+    };
+
+    open_tree(state, terminal, node, path, passphrase)
+}
+
+/// Opens a recent file: the already-decrypted one straight away, any other after
+/// checking it is a secret file and asking for its master password.
+fn open_recent<B: Backend>(
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+    path: String,
+) -> io::Result<()> {
+    let is_open = state.active_vault.as_ref().is_some_and(|active| {
+        active.path.as_deref() == Some(path.as_str()) && active.node.is_some()
+    });
+    if is_open {
+        return launch_tree(state, terminal);
+    }
+
+    state.modal = Some(match file_handling::validate_encrypted_file(&path) {
+        Ok(data) => HomeModal::Unlock(UnlockPrompt::new(path, data)),
+        Err(e) => HomeModal::alert(format!("{e}")),
+    });
+    Ok(())
+}
+
+/// Opens the File Browser, seeded with the session memory and protecting the open
+/// vault from being overwritten or deleted.
+fn open_browser(state: &mut HomeState, mode: FileBrowserMode) {
+    let mut browser = BrowserModal::new(mode, &state.browser_session);
+    browser.set_active_vault_path(
+        state
+            .active_vault
+            .as_ref()
+            .and_then(|active| active.path.as_ref().map(PathBuf::from)),
+    );
+    state.modal = Some(HomeModal::FileBrowser(browser));
+}
+
+/// Runs the Tree screen and merges what it leaves behind back into Home.
+///
+/// On a normal exit the autosave worker may have written a newer root to disk than
+/// the one Home originally decrypted; keeping the in-memory copy in sync stops
+/// later home operations (change password, import) from overwriting those edits
+/// with stale data. A force-quit ([`ExitStatus::Unsaved`]) instead drops the active
+/// vault, so no later home action can persist the discarded tree.
+fn run_tree<B: Backend>(
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+    mut tree_state: crate::tree::widget::TreeState,
+    target: Option<SaveTarget>,
+) -> io::Result<()> {
+    use crate::tree::app_tree::ExitStatus;
+
+    if let Some(target) = &target {
+        tree_state.active_vault_path = Some(target.path.clone());
+    }
+    let result = crate::tree::app_tree::run_app(terminal, &mut tree_state, target);
+
+    // Generator settings are per app run: copy them back even when the tree
+    // exits with an error or the user discards changes.
+    state.generator = tree_state.generator;
+    let return_to_menu = tree_state.return_to_menu;
+    match result {
+        Ok(ExitStatus::Saved) => {
+            if let Some(active) = state.active_vault.as_mut() {
+                active.node = Some(tree_state.root);
+            }
+            if !return_to_menu {
+                state.quit = true;
+            }
+            Ok(())
+        }
+        Ok(ExitStatus::Unsaved) => {
+            state.active_vault = None;
+            if !return_to_menu {
+                state.quit = true;
+            }
+            Ok(())
+        }
+        // Sync even on error: a later retry from Home must not start from a
+        // stale copy that could overwrite edits already written by the worker.
+        Err(error) => {
+            if let Some(active) = state.active_vault.as_mut() {
+                active.node = Some(tree_state.root);
+            }
+            Err(error)
+        }
+    }
 }

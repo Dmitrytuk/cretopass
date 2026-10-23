@@ -63,9 +63,9 @@ impl BrowserModal {
     /// What accepting `path` means, which is why the browser was opened.
     fn selected(&self, path: String) -> HomeAction {
         match self.state.mode {
-            FileBrowserMode::ImportFile => HomeAction::ChoseFileToImport { import_path: path },
-            FileBrowserMode::CreateFile => HomeAction::ChoseFileToCreate { file_path: path },
-            FileBrowserMode::OpenFile => HomeAction::ChoseFileToOpen { file_path: path },
+            FileBrowserMode::ImportFile => HomeAction::ImportFileChosen { import_path: path },
+            FileBrowserMode::CreateFile => HomeAction::CreateFileChosen { file_path: path },
+            FileBrowserMode::OpenFile => HomeAction::OpenFileChosen { file_path: path },
         }
     }
 
@@ -94,15 +94,15 @@ mod tests {
     fn a_selection_is_translated_by_the_mode_it_was_opened_in() {
         assert!(matches!(
             browser(FileBrowserMode::OpenFile).selected("/tmp/v.age".to_string()),
-            HomeAction::ChoseFileToOpen { file_path } if file_path == "/tmp/v.age"
+            HomeAction::OpenFileChosen { file_path } if file_path == "/tmp/v.age"
         ));
         assert!(matches!(
             browser(FileBrowserMode::CreateFile).selected("/tmp/new.age".to_string()),
-            HomeAction::ChoseFileToCreate { file_path } if file_path == "/tmp/new.age"
+            HomeAction::CreateFileChosen { file_path } if file_path == "/tmp/new.age"
         ));
         assert!(matches!(
             browser(FileBrowserMode::ImportFile).selected("/tmp/x.json".to_string()),
-            HomeAction::ChoseFileToImport { import_path } if import_path == "/tmp/x.json"
+            HomeAction::ImportFileChosen { import_path } if import_path == "/tmp/x.json"
         ));
     }
 

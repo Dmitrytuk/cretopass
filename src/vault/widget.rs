@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::io;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyEventKind};
@@ -14,7 +13,7 @@ mod modal;
 mod orchestrator;
 mod secret_field;
 
-use crate::file_browser::{FileBrowserMode, FileBrowserSession};
+use crate::file_browser::FileBrowserSession;
 use crate::file_handling;
 use crate::generator::PasswordParams;
 use crate::theming::Action;
@@ -22,7 +21,6 @@ use crate::theming::{
     ElementStyle, Icon, Palette, SPINNER_TICK, Spinner, Status, paint_background,
     render_status_bar, set_palette, texts,
 };
-use crate::tree::app_tree::SaveTarget;
 use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils::{self, Configuration};
 
@@ -229,199 +227,59 @@ where
 
 // ── Settings menu key handling (no modal active) ──
 
-/// Opens the File Browser on the Home screen, seeded with the session memory and
-/// protecting the open vault from being overwritten or deleted.
-fn open_browser(state: &mut HomeState, mode: FileBrowserMode) {
-    let mut browser = BrowserModal::new(mode, &state.browser_session);
-    browser.set_active_vault_path(
-        state
-            .active_vault
-            .as_ref()
-            .and_then(|active| active.path.as_ref().map(PathBuf::from)),
-    );
-    state.modal = Some(HomeModal::FileBrowser(browser));
-}
-
+/// Handles a key on the Home menu.
+///
+/// Moving the cursor is pure screen state and handled here; everything else —
+/// quitting, opening a modal, launching the Tree, touching the recent list — is
+/// reported as a [`HomeAction`] and performed by the orchestrator, exactly as the
+/// modals do.
 fn handle_home_key<B: Backend>(
     key: event::KeyEvent,
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
-    match Action::from_home(&key) {
-        Action::Quit => state.quit = true,
+    let action = Action::from_home(&key);
+    match &action {
         Action::NavDown => state.select_next(),
         Action::NavUp => state.select_prev(),
-        Action::ReturnToMenu => {
-            reopen_tree(state, terminal)?;
-        }
-        Action::OpenHelp => {
-            state.modal = Some(HomeModal::About(About));
-        }
-        Action::Back => {
-            if state
-                .active_vault
-                .as_ref()
-                .and_then(|af| af.node.as_ref())
-                .is_some()
-            {
-                reopen_tree(state, terminal)?;
-            } else {
-                state.quit = true;
+        _ => {
+            if let Some(intent) = menu_intent(state, &action) {
+                return orchestrator::execute(state, terminal, intent, None);
             }
         }
-        Action::Confirm => {
-            let idx = state.selected;
-            if idx == 0 {
-                open_browser(state, FileBrowserMode::OpenFile);
-            } else if idx == 1 {
-                open_browser(state, FileBrowserMode::CreateFile);
-            } else if idx == 2 {
-                state.modal = Some(HomeModal::Configuration(ConfigurationModal::new()));
-            } else if idx == 3 {
-                if state.active_vault.is_some() {
-                    state.modal = Some(HomeModal::Confirmation(Confirmation::change_password()));
-                } else {
-                    state.modal = Some(HomeModal::alert(texts::MSG_NO_OPEN_FILE.to_string()));
-                }
-            } else if idx == 4 {
-                if state.active_vault.is_some() {
-                    state.modal = Some(HomeModal::Export(ExportWizard::new()));
-                } else {
-                    state.modal = Some(HomeModal::alert(texts::MSG_NO_OPEN_FILE.to_string()));
-                }
-            } else if idx == 5 {
-                open_browser(state, FileBrowserMode::ImportFile);
-            } else {
-                let file_idx = idx - texts::MENU_ITEMS.len();
-                if file_idx < state.config.recent_files.len() {
-                    let file_path: String = state.config.recent_files[file_idx].clone();
-
-                    if let Some(ref active_vault) = state.active_vault
-                        && active_vault.path.as_deref() == Some(&file_path)
-                        && let Some(ref node) = active_vault.node
-                    {
-                        let passphrase = active_vault.passphrase.clone();
-                        let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
-                        tree_state.display_full_path = state.config.display_full_path;
-                        tree_state.generator = state.generator;
-                        run_tree(
-                            state,
-                            terminal,
-                            tree_state,
-                            Some(SaveTarget {
-                                path: file_path,
-                                passphrase,
-                            }),
-                        )?;
-                        return Ok(());
-                    }
-
-                    match file_handling::validate_encrypted_file(&file_path) {
-                        Err(e) => {
-                            state.modal = Some(HomeModal::alert(format!("{e}")));
-                        }
-                        Ok(data) => {
-                            state.modal =
-                                Some(HomeModal::Unlock(UnlockPrompt::new(file_path, data)));
-                        }
-                    }
-                }
-            }
-        }
-        Action::ConfigDelete => {
-            let idx = state.selected;
-            if idx >= texts::MENU_ITEMS.len() {
-                let file_idx = idx - texts::MENU_ITEMS.len();
-                if file_idx < state.config.recent_files.len() {
-                    let path = &state.config.recent_files[file_idx];
-                    let is_active = state
-                        .active_vault
-                        .as_ref()
-                        .and_then(|af| af.path.as_deref())
-                        == Some(path);
-                    if is_active {
-                        state.modal =
-                            Some(HomeModal::alert(texts::MSG_CANNOT_DELETE_OPEN.to_string()));
-                    } else {
-                        state.modal = Some(HomeModal::Confirmation(Confirmation::delete_recent(
-                            path.clone(),
-                        )));
-                    }
-                }
-            }
-        }
-        _ => {}
     }
     Ok(())
 }
 
-fn reopen_tree<B: Backend>(state: &mut HomeState, terminal: &mut Terminal<B>) -> io::Result<()> {
-    if let Some(ref active_vault) = state.active_vault
-        && let Some(ref node) = active_vault.node
-    {
-        let passphrase = active_vault.passphrase.clone();
-        let target = active_vault
-            .path
-            .clone()
-            .map(|path| SaveTarget { path, passphrase });
-        let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
-        tree_state.display_full_path = state.config.display_full_path;
-        tree_state.generator = state.generator;
-        run_tree(state, terminal, tree_state, target)?;
-    }
-    Ok(())
-}
-
-/// Runs the tree and hands its final root back to the active vault.
+/// What the Home menu asks for, given the highlighted row.
 ///
-/// On a normal exit the autosave worker may have written a newer root to disk
-/// than the one `HomeState` originally decrypted; keeping the in-memory home
-/// copy in sync prevents later home operations (change password, import) from
-/// overwriting those edits with stale data. A force-quit ([`ExitStatus::Unsaved`])
-/// instead drops the active vault, so no later home action can persist or
-/// overwrite with the discarded in-memory tree.
-fn run_tree<B: Backend>(
-    state: &mut HomeState,
-    terminal: &mut Terminal<B>,
-    mut tree_state: crate::tree::widget::TreeState,
-    target: Option<SaveTarget>,
-) -> io::Result<()> {
-    use crate::tree::app_tree::ExitStatus;
-
-    if let Some(target) = &target {
-        tree_state.active_vault_path = Some(target.path.clone());
-    }
-    let result = crate::tree::app_tree::run_app(terminal, &mut tree_state, target);
-
-    // Generator settings are per app run: copy them back even when the tree
-    // exits with an error or the user discards changes.
-    state.generator = tree_state.generator;
-    let return_to_menu = tree_state.return_to_menu;
-    match result {
-        Ok(ExitStatus::Saved) => {
-            if let Some(active) = state.active_vault.as_mut() {
-                active.node = Some(tree_state.root);
-            }
-            if !return_to_menu {
-                state.quit = true;
-            }
-            Ok(())
-        }
-        Ok(ExitStatus::Unsaved) => {
-            state.active_vault = None;
-            if !return_to_menu {
-                state.quit = true;
-            }
-            Ok(())
-        }
-        // Sync even on error: a later retry from Home must not start from a
-        // stale copy that could overwrite edits already written by the worker.
-        Err(error) => {
-            if let Some(active) = state.active_vault.as_mut() {
-                active.node = Some(tree_state.root);
-            }
-            Err(error)
-        }
+/// `None` means the key needs nothing from the orchestrator: it either moved the
+/// cursor or is not bound in this menu.
+fn menu_intent(state: &HomeState, action: &Action) -> Option<HomeAction> {
+    match action {
+        Action::Quit => Some(HomeAction::Quit),
+        Action::ReturnToMenu => Some(HomeAction::LaunchTree),
+        Action::Back => Some(HomeAction::Back),
+        Action::OpenHelp => Some(HomeAction::OpenAbout),
+        Action::Confirm => match state.selected {
+            0 => Some(HomeAction::ChooseFileToOpen),
+            1 => Some(HomeAction::ChooseFileToCreate),
+            2 => Some(HomeAction::OpenConfiguration),
+            3 => Some(HomeAction::BeginChangePassword),
+            4 => Some(HomeAction::BeginExport),
+            5 => Some(HomeAction::ChooseFileToImport),
+            idx => state
+                .config
+                .recent_files
+                .get(idx - texts::MENU_ITEMS.len())
+                .map(|path| HomeAction::OpenRecent { path: path.clone() }),
+        },
+        Action::ConfigDelete => state
+            .selected
+            .checked_sub(texts::MENU_ITEMS.len())
+            .and_then(|idx| state.config.recent_files.get(idx))
+            .map(|path| HomeAction::RequestDeleteRecent { path: path.clone() }),
+        _ => None,
     }
 }
 
@@ -447,7 +305,7 @@ fn handle_modal_key<B: Backend>(
             state.modal = Some(modal);
             Ok(())
         }
-        Some(action) => orchestrator::execute(state, terminal, action, modal),
+        Some(action) => orchestrator::execute(state, terminal, action, Some(modal)),
     }
 }
 
@@ -615,9 +473,11 @@ fn home_status_parts(state: &HomeState) -> (&'static str, ElementStyle, Cow<'_, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::file_browser::FileBrowserMode;
     use crossterm::event::KeyCode;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
+    use std::path::PathBuf;
 
     /// Renders the home screen — including any modal `state` carries — into a
     /// test backend, and asserts that no cell falls through to the terminal's own

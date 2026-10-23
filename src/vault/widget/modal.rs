@@ -65,9 +65,33 @@ pub enum HomeAction {
     /// Take `from`'s place in the recent list with `to`.
     RenameFile { from: String, to: String },
     /// Merge the tree stored in `import_path` into the open vault.
-    ChoseFileToImport { import_path: String },
+    ImportFileChosen { import_path: String },
     /// The user picked an empty `file_path` to create a secret file at.
-    ChoseFileToCreate { file_path: String },
+    CreateFileChosen { file_path: String },
     /// The user picked `file_path` to unlock as a secret file.
-    ChoseFileToOpen { file_path: String },
+    OpenFileChosen { file_path: String },
+    /// End the app.
+    Quit,
+    /// Leave Home: the Tree when a file is open, otherwise the app ends.
+    Back,
+    /// Reopen the already-decrypted vault in the Tree.
+    LaunchTree,
+    /// Open the file browser to pick a secret file to unlock.
+    ChooseFileToOpen,
+    /// Open the file browser to name a new secret file.
+    ChooseFileToCreate,
+    /// Open the file browser to pick something to import.
+    ChooseFileToImport,
+    /// Open the app identity card.
+    OpenAbout,
+    /// Open the persisted preferences.
+    OpenConfiguration,
+    /// Confirm, then ask for a new master password for the open file.
+    BeginChangePassword,
+    /// Choose a format, then confirm exporting the open vault.
+    BeginExport,
+    /// Unlock and open `path` from the recent list.
+    OpenRecent { path: String },
+    /// Confirm dropping `path` from the recent list.
+    RequestDeleteRecent { path: String },
 }
