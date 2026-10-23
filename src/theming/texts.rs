@@ -157,6 +157,7 @@ pub const TREE_HELP_KEY_BINDINGS: &[&str] = &[
     " d d      Cut selected node",
     " p        Paste: p after, P before, l/→ child",
     " a        Add: a after, A before, l/→ child",
+    " Ctrl+e   Export selected node",
     " /        Search",
     " ?        Show this help",
     " Esc      Clear search highlights",
