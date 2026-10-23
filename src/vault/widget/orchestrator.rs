@@ -12,7 +12,9 @@ use ratatui::backend::Backend;
 use zeroize::Zeroizing;
 
 use crate::file_handling;
+use crate::file_handling::export::ExportFormat;
 use crate::theming::Status;
+use crate::theming::texts;
 use crate::tree::app_tree::SaveTarget;
 use crate::tree::node::Node;
 use crate::vault::active_file::ActiveVaultState;
@@ -54,7 +56,31 @@ pub fn execute<B: Backend>(
         HomeAction::CreateWithoutPassword { file_path } => {
             create_without_password(state, terminal, file_path)
         }
+        HomeAction::Export { format } => {
+            export(state, format);
+            Ok(())
+        }
     }
+}
+
+/// Writes the open tree to a plain-text file beside the secret file, reporting
+/// the result in an alert.
+fn export(state: &mut HomeState, format: ExportFormat) {
+    let Some((node, path)) = state
+        .active_vault
+        .as_ref()
+        .and_then(|active| Some((active.node.clone()?, active.path.clone()?)))
+    else {
+        // Nothing is open: the wizard was taken out, so there is nothing to show.
+        return;
+    };
+
+    state.modal = Some(
+        match file_handling::export::export_tree(&node, &path, format) {
+            Ok(out_path) => HomeModal::alert(format!("{}{}", texts::MSG_EXPORT_SUCCESS, out_path)),
+            Err(e) => HomeModal::alert(format!("{e}")),
+        },
+    );
 }
 
 /// Drops `path` from the recent secret files, forgets it as the last opened file,

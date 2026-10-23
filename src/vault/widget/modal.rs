@@ -12,10 +12,14 @@
 mod about;
 mod alert;
 mod confirmation;
+mod export;
 
 pub use about::About;
 pub use alert::Alert;
 pub use confirmation::Confirmation;
+pub use export::ExportWizard;
+
+use crate::file_handling::export::ExportFormat;
 
 /// What the active modal asks the Home screen to do.
 ///
@@ -32,4 +36,6 @@ pub enum HomeAction {
     ReopenCreateSecret { file_path: String },
     /// Create `file_path` without a master password, then open it.
     CreateWithoutPassword { file_path: String },
+    /// Write the open tree to a plain-text file next to the secret file.
+    Export { format: ExportFormat },
 }

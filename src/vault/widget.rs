@@ -28,7 +28,7 @@ use crate::tree::app_tree::SaveTarget;
 use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils::{self, Configuration};
 
-use modal::{About, Alert, Confirmation, HomeAction};
+use modal::{About, Alert, Confirmation, ExportWizard, HomeAction};
 use secret_field::{SecretField, SecretFieldGroup, password_field_spans, secret_field_spans};
 
 enum HomeModal {
@@ -59,12 +59,8 @@ enum HomeModal {
         fields: SecretFieldGroup,
         error: Option<String>,
     },
-    ExportSelectType {
-        selected_type: usize,
-    },
-    ExportConfirm {
-        export_type: String,
-    },
+    /// The two-step export flow: pick a format, then confirm it.
+    Export(ExportWizard),
     /// App identity, version, and feedback links, opened with `?` from the menu.
     About(About),
 }
@@ -84,7 +80,7 @@ impl HomeModal {
     fn uses_intent_contract(&self) -> bool {
         matches!(
             self,
-            Self::Alert(_) | Self::About(_) | Self::Confirmation(_)
+            Self::Alert(_) | Self::About(_) | Self::Confirmation(_) | Self::Export(_)
         )
     }
 
@@ -95,6 +91,7 @@ impl HomeModal {
             Self::Alert(alert) => alert.handle_key(key),
             Self::About(about) => about.handle_key(key),
             Self::Confirmation(confirmation) => confirmation.handle_key(key),
+            Self::Export(wizard) => wizard.handle_key(key),
             _ => None,
         }
     }
@@ -322,7 +319,7 @@ fn handle_home_key<B: Backend>(
                 }
             } else if idx == 4 {
                 if state.active_vault.is_some() {
-                    state.modal = Some(HomeModal::ExportSelectType { selected_type: 0 });
+                    state.modal = Some(HomeModal::Export(ExportWizard::new()));
                 } else {
                     state.modal = Some(HomeModal::alert(texts::MSG_NO_OPEN_FILE.to_string()));
                 }
@@ -803,99 +800,6 @@ fn change_master_password<B: Backend>(
 
 // ── Export/Import modal key handlers ──
 
-fn handle_export_select_type_key(key: event::KeyEvent, state: &mut HomeState) {
-    match Action::from_select_field_type(&key) {
-        Action::Cancel => {
-            state.modal = None;
-        }
-        Action::NavDown => {
-            if let Some(HomeModal::ExportSelectType {
-                ref mut selected_type,
-            }) = state.modal
-            {
-                *selected_type = (*selected_type + 1) % 3;
-            }
-        }
-        Action::NavUp => {
-            if let Some(HomeModal::ExportSelectType {
-                ref mut selected_type,
-            }) = state.modal
-            {
-                *selected_type = (*selected_type + 2) % 3;
-            }
-        }
-        Action::SelectIndex(i) if i < 3 => {
-            if let Some(HomeModal::ExportSelectType {
-                ref mut selected_type,
-            }) = state.modal
-            {
-                *selected_type = i;
-            }
-        }
-        Action::Confirm => {
-            if let Some(HomeModal::ExportSelectType { selected_type }) = state.modal.take() {
-                let format = match selected_type {
-                    0 => texts::FORMAT_JSON,
-                    1 => texts::FORMAT_XML,
-                    _ => texts::FORMAT_CSV,
-                };
-                state.modal = Some(HomeModal::ExportConfirm {
-                    export_type: format.to_string(),
-                });
-            }
-        }
-        _ => {}
-    }
-}
-
-fn handle_export_confirm_key(key: event::KeyEvent, state: &mut HomeState) {
-    match Action::from_confirm(&key) {
-        Action::Yes => {
-            let export_type = match state.modal.take() {
-                Some(HomeModal::ExportConfirm { export_type }) => export_type,
-                _ => return,
-            };
-
-            let af = match state.active_vault.clone() {
-                Some(af) => af,
-                None => return,
-            };
-
-            let path = match af.path {
-                Some(p) => p,
-                None => return,
-            };
-
-            let node = match af.node {
-                Some(n) => n,
-                None => return,
-            };
-
-            let format = match export_type.as_str() {
-                "JSON" => file_handling::export::ExportFormat::Json,
-                "XML" => file_handling::export::ExportFormat::Xml,
-                _ => file_handling::export::ExportFormat::Csv,
-            };
-
-            match file_handling::export::export_tree(&node, &path, format) {
-                Ok(out_path) => {
-                    state.modal = Some(HomeModal::alert(format!(
-                        "{}{}",
-                        texts::MSG_EXPORT_SUCCESS,
-                        out_path
-                    )));
-                }
-                Err(e) => {
-                    state.modal = Some(HomeModal::alert(format!("{e}")));
-                }
-            }
-        }
-        _ => {
-            state.modal = None;
-        }
-    }
-}
-
 // ── Modal key handling ──
 
 /// Dispatches a key to the active modal.
@@ -952,18 +856,6 @@ fn legacy_modal_key<B: Backend>(
     let is_create_secret = matches!(state.modal, Some(HomeModal::CreateSecretFile { .. }));
     if is_create_secret {
         return handle_create_secret_file_key(key, state, terminal);
-    }
-
-    let is_export_select = matches!(state.modal, Some(HomeModal::ExportSelectType { .. }));
-    if is_export_select {
-        handle_export_select_type_key(key, state);
-        return Ok(());
-    }
-
-    let is_export_confirm = matches!(state.modal, Some(HomeModal::ExportConfirm { .. }));
-    if is_export_confirm {
-        handle_export_confirm_key(key, state);
-        return Ok(());
     }
 
     // No modal or unknown modal: nothing to do.
@@ -1224,12 +1116,7 @@ fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
         }
         Some(HomeModal::Configuration { .. }) => render_config_modal(frame, area, state),
         Some(HomeModal::ChangePwInput { .. }) => render_change_pw_input_modal(frame, area, state),
-        Some(HomeModal::ExportSelectType { .. }) => {
-            render_export_select_type_modal(frame, area, state)
-        }
-        Some(HomeModal::ExportConfirm { export_type }) => {
-            render_export_confirm_modal(frame, area, export_type)
-        }
+        Some(HomeModal::Export(wizard)) => wizard.render(frame, area),
         None => {}
     }
 }
@@ -1462,76 +1349,6 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &HomeState
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-fn render_export_select_type_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
-    let selected_type = match &state.modal {
-        Some(HomeModal::ExportSelectType { selected_type }) => *selected_type,
-        _ => 0,
-    };
-
-    let overlay_area = chrome::make_overlay(area, 9);
-    let block = Block::default()
-        .title(texts::EXPORT_SELECT_TITLE)
-        .borders(Borders::ALL)
-        .style(ElementStyle::HomeOverlayBlock.style());
-
-    let inner = block.inner(overlay_area);
-
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(""));
-
-    for (i, item) in texts::EXPORT_TYPE_ITEMS.iter().enumerate() {
-        let is_selected = i == selected_type;
-        let style = if is_selected {
-            ElementStyle::HomeSelected.style()
-        } else {
-            ElementStyle::HomeNormal.style()
-        };
-        let prefix = if is_selected {
-            Icon::SelectionArrow.as_str()
-        } else {
-            Icon::SelectionPad.as_str()
-        };
-        lines.push(Line::from(Span::styled(
-            format!("{}{}", prefix, item),
-            style,
-        )));
-    }
-
-    lines.push(Line::from(""));
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
-fn render_export_confirm_modal(frame: &mut Frame, area: Rect, export_type: &str) {
-    let overlay_area = chrome::make_overlay(area, 6);
-    let block = Block::default()
-        .title(texts::EXPORT_CONFIRM_TITLE)
-        .borders(Borders::ALL)
-        .style(ElementStyle::HomeChangePwBlock.style());
-
-    let inner = block.inner(overlay_area);
-
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            format!(
-                "{}{}{}",
-                texts::PROMPT_EXPORT_CONFIRM_START,
-                export_type,
-                texts::PROMPT_EXPORT_CONFIRM_END
-            ),
-            ElementStyle::ConfirmMessage.style(),
-        )),
-        Line::from(""),
-    ];
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
 fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
     let (file_path, fields, error) = match &state.modal {
         Some(HomeModal::PassphraseInput {
@@ -1693,16 +1510,7 @@ fn home_status_parts(state: &HomeState) -> (&'static str, ElementStyle, Cow<'_, 
             ElementStyle::ModeConfirmDelete,
             Cow::Borrowed(texts::HINT_CHANGE_PW_INPUT),
         ),
-        Some(HomeModal::ExportSelectType { .. }) => (
-            texts::MODE_EXPORT,
-            ElementStyle::ModeFieldType,
-            Cow::Borrowed(texts::HINT_EXPORT_SELECT),
-        ),
-        Some(HomeModal::ExportConfirm { .. }) => (
-            texts::MODE_EXPORT,
-            ElementStyle::ModeFieldType,
-            Cow::Borrowed(texts::HINT_EXPORT_CONFIRM),
-        ),
+        Some(HomeModal::Export(wizard)) => wizard.status_parts(),
         Some(HomeModal::About(about)) => about.status_parts(),
     }
 }
