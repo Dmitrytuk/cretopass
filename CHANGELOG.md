@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session.
 - The import file browser advertises the accepted formats (`json`/`csv`/`xml`)
   at the head of its status-bar hint.
+- Home has an **About** overlay (press `?`): app name, version, tagline, the
+  GitHub Issues link, the private security-reporting form, and the MIT license
+  link. Any key dismisses it.
+- `cretopass --help` now ends with the same app version, feedback links, and
+  license. The strings are shared constants in `theming`, so the TUI overlay
+  and the CLI help cannot drift apart. `cretopass --version` is unchanged.
+- GitHub issue forms (bug report, feature request), `SECURITY.md`, and a README
+  feedback section establish the project's feedback channel: ordinary reports
+  go to GitHub Issues, security vulnerabilities through GitHub Private
+  Vulnerability Reporting.
 
 ### Changed
 
@@ -43,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exported XML/CSV/JSON files are migrated automatically on load: a non-empty
   legacy description becomes a leading Description field. The serialized format
   no longer contains a `description` key.
+- The Home status-bar hint now lists `?:about`, so the new About overlay is
+  discoverable from the menu.
 
 ### Fixed
 

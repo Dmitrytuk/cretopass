@@ -1,0 +1,69 @@
+name: Bug report
+description: Report a problem so we can reproduce and fix it
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Reports missing the version
+        and reproduction steps are hard to act on, so the fields below are
+        required.
+
+        ⚠️ **Do not report security vulnerabilities here** — use the private
+        channel instead (see `SECURITY.md`).
+  - type: input
+    id: version
+    attributes:
+      label: cretopass version
+      description: Output of `cretopass --version`.
+      placeholder: "cretopass 0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other (describe below)
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal emulator
+      description: "For example: kitty, alacritty, Windows Terminal, iTerm2."
+    validations:
+      required: false
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Press ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, error output, or anything else that helps.
+    validations:
+      required: false
