@@ -11,15 +11,21 @@
 
 mod about;
 mod alert;
+mod change_password;
 mod configuration;
 mod confirmation;
+mod create_secret;
 mod export;
+mod unlock;
 
 pub use about::About;
 pub use alert::Alert;
+pub use change_password::ChangePasswordPrompt;
 pub use configuration::{ConfigurationModal, Setting};
 pub use confirmation::Confirmation;
+pub use create_secret::CreateSecretPrompt;
 pub use export::ExportWizard;
+pub use unlock::UnlockPrompt;
 
 use crate::file_handling::export::ExportFormat;
 
@@ -46,4 +52,12 @@ pub enum HomeAction {
     SaveConfig,
     /// Reload the stored configuration, discarding the edits.
     DiscardConfig,
+    /// Decrypt the file the unlock prompt was opened for, with the typed password.
+    Unlock,
+    /// Create the file the create dialog was opened for, with the typed password.
+    CreateSecret,
+    /// Ask whether to create `file_path` with no master password at all.
+    ConfirmNoPassphrase { file_path: String },
+    /// Re-encrypt the open file with the typed replacement master password.
+    ChangeMasterPassword,
 }

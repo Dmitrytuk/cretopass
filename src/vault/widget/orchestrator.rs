@@ -21,8 +21,7 @@ use crate::tree::node::Node;
 use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils;
 
-use super::modal::{HomeAction, Setting};
-use super::secret_field::SecretFieldGroup;
+use super::modal::{ChangePasswordPrompt, Confirmation, CreateSecretPrompt, HomeAction, Setting};
 use super::{HomeModal, HomeState, run_tree, run_with_spinner};
 
 /// Performs `action`. The modal that produced it has already been removed from
@@ -42,23 +41,25 @@ pub fn execute<B: Backend>(
             Ok(())
         }
         HomeAction::ChangePasswordPrompt => {
-            state.modal = Some(HomeModal::ChangePwInput {
-                fields: SecretFieldGroup::with_fields(3),
-                error: None,
-            });
+            state.modal = Some(HomeModal::ChangePassword(ChangePasswordPrompt::new()));
             Ok(())
         }
         HomeAction::ReopenCreateSecret { file_path } => {
-            state.modal = Some(HomeModal::CreateSecretFile {
+            state.modal = Some(HomeModal::CreateSecret(CreateSecretPrompt::new(file_path)));
+            Ok(())
+        }
+        HomeAction::ConfirmNoPassphrase { file_path } => {
+            state.modal = Some(HomeModal::Confirmation(Confirmation::no_passphrase(
                 file_path,
-                fields: SecretFieldGroup::with_fields(2),
-                error: None,
-            });
+            )));
             Ok(())
         }
         HomeAction::CreateWithoutPassword { file_path } => {
             create_without_password(state, terminal, file_path)
         }
+        HomeAction::Unlock => unlock(state, terminal, modal),
+        HomeAction::CreateSecret => create_secret(state, terminal, modal),
+        HomeAction::ChangeMasterPassword => change_master_password(state, terminal, modal),
         HomeAction::Export { format } => {
             export(state, format);
             Ok(())
@@ -130,6 +131,152 @@ fn delete_recent(state: &mut HomeState, path: &str) {
         state.config.last_opened_file = None;
     }
     let _ = utils::save_config(&state.config);
+}
+
+/// Decrypts the file the unlock prompt was opened for and opens it in the Tree.
+///
+/// A wrong master password re-shows the prompt with the error, keeping what was
+/// typed so the user can correct it.
+fn unlock<B: Backend>(
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+    modal: HomeModal,
+) -> io::Result<()> {
+    let HomeModal::Unlock(mut prompt) = modal else {
+        return Ok(());
+    };
+
+    let passphrase = prompt.typed();
+    let file_data = prompt.file_data().to_vec();
+    let (outcome, passphrase) = run_with_spinner(terminal, state, Status::Loading, move || {
+        let outcome = file_handling::decrypt_to_node(&file_data, &passphrase);
+        (outcome, passphrase)
+    })?;
+
+    match outcome {
+        Err(e) => {
+            prompt.reject(format!("{}{e}", texts::MSG_WRONG_PW));
+            state.modal = Some(HomeModal::Unlock(prompt));
+            Ok(())
+        }
+        Ok(node) => {
+            let file_path = prompt.file_path().to_string();
+            let passphrase = Zeroizing::new(passphrase.into_bytes());
+            state.active_vault = Some(ActiveVaultState {
+                path: Some(file_path.clone()),
+                passphrase: passphrase.clone(),
+                node: Some(node.clone()),
+            });
+            let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
+            open_tree(state, terminal, node, file_path, passphrase)
+        }
+    }
+}
+
+/// Creates the file the create dialog was opened for and opens it in the Tree.
+///
+/// A failed write re-shows the dialog with the error, keeping the typed pair.
+fn create_secret<B: Backend>(
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+    modal: HomeModal,
+) -> io::Result<()> {
+    let HomeModal::CreateSecret(mut prompt) = modal else {
+        return Ok(());
+    };
+
+    let file_path = prompt.file_path().to_string();
+    let passphrase = prompt.typed();
+    let (outcome, file_path, passphrase) =
+        run_with_spinner(terminal, state, Status::Saving, move || {
+            let outcome = file_handling::create_secret_file(&file_path, &passphrase);
+            (outcome, file_path, passphrase)
+        })?;
+
+    match outcome {
+        Err(e) => {
+            prompt.reject(format!("{e}"));
+            state.modal = Some(HomeModal::CreateSecret(prompt));
+            Ok(())
+        }
+        Ok(node) => {
+            let passphrase = Zeroizing::new(passphrase.into_bytes());
+            state.active_vault = Some(ActiveVaultState {
+                path: Some(file_path.clone()),
+                passphrase: passphrase.clone(),
+                node: Some(node.clone()),
+            });
+            let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
+            open_tree(state, terminal, node, file_path, passphrase)
+        }
+    }
+}
+
+/// Re-encrypts the open secret file with the typed replacement master password.
+///
+/// Validation lives here, not in the prompt: the "current password" field is
+/// checked against the open vault, which only this module holds. The order of the
+/// three checks is the one users are used to — current password, then emptiness,
+/// then a mismatched pair.
+fn change_master_password<B: Backend>(
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+    modal: HomeModal,
+) -> io::Result<()> {
+    let HomeModal::ChangePassword(mut prompt) = modal else {
+        return Ok(());
+    };
+
+    let current_matches = prompt.current().as_bytes()
+        == state
+            .active_vault
+            .as_ref()
+            .map(|active| active.passphrase.as_slice())
+            .unwrap_or(&[]);
+
+    let error = if !current_matches {
+        Some(texts::MSG_CURRENT_PW_INCORRECT.to_string())
+    } else if prompt.new_password().is_empty() || prompt.confirmation().is_empty() {
+        Some(texts::MSG_PW_EMPTY.to_string())
+    } else if prompt.new_password() != prompt.confirmation() {
+        Some(texts::MSG_PW_MISMATCH.to_string())
+    } else {
+        None
+    };
+
+    if let Some(message) = error {
+        prompt.reject(message);
+        state.modal = Some(HomeModal::ChangePassword(prompt));
+        return Ok(());
+    }
+
+    let Some((path, node)) = state
+        .active_vault
+        .as_ref()
+        .and_then(|active| Some((active.path.clone()?, active.node.clone()?)))
+    else {
+        return Ok(());
+    };
+
+    let new_password = Zeroizing::new(prompt.new_password().as_bytes().to_vec());
+    let save_node = node.clone();
+    let save_path = path.clone();
+    let (outcome, new_password) = run_with_spinner(terminal, state, Status::Saving, move || {
+        let outcome = file_handling::save_tree(&save_node, &save_path, &new_password);
+        (outcome, new_password)
+    })?;
+
+    match outcome {
+        Err(e) => {
+            prompt.reject_and_clear(format!("{}{e}", texts::MSG_SAVE_FAILED));
+            state.modal = Some(HomeModal::ChangePassword(prompt));
+            Ok(())
+        }
+        Ok(()) => {
+            state.active_vault.as_mut().unwrap().passphrase = new_password.clone();
+            open_tree(state, terminal, node, path, new_password)
+        }
+    }
 }
 
 /// Creates `file_path` with an empty master password and opens it in the Tree.

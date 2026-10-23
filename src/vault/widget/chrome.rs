@@ -7,6 +7,17 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Clear, Paragraph};
 
+/// The path as a modal shows it: the whole path, or only the file name.
+pub fn display_path(path: &str, display_full_path: bool) -> String {
+    if display_full_path {
+        return path.to_string();
+    }
+    std::path::Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string())
+}
+
 /// A centred overlay `height` rows tall, three-fifths of the screen wide.
 ///
 /// The height is clamped so a modal never covers the last screen row.
