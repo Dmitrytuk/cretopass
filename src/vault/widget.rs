@@ -1671,7 +1671,9 @@ fn render_about_modal(frame: &mut Frame, area: Rect) {
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
     frame.render_widget(
-        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        Paragraph::new(Text::from(lines))
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: false }),
         inner,
     );
 }
@@ -1685,17 +1687,17 @@ fn about_lines() -> Vec<Line<'static>> {
         styled(texts::APP_TAGLINE.to_string()),
         Line::from(""),
         styled(texts::ABOUT_LABEL_BUGS.to_string()),
-        styled(format!("  {}", texts::ISSUES_URL)),
+        styled(texts::ISSUES_URL.to_string()),
         Line::from(""),
         styled(texts::ABOUT_LABEL_SECURITY.to_string()),
-        styled(format!("  {}", texts::SECURITY_ADVISORY_URL)),
+        styled(texts::SECURITY_ADVISORY_URL.to_string()),
         Line::from(""),
         styled(format!(
             "{}{}",
             texts::ABOUT_LICENSE_PREFIX,
             texts::LICENSE_NAME
         )),
-        styled(format!("  {}", texts::LICENSE_URL)),
+        styled(texts::LICENSE_URL.to_string()),
     ]
 }
 
