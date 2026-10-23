@@ -81,6 +81,5 @@ launching the tree, so returning to home does not re-show the dialog.
 - `file_browser` — the directory browser, wrapped as a `Modal` variant
 - `theming` — Action dispatch, strings, styles
 - `cursor` — text editing in `secret_field`
-- `file_browser` — the directory browser, wrapped as a `Modal` variant
 - `tree::node` — Node type for ActiveVaultState
 - `tree::app_tree` — tree screen launch
