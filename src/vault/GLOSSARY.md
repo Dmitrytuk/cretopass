@@ -7,6 +7,9 @@ Vault lifecycle: opening, creating, browsing for, configuring, and exchanging se
 **Home**: The launcher shown on startup. Lists Open secret file, Create new secret file, Configuration, Change file password, Export/Import actions, and Recent secret files.
 _Avoid_: Settings menu, Launcher
 
+**About overlay**: The Home modal opened with `?`. Shows the app name, version, tagline, the Feedback channel link, the private security-reporting form, and the license. Dismissed by any key, like the Tree's help overlay.
+_Avoid_: Help screen, Info dialog
+
 **File Browser**: Modal for navigating the filesystem to pick a secret file (Open), name a new one (Create), or select a file for import.
 _Avoid_: File Picker, Directory Browser
 

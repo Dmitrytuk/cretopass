@@ -3,6 +3,28 @@ pub const TITLE_TREE_PREFIX: &str = " File — ";
 pub const TITLE_HOME_DEFAULT: &str = " Home ";
 pub const TITLE_HOME_PREFIX: &str = " Home — ";
 
+// ── App identity & feedback ──
+//
+// One source of truth for the app's name, version, tagline, and feedback
+// links, shared by the TUI About overlay and the CLI `--help` footer so the
+// two can never drift apart (see
+// [ADR 0020](../../../docs/adr/0020-feedback-and-issue-reporting.md)).
+
+pub const APP_NAME: &str = "cretopass";
+/// One-line description of the app shown in the About overlay and `--help`.
+pub const APP_TAGLINE: &str = "Terminal-based secret keeper with age-encrypted storage";
+/// Version from `Cargo.toml`.
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The single channel for ordinary bug reports and feature requests.
+pub const ISSUES_URL: &str = "https://github.com/Dmitrytuk/cretopass/issues";
+/// GitHub's private vulnerability reporting form for security issues.
+pub const SECURITY_ADVISORY_URL: &str =
+    "https://github.com/Dmitrytuk/cretopass/security/advisories/new";
+/// The license name.
+pub const LICENSE_NAME: &str = "MIT";
+/// The license text in the repository.
+pub const LICENSE_URL: &str = "https://github.com/Dmitrytuk/cretopass/blob/master/LICENSE";
+
 pub const OVERLAY_SEARCH: &str = " Search ";
 pub const OVERLAY_ADD_NODE: &str = "Add Node";
 pub const OVERLAY_EDIT_NODE: &str = "Edit Node";
@@ -13,7 +35,13 @@ pub const OVERLAY_SYMBOLS: &str = " Special Characters ";
 pub const OVERLAY_CONFIRM_DELETE: &str = " Confirm Delete ";
 pub const OVERLAY_COPIED: &str = " Copied ";
 pub const OVERLAY_HELP: &str = " Help ";
+pub const OVERLAY_ABOUT: &str = " About ";
 pub const OVERLAY_SAVE_ERROR: &str = " Save Error ";
+
+// Labels used by the About overlay and the CLI `--help` footer.
+pub const ABOUT_LABEL_BUGS: &str = "Bug reports & feature requests:";
+pub const ABOUT_LABEL_SECURITY: &str = "Security vulnerabilities (private):";
+pub const ABOUT_LICENSE_PREFIX: &str = "License: ";
 
 pub const CONFIG_TITLE: &str = " Configuration ";
 pub const HOME_CHANGE_PASSWORD: &str = " Change Password ";
@@ -90,6 +118,7 @@ pub const MODE_GENERATOR: &str = "GENERATE";
 pub const MODE_SYMBOLS: &str = "SYMBOLS";
 pub const MODE_CONFIRM: &str = "CONFIRM";
 pub const MODE_HELP: &str = "HELP";
+pub const MODE_ABOUT: &str = "ABOUT";
 pub const MODE_MENU: &str = "MENU";
 pub const MODE_OPEN: &str = "OPEN";
 pub const MODE_PWD: &str = "PWD";
@@ -134,7 +163,7 @@ pub const HINT_FIELD_PASTE: &str = "p:after  P:before  Esc:cancel";
 pub const HINT_SELECT_FIELD_TYPE: &str = "j/k:nav  1-9:select  Enter:choose  Esc:cancel";
 pub const HINT_CUSTOM_FIELD_NAME: &str = "Type name  Enter:done  Esc:cancel";
 pub const HINT_CONFIRM_DELETE: &str = "y:delete  n/Esc:cancel";
-pub const HINT_HOME: &str = "j/k:navigate  Enter/l:select  d:<delete path>  q:quit";
+pub const HINT_HOME: &str = "j/k:navigate  Enter/l:select  d:<delete path>  ?:about  q:quit";
 pub const HINT_CONFIG: &str = "Space:toggle  Enter:save  Esc:cancel";
 pub const HINT_DELETE_CONFIRM: &str = "y/Enter:confirm  any key:cancel";
 pub const HINT_CHANGE_PW_CONFIRM: &str = "y/Enter:yes  any key:no";

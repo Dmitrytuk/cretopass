@@ -100,6 +100,21 @@ secret file — they are useless to anyone without the passphrase.
 | `<secret file>.bak` | Transient copy of the previous version; exists only during a save (or after an interrupted one) |
 | `~/.config/cretopass/config.pwd` | App settings and recent files list (rkyv binary) |
 
+## Feedback & Security
+
+Found a bug or have a feature request? The single place to report it is GitHub
+Issues:
+
+👉 https://github.com/Dmitrytuk/cretopass/issues
+
+For security vulnerabilities, do **not** open a public issue — use GitHub's
+private vulnerability reporting instead (see [SECURITY.md](SECURITY.md)):
+
+👉 https://github.com/Dmitrytuk/cretopass/security/advisories/new
+
+The same links, together with the app version, are available in the app itself:
+press `?` on the Home screen or run `cretopass --help`.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
