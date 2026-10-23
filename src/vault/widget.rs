@@ -739,8 +739,6 @@ fn render_home_window(frame: &mut Frame, area: Rect, state: &HomeState) {
     render_status_bar(frame, layout[1], mode_str, mode_style.style(), &hint);
 }
 
-/// Renders the change-master-password dialog: the current, new, and
-/// confirmation master-password fields, plus a validation error when present.
 /// Maps the active Home modal (or the menu) to the unified status-bar parts:
 /// `(mode label, badge style, context hint)`.
 ///
