@@ -3,12 +3,15 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use crossterm::event::{self, Event, KeyEventKind};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{Frame, Terminal, backend::Backend};
 
+mod chrome;
+mod modal;
+mod orchestrator;
 mod secret_field;
 
 use crate::file_browser::{
@@ -25,6 +28,7 @@ use crate::tree::app_tree::SaveTarget;
 use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils::{self, Configuration};
 
+use modal::{About, Alert, Confirmation, HomeAction};
 use secret_field::{SecretField, SecretFieldGroup, password_field_spans, secret_field_spans};
 
 enum HomeModal {
@@ -45,16 +49,11 @@ enum HomeModal {
     Configuration {
         setting_idx: usize,
     },
-    Alert {
-        message: String,
-    },
-    DeleteConfirm {
-        path: String,
-    },
-    ChangePwConfirm,
-    ConfirmNoPassphrase {
-        file_path: String,
-    },
+    /// A passive message the user acknowledges with any key.
+    Alert(Alert),
+    /// A yes/no confirmation; the prompt and its consequences follow from the
+    /// kind it carries.
+    Confirmation(Confirmation),
     /// Change master password: current, new, and confirmation.
     ChangePwInput {
         fields: SecretFieldGroup,
@@ -67,7 +66,38 @@ enum HomeModal {
         export_type: String,
     },
     /// App identity, version, and feedback links, opened with `?` from the menu.
-    About,
+    About(About),
+}
+
+impl HomeModal {
+    /// A passive alert carrying `message`.
+    fn alert(message: impl Into<String>) -> Self {
+        Self::Alert(Alert {
+            message: message.into(),
+        })
+    }
+
+    /// Whether this modal handles its own keys on the intent contract.
+    ///
+    /// Transitional: modals migrate one flow at a time, and this predicate goes
+    /// away once the last of them does.
+    fn uses_intent_contract(&self) -> bool {
+        matches!(
+            self,
+            Self::Alert(_) | Self::About(_) | Self::Confirmation(_)
+        )
+    }
+
+    /// Reads a key on the intent contract: `None` means the modal consumed it and
+    /// stays open, `Some` is what the user asked for.
+    fn handle_key(&mut self, key: event::KeyEvent) -> Option<HomeAction> {
+        match self {
+            Self::Alert(alert) => alert.handle_key(key),
+            Self::About(about) => about.handle_key(key),
+            Self::Confirmation(confirmation) => confirmation.handle_key(key),
+            _ => None,
+        }
+    }
 }
 
 pub struct HomeState {
@@ -246,7 +276,7 @@ fn handle_home_key<B: Backend>(
             reopen_tree(state, terminal)?;
         }
         Action::OpenHelp => {
-            state.modal = Some(HomeModal::About);
+            state.modal = Some(HomeModal::About(About));
         }
         Action::Back => {
             if state
@@ -286,19 +316,15 @@ fn handle_home_key<B: Backend>(
                 state.modal = Some(HomeModal::Configuration { setting_idx: 0 });
             } else if idx == 3 {
                 if state.active_vault.is_some() {
-                    state.modal = Some(HomeModal::ChangePwConfirm);
+                    state.modal = Some(HomeModal::Confirmation(Confirmation::change_password()));
                 } else {
-                    state.modal = Some(HomeModal::Alert {
-                        message: texts::MSG_NO_OPEN_FILE.to_string(),
-                    });
+                    state.modal = Some(HomeModal::alert(texts::MSG_NO_OPEN_FILE.to_string()));
                 }
             } else if idx == 4 {
                 if state.active_vault.is_some() {
                     state.modal = Some(HomeModal::ExportSelectType { selected_type: 0 });
                 } else {
-                    state.modal = Some(HomeModal::Alert {
-                        message: texts::MSG_NO_OPEN_FILE.to_string(),
-                    });
+                    state.modal = Some(HomeModal::alert(texts::MSG_NO_OPEN_FILE.to_string()));
                 }
             } else if idx == 5 {
                 let mut fb =
@@ -337,9 +363,7 @@ fn handle_home_key<B: Backend>(
 
                     match file_handling::validate_encrypted_file(&file_path) {
                         Err(e) => {
-                            state.modal = Some(HomeModal::Alert {
-                                message: format!("{e}"),
-                            });
+                            state.modal = Some(HomeModal::alert(format!("{e}")));
                         }
                         Ok(data) => {
                             state.modal = Some(HomeModal::PassphraseInput {
@@ -365,11 +389,12 @@ fn handle_home_key<B: Backend>(
                         .and_then(|af| af.path.as_deref())
                         == Some(path);
                     if is_active {
-                        state.modal = Some(HomeModal::Alert {
-                            message: texts::MSG_CANNOT_DELETE_OPEN.to_string(),
-                        });
+                        state.modal =
+                            Some(HomeModal::alert(texts::MSG_CANNOT_DELETE_OPEN.to_string()));
                     } else {
-                        state.modal = Some(HomeModal::DeleteConfirm { path: path.clone() });
+                        state.modal = Some(HomeModal::Confirmation(Confirmation::delete_recent(
+                            path.clone(),
+                        )));
                     }
                 }
             }
@@ -514,9 +539,9 @@ fn handle_file_browser_key<B: Backend>(
                                             Some((p, active_vault.passphrase.clone(), root.clone()))
                                         }
                                         None => {
-                                            state.modal = Some(HomeModal::Alert {
-                                                message: texts::MSG_NO_FILE_PATH.to_string(),
-                                            });
+                                            state.modal = Some(HomeModal::alert(
+                                                texts::MSG_NO_FILE_PATH.to_string(),
+                                            ));
                                             return Ok(());
                                         }
                                     }
@@ -524,9 +549,8 @@ fn handle_file_browser_key<B: Backend>(
                                 None => None,
                             }
                         } else {
-                            state.modal = Some(HomeModal::Alert {
-                                message: texts::MSG_IMPORT_NO_OPEN_FILE.to_string(),
-                            });
+                            state.modal =
+                                Some(HomeModal::alert(texts::MSG_IMPORT_NO_OPEN_FILE.to_string()));
                             return Ok(());
                         };
 
@@ -537,29 +561,27 @@ fn handle_file_browser_key<B: Backend>(
                                 })?;
                             match outcome {
                                 Err(e) => {
-                                    state.modal = Some(HomeModal::Alert {
-                                        message: format!("{}{}", texts::MSG_SAVE_FAILED, e),
-                                    });
+                                    state.modal = Some(HomeModal::alert(format!(
+                                        "{}{}",
+                                        texts::MSG_SAVE_FAILED,
+                                        e
+                                    )));
                                 }
                                 Ok(()) => {
-                                    state.modal = Some(HomeModal::Alert {
-                                        message: texts::MSG_IMPORT_SUCCESS.to_string(),
-                                    });
+                                    state.modal = Some(HomeModal::alert(
+                                        texts::MSG_IMPORT_SUCCESS.to_string(),
+                                    ));
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        state.modal = Some(HomeModal::Alert {
-                            message: format!("{e}"),
-                        });
+                        state.modal = Some(HomeModal::alert(format!("{e}")));
                     }
                 }
             } else if creating {
                 if std::path::Path::new(&path).exists() {
-                    state.modal = Some(HomeModal::Alert {
-                        message: texts::MSG_FILE_EXISTS.to_string(),
-                    });
+                    state.modal = Some(HomeModal::alert(texts::MSG_FILE_EXISTS.to_string()));
                 } else if file_handling::probe_path_writable(&path).is_ok() {
                     state.modal = Some(HomeModal::CreateSecretFile {
                         file_path: path,
@@ -567,16 +589,12 @@ fn handle_file_browser_key<B: Backend>(
                         error: None,
                     });
                 } else {
-                    state.modal = Some(HomeModal::Alert {
-                        message: texts::MSG_CANNOT_WRITE.to_string(),
-                    });
+                    state.modal = Some(HomeModal::alert(texts::MSG_CANNOT_WRITE.to_string()));
                 }
             } else {
                 match file_handling::validate_encrypted_file(&path) {
                     Err(e) => {
-                        state.modal = Some(HomeModal::Alert {
-                            message: format!("{e}"),
-                        });
+                        state.modal = Some(HomeModal::alert(format!("{e}")));
                     }
                     Ok(data) => {
                         state.modal = Some(HomeModal::PassphraseInput {
@@ -636,9 +654,7 @@ fn handle_config_key(key: event::KeyEvent, state: &mut HomeState) {
         }
         Action::SaveConfig => {
             let _ = utils::save_config(&state.config);
-            state.modal = Some(HomeModal::Alert {
-                message: texts::MSG_CONFIG_SAVED.to_string(),
-            });
+            state.modal = Some(HomeModal::alert(texts::MSG_CONFIG_SAVED.to_string()));
         }
         Action::Cancel => {
             state.config = utils::load_config();
@@ -648,37 +664,6 @@ fn handle_config_key(key: event::KeyEvent, state: &mut HomeState) {
             state.modal = None;
         }
         _ => {}
-    }
-}
-
-fn handle_delete_confirm_key(key: event::KeyEvent, state: &mut HomeState) {
-    match Action::from_confirm(&key) {
-        Action::Yes => {
-            if let Some(HomeModal::DeleteConfirm { path }) = state.modal.take() {
-                state.config.recent_files.retain(|f| f != &path);
-                if state.config.last_opened_file.as_deref() == Some(&path) {
-                    state.config.last_opened_file = None;
-                }
-                let _ = utils::save_config(&state.config);
-            }
-        }
-        _ => {
-            state.modal = None;
-        }
-    }
-}
-
-fn handle_change_pw_confirm_key(key: event::KeyEvent, state: &mut HomeState) {
-    match Action::from_confirm(&key) {
-        Action::Yes => {
-            state.modal = Some(HomeModal::ChangePwInput {
-                fields: SecretFieldGroup::with_fields(3),
-                error: None,
-            });
-        }
-        _ => {
-            state.modal = None;
-        }
     }
 }
 
@@ -816,66 +801,6 @@ fn change_master_password<B: Backend>(
     Ok(())
 }
 
-fn handle_confirm_no_passphrase_key<B: Backend>(
-    key: event::KeyEvent,
-    state: &mut HomeState,
-    terminal: &mut Terminal<B>,
-) -> io::Result<()> {
-    let file_path = match state.modal.take() {
-        Some(HomeModal::ConfirmNoPassphrase { file_path }) => file_path,
-        _ => return Ok(()),
-    };
-    match key.code {
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-            let (outcome, file_path) =
-                run_with_spinner(terminal, state, Status::Saving, move || {
-                    let outcome = file_handling::create_secret_file(&file_path, "");
-                    (outcome, file_path)
-                })?;
-            match outcome {
-                Err(e) => {
-                    state.modal = Some(HomeModal::Alert {
-                        message: format!("{e}"),
-                    });
-                }
-                Ok(node) => {
-                    state.modal = None;
-                    let pp_bytes = zeroize::Zeroizing::new(Vec::new());
-                    let active_vault = ActiveVaultState {
-                        path: Some(file_path.clone()),
-                        passphrase: pp_bytes.clone(),
-                        node: Some(node.clone()),
-                    };
-                    state.active_vault = Some(active_vault);
-
-                    let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
-
-                    let mut tree_state = crate::tree::widget::TreeState::new(node);
-                    tree_state.display_full_path = state.config.display_full_path;
-                    tree_state.generator = state.generator;
-                    run_tree(
-                        state,
-                        terminal,
-                        tree_state,
-                        Some(SaveTarget {
-                            path: file_path,
-                            passphrase: pp_bytes,
-                        }),
-                    )?;
-                }
-            }
-        }
-        _ => {
-            state.modal = Some(HomeModal::CreateSecretFile {
-                file_path,
-                fields: SecretFieldGroup::with_fields(2),
-                error: None,
-            });
-        }
-    }
-    Ok(())
-}
-
 // ── Export/Import modal key handlers ──
 
 fn handle_export_select_type_key(key: event::KeyEvent, state: &mut HomeState) {
@@ -954,14 +879,14 @@ fn handle_export_confirm_key(key: event::KeyEvent, state: &mut HomeState) {
 
             match file_handling::export::export_tree(&node, &path, format) {
                 Ok(out_path) => {
-                    state.modal = Some(HomeModal::Alert {
-                        message: format!("{}{}", texts::MSG_EXPORT_SUCCESS, out_path),
-                    });
+                    state.modal = Some(HomeModal::alert(format!(
+                        "{}{}",
+                        texts::MSG_EXPORT_SUCCESS,
+                        out_path
+                    )));
                 }
                 Err(e) => {
-                    state.modal = Some(HomeModal::Alert {
-                        message: format!("{e}"),
-                    });
+                    state.modal = Some(HomeModal::alert(format!("{e}")));
                 }
             }
         }
@@ -971,43 +896,51 @@ fn handle_export_confirm_key(key: event::KeyEvent, state: &mut HomeState) {
     }
 }
 
-// ── Modal key handling (Passphrase, Alert, FileBrowser) ──
+// ── Modal key handling ──
 
+/// Dispatches a key to the active modal.
+///
+/// Modals on the intent contract read the key themselves and report a
+/// [`HomeAction`], which [`orchestrator::execute`] then performs; the rest still
+/// run their own I/O through the legacy handlers below until they migrate.
 fn handle_modal_key<B: Backend>(
     key: event::KeyEvent,
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
-    // The About overlay is a read-only info card: any key dismisses it, like the
-    // Tree's help overlay.
-    if matches!(state.modal, Some(HomeModal::About)) {
-        state.modal = None;
+    let Some(mut modal) = state.modal.take() else {
         return Ok(());
+    };
+
+    if modal.uses_intent_contract() {
+        return match modal.handle_key(key) {
+            // The modal consumed the key and stays open.
+            None => {
+                state.modal = Some(modal);
+                Ok(())
+            }
+            Some(action) => orchestrator::execute(state, terminal, action),
+        };
     }
 
-    let is_passphrase = matches!(
-        state.modal,
-        Some(HomeModal::PassphraseInput { .. }) | Some(HomeModal::Alert { .. })
-    );
-    if is_passphrase {
+    state.modal = Some(modal);
+    legacy_modal_key(key, state, terminal)
+}
+
+/// Key handling for the modals still running their own I/O.
+fn legacy_modal_key<B: Backend>(
+    key: event::KeyEvent,
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
+    let is_unlock = matches!(state.modal, Some(HomeModal::PassphraseInput { .. }));
+    if is_unlock {
         return handle_passphrase_key(key, state, terminal);
     }
 
     let is_app_settings = matches!(state.modal, Some(HomeModal::Configuration { .. }));
     if is_app_settings {
         handle_config_key(key, state);
-        return Ok(());
-    }
-
-    let is_delete_confirm = matches!(state.modal, Some(HomeModal::DeleteConfirm { .. }));
-    if is_delete_confirm {
-        handle_delete_confirm_key(key, state);
-        return Ok(());
-    }
-
-    let is_change_pw_confirm = matches!(state.modal, Some(HomeModal::ChangePwConfirm));
-    if is_change_pw_confirm {
-        handle_change_pw_confirm_key(key, state);
         return Ok(());
     }
 
@@ -1019,12 +952,6 @@ fn handle_modal_key<B: Backend>(
     let is_create_secret = matches!(state.modal, Some(HomeModal::CreateSecretFile { .. }));
     if is_create_secret {
         return handle_create_secret_file_key(key, state, terminal);
-    }
-
-    let is_confirm_no_passphrase =
-        matches!(state.modal, Some(HomeModal::ConfirmNoPassphrase { .. }));
-    if is_confirm_no_passphrase {
-        return handle_confirm_no_passphrase_key(key, state, terminal);
     }
 
     let is_export_select = matches!(state.modal, Some(HomeModal::ExportSelectType { .. }));
@@ -1211,7 +1138,9 @@ fn create_secret_file<B: Backend>(
     let confirm = fields.field(1).text().to_string();
 
     if passphrase.is_empty() && confirm.is_empty() {
-        state.modal = Some(HomeModal::ConfirmNoPassphrase { file_path });
+        state.modal = Some(HomeModal::Confirmation(Confirmation::no_passphrase(
+            file_path,
+        )));
         return Ok(());
     }
     if passphrase != confirm {
@@ -1286,17 +1215,14 @@ fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
 
     match &state.modal {
         Some(HomeModal::FileBrowser(_)) => {}
+        Some(HomeModal::Alert(alert)) => alert.render(frame, area),
+        Some(HomeModal::About(about)) => about.render(frame, area),
+        Some(HomeModal::Confirmation(confirmation)) => confirmation.render(frame, area),
         Some(HomeModal::PassphraseInput { .. }) => render_passphrase_modal(frame, area, state),
         Some(HomeModal::CreateSecretFile { .. }) => {
             render_create_secret_file_modal(frame, area, state)
         }
         Some(HomeModal::Configuration { .. }) => render_config_modal(frame, area, state),
-        Some(HomeModal::Alert { message }) => render_alert_modal(frame, area, message),
-        Some(HomeModal::DeleteConfirm { path }) => render_delete_confirm_modal(frame, area, path),
-        Some(HomeModal::ChangePwConfirm) => render_change_pw_confirm_modal(frame, area),
-        Some(HomeModal::ConfirmNoPassphrase { .. }) => {
-            render_confirm_no_passphrase_modal(frame, area)
-        }
         Some(HomeModal::ChangePwInput { .. }) => render_change_pw_input_modal(frame, area, state),
         Some(HomeModal::ExportSelectType { .. }) => {
             render_export_select_type_modal(frame, area, state)
@@ -1304,64 +1230,8 @@ fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
         Some(HomeModal::ExportConfirm { export_type }) => {
             render_export_confirm_modal(frame, area, export_type)
         }
-        Some(HomeModal::About) => render_about_modal(frame, area),
         None => {}
     }
-}
-
-/// Renders the About overlay: app identity, version, and feedback links.
-///
-/// The body is built from the shared constants in [`texts`] — the same values
-/// the CLI `--help` footer uses. Any key dismisses it, like the Tree's help
-/// overlay.
-fn render_about_modal(frame: &mut Frame, area: Rect) {
-    let lines = about_lines();
-    let overlay_height = (lines.len() as u16 + 2).min(area.height.saturating_sub(2));
-    let width = area.width.saturating_sub(4);
-    let overlay_area = Rect {
-        x: area.width.saturating_sub(width) / 2,
-        y: area.height.saturating_sub(overlay_height) / 2,
-        width,
-        height: overlay_height,
-    };
-
-    let block = Block::default()
-        .title(texts::OVERLAY_ABOUT)
-        .borders(Borders::ALL)
-        .style(ElementStyle::HelpBlock.style());
-
-    let inner = block.inner(overlay_area);
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(
-        Paragraph::new(Text::from(lines))
-            .alignment(Alignment::Center)
-            .wrap(Wrap { trim: false }),
-        inner,
-    );
-}
-
-/// Builds the About overlay body from the shared app-identity constants.
-fn about_lines() -> Vec<Line<'static>> {
-    let text = ElementStyle::HelpText.style();
-    let styled = |body: String| Line::from(Span::styled(body, text));
-    vec![
-        styled(format!("{} {}", texts::APP_NAME, texts::APP_VERSION)),
-        styled(texts::APP_TAGLINE.to_string()),
-        Line::from(""),
-        styled(texts::ABOUT_LABEL_BUGS.to_string()),
-        styled(texts::ISSUES_URL.to_string()),
-        Line::from(""),
-        styled(texts::ABOUT_LABEL_SECURITY.to_string()),
-        styled(texts::SECURITY_ADVISORY_URL.to_string()),
-        Line::from(""),
-        styled(format!(
-            "{}{}",
-            texts::ABOUT_LICENSE_PREFIX,
-            texts::LICENSE_NAME
-        )),
-        styled(texts::LICENSE_URL.to_string()),
-    ]
 }
 
 fn render_home_window(frame: &mut Frame, area: Rect, state: &HomeState) {
@@ -1466,23 +1336,13 @@ fn render_home_window(frame: &mut Frame, area: Rect, state: &HomeState) {
     render_status_bar(frame, layout[1], mode_str, mode_style.style(), &hint);
 }
 
-fn make_overlay(area: Rect, height: u16) -> Rect {
-    let overlay_height = height.min(area.height.saturating_sub(2));
-    Rect {
-        x: area.width / 5,
-        y: area.height.saturating_sub(overlay_height) / 2,
-        width: area.width * 3 / 5,
-        height: overlay_height,
-    }
-}
-
 fn render_config_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
     let setting_idx = match &state.modal {
         Some(HomeModal::Configuration { setting_idx }) => *setting_idx,
         _ => 0,
     };
 
-    let overlay_area = make_overlay(area, 10);
+    let overlay_area = chrome::make_overlay(area, 10);
     let block = Block::default()
         .title(texts::CONFIG_TITLE)
         .borders(Borders::ALL)
@@ -1554,80 +1414,6 @@ fn render_config_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-fn render_delete_confirm_modal(frame: &mut Frame, area: Rect, path: &str) {
-    let overlay_area = make_overlay(area, 6);
-    let block = Block::default()
-        .title(texts::HOME_DELETE_CONFIRM)
-        .borders(Borders::ALL)
-        .style(ElementStyle::HomeDeleteBlock.style());
-
-    let inner = block.inner(overlay_area);
-
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            format!(
-                "{}{}{}",
-                texts::PROMPT_DELETE_RECENT_START,
-                path,
-                texts::PROMPT_DELETE_RECENT_END
-            ),
-            ElementStyle::ConfirmMessage.style(),
-        )),
-        Line::from(""),
-    ];
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
-fn render_change_pw_confirm_modal(frame: &mut Frame, area: Rect) {
-    let overlay_area = make_overlay(area, 6);
-    let block = Block::default()
-        .title(texts::HOME_CHANGE_PASSWORD)
-        .borders(Borders::ALL)
-        .style(ElementStyle::HomeChangePwBlock.style());
-
-    let inner = block.inner(overlay_area);
-
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            texts::PROMPT_CHANGE_PW,
-            ElementStyle::ConfirmMessage.style(),
-        )),
-        Line::from(""),
-    ];
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
-fn render_confirm_no_passphrase_modal(frame: &mut Frame, area: Rect) {
-    let overlay_area = make_overlay(area, 6);
-    let block = Block::default()
-        .title(texts::HOME_NO_PASSPHRASE)
-        .borders(Borders::ALL)
-        .style(ElementStyle::HomeNoPassBlock.style());
-
-    let inner = block.inner(overlay_area);
-
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            texts::PROMPT_NO_PASSPHRASE,
-            ElementStyle::ConfirmMessage.style(),
-        )),
-        Line::from(""),
-    ];
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
 /// Renders the change-master-password dialog: the current, new, and
 /// confirmation master-password fields, plus a validation error when present.
 fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
@@ -1636,7 +1422,7 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &HomeState
         _ => return,
     };
 
-    let overlay_area = make_overlay(area, if error.is_some() { 12 } else { 11 });
+    let overlay_area = chrome::make_overlay(area, if error.is_some() { 12 } else { 11 });
     let block = Block::default()
         .title(texts::HOME_CHANGE_PASSWORD)
         .borders(Borders::ALL)
@@ -1682,7 +1468,7 @@ fn render_export_select_type_modal(frame: &mut Frame, area: Rect, state: &HomeSt
         _ => 0,
     };
 
-    let overlay_area = make_overlay(area, 9);
+    let overlay_area = chrome::make_overlay(area, 9);
     let block = Block::default()
         .title(texts::EXPORT_SELECT_TITLE)
         .borders(Borders::ALL)
@@ -1719,7 +1505,7 @@ fn render_export_select_type_modal(frame: &mut Frame, area: Rect, state: &HomeSt
 }
 
 fn render_export_confirm_modal(frame: &mut Frame, area: Rect, export_type: &str) {
-    let overlay_area = make_overlay(area, 6);
+    let overlay_area = chrome::make_overlay(area, 6);
     let block = Block::default()
         .title(texts::EXPORT_CONFIRM_TITLE)
         .borders(Borders::ALL)
@@ -1766,7 +1552,7 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
             .unwrap_or_else(|| file_path.to_string())
     };
 
-    let overlay_area = make_overlay(area, if error.is_some() { 8 } else { 7 });
+    let overlay_area = chrome::make_overlay(area, if error.is_some() { 8 } else { 7 });
 
     let block = Block::default()
         .title(texts::HOME_ENTER_PASSPHRASE)
@@ -1825,7 +1611,7 @@ fn render_create_secret_file_modal(frame: &mut Frame, area: Rect, state: &HomeSt
             .unwrap_or_else(|| file_path.to_string())
     };
 
-    let overlay_area = make_overlay(area, if error.is_some() { 10 } else { 9 });
+    let overlay_area = chrome::make_overlay(area, if error.is_some() { 10 } else { 9 });
     let block = Block::default()
         .title(texts::HOME_CREATE_SECRET)
         .borders(Borders::ALL)
@@ -1868,29 +1654,6 @@ fn render_create_secret_file_modal(frame: &mut Frame, area: Rect, state: &HomeSt
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-fn render_alert_modal(frame: &mut Frame, area: Rect, message: &str) {
-    let overlay_area = make_overlay(area, 5);
-    let block = Block::default()
-        .title(texts::ALERT_TITLE)
-        .borders(Borders::ALL)
-        .style(ElementStyle::HomeAlertBlock.style());
-
-    let inner = block.inner(overlay_area);
-
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(message, ElementStyle::ConfirmMessage.style())),
-        Line::from(""),
-    ];
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(
-        Paragraph::new(Text::from(lines)).alignment(Alignment::Center),
-        inner,
-    );
-}
-
 /// Maps the active Home modal (or the menu) to the unified status-bar parts:
 /// `(mode label, badge style, context hint)`.
 ///
@@ -1923,30 +1686,12 @@ fn home_status_parts(state: &HomeState) -> (&'static str, ElementStyle, Cow<'_, 
             ElementStyle::ModeFieldType,
             Cow::Borrowed(texts::HINT_CONFIG),
         ),
-        Some(HomeModal::Alert { .. }) => (
-            "",
-            ElementStyle::ModeNormal,
-            Cow::Borrowed(texts::HINT_ALERT),
-        ),
-        Some(HomeModal::DeleteConfirm { .. }) => (
-            texts::MODE_DELETE,
-            ElementStyle::ModeConfirmDelete,
-            Cow::Borrowed(texts::HINT_DELETE_CONFIRM),
-        ),
-        Some(HomeModal::ChangePwConfirm) => (
-            texts::MODE_CHANGE_PW,
-            ElementStyle::ModeConfirmDelete,
-            Cow::Borrowed(texts::HINT_CHANGE_PW_CONFIRM),
-        ),
+        Some(HomeModal::Alert(alert)) => alert.status_parts(),
+        Some(HomeModal::Confirmation(confirmation)) => confirmation.status_parts(),
         Some(HomeModal::ChangePwInput { .. }) => (
             texts::MODE_CHANGE_PW,
             ElementStyle::ModeConfirmDelete,
             Cow::Borrowed(texts::HINT_CHANGE_PW_INPUT),
-        ),
-        Some(HomeModal::ConfirmNoPassphrase { .. }) => (
-            texts::MODE_CONFIRM,
-            ElementStyle::ModeConfirmDelete,
-            Cow::Borrowed(texts::HINT_NO_PASSPHRASE),
         ),
         Some(HomeModal::ExportSelectType { .. }) => (
             texts::MODE_EXPORT,
@@ -1958,17 +1703,14 @@ fn home_status_parts(state: &HomeState) -> (&'static str, ElementStyle, Cow<'_, 
             ElementStyle::ModeFieldType,
             Cow::Borrowed(texts::HINT_EXPORT_CONFIRM),
         ),
-        Some(HomeModal::About) => (
-            texts::MODE_ABOUT,
-            ElementStyle::ModeHelp,
-            Cow::Borrowed(texts::HINT_HELP),
-        ),
+        Some(HomeModal::About(about)) => about.status_parts(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::KeyCode;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
 
@@ -2022,7 +1764,7 @@ mod tests {
     #[test]
     fn about_modal_paints_every_cell() {
         let mut state = HomeState::new();
-        state.modal = Some(HomeModal::About);
+        state.modal = Some(HomeModal::About(About));
 
         assert_no_terminal_background(&mut state);
     }
@@ -2032,7 +1774,7 @@ mod tests {
     #[test]
     fn about_modal_status_bar_parts() {
         let mut state = HomeState::new();
-        state.modal = Some(HomeModal::About);
+        state.modal = Some(HomeModal::About(About));
 
         let (mode, _, hint) = home_status_parts(&state);
         assert_eq!(mode, texts::MODE_ABOUT);
@@ -2119,7 +1861,9 @@ mod tests {
         .unwrap();
 
         match &state.modal {
-            Some(HomeModal::Alert { message }) => assert_eq!(message, texts::MSG_IMPORT_SUCCESS),
+            Some(HomeModal::Alert(alert)) => {
+                assert_eq!(alert.message, texts::MSG_IMPORT_SUCCESS)
+            }
             _ => panic!("a successful import must be reported in an alert"),
         }
 
