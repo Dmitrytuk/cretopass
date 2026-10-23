@@ -9,7 +9,8 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::{Frame, Terminal, backend::Backend};
 
-use crate::cursor::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
+mod secret_field;
+
 use crate::file_browser::{
     self, FileBrowserAction, FileBrowserMode, FileBrowserSession, FileBrowserState,
 };
@@ -24,24 +25,21 @@ use crate::tree::app_tree::SaveTarget;
 use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils::{self, Configuration};
 
+use secret_field::{SecretField, SecretFieldGroup, password_field_spans, secret_field_spans};
+
 enum HomeModal {
     FileBrowser(FileBrowserState),
+    /// Unlock prompt: one masked field for the master password.
     PassphraseInput {
         file_path: String,
         file_data: Vec<u8>,
-        passphrase: String,
-        cursor: usize,
-        show: bool,
+        fields: SecretFieldGroup,
         error: Option<String>,
     },
+    /// Create a new secret file: the master password and its confirmation.
     CreateSecretFile {
         file_path: String,
-        passphrase: String,
-        pass_cursor: usize,
-        confirm: String,
-        confirm_cursor: usize,
-        focused: usize,
-        show: bool,
+        fields: SecretFieldGroup,
         error: Option<String>,
     },
     Configuration {
@@ -57,15 +55,9 @@ enum HomeModal {
     ConfirmNoPassphrase {
         file_path: String,
     },
+    /// Change master password: current, new, and confirmation.
     ChangePwInput {
-        current: String,
-        current_cursor: usize,
-        new_pass: String,
-        new_cursor: usize,
-        confirm: String,
-        confirm_cursor: usize,
-        focused: usize,
-        show: bool,
+        fields: SecretFieldGroup,
         error: Option<String>,
     },
     ExportSelectType {
@@ -113,9 +105,7 @@ impl HomeState {
                     .map(|data| HomeModal::PassphraseInput {
                         file_path: path.clone(),
                         file_data: data,
-                        passphrase: String::new(),
-                        cursor: 0,
-                        show: false,
+                        fields: SecretFieldGroup::with_fields(1),
                         error: None,
                     })
             })
@@ -355,9 +345,7 @@ fn handle_home_key<B: Backend>(
                             state.modal = Some(HomeModal::PassphraseInput {
                                 file_path,
                                 file_data: data,
-                                passphrase: String::new(),
-                                cursor: 0,
-                                show: false,
+                                fields: SecretFieldGroup::with_fields(1),
                                 error: None,
                             });
                         }
@@ -575,12 +563,7 @@ fn handle_file_browser_key<B: Backend>(
                 } else if file_handling::probe_path_writable(&path).is_ok() {
                     state.modal = Some(HomeModal::CreateSecretFile {
                         file_path: path,
-                        passphrase: String::new(),
-                        pass_cursor: 0,
-                        confirm: String::new(),
-                        confirm_cursor: 0,
-                        focused: 0,
-                        show: false,
+                        fields: SecretFieldGroup::with_fields(2),
                         error: None,
                     });
                 } else {
@@ -599,9 +582,7 @@ fn handle_file_browser_key<B: Backend>(
                         state.modal = Some(HomeModal::PassphraseInput {
                             file_path: path,
                             file_data: data,
-                            passphrase: String::new(),
-                            cursor: 0,
-                            show: false,
+                            fields: SecretFieldGroup::with_fields(1),
                             error: None,
                         });
                     }
@@ -691,14 +672,7 @@ fn handle_change_pw_confirm_key(key: event::KeyEvent, state: &mut HomeState) {
     match Action::from_confirm(&key) {
         Action::Yes => {
             state.modal = Some(HomeModal::ChangePwInput {
-                current: String::new(),
-                current_cursor: 0,
-                new_pass: String::new(),
-                new_cursor: 0,
-                confirm: String::new(),
-                confirm_cursor: 0,
-                focused: 0,
-                show: false,
+                fields: SecretFieldGroup::with_fields(3),
                 error: None,
             });
         }
@@ -714,283 +688,130 @@ fn handle_change_pw_input_key<B: Backend>(
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     match Action::from_change_pw_input(&key) {
-        Action::NextField => {
-            if let Some(HomeModal::ChangePwInput {
-                ref mut focused, ..
-            }) = state.modal
-            {
-                *focused = (*focused + 1) % 3;
-            }
-        }
-        Action::PrevField => {
-            if let Some(HomeModal::ChangePwInput {
-                ref mut focused, ..
-            }) = state.modal
-            {
-                *focused = focused.saturating_sub(1);
-            }
-        }
-        Action::ToggleShowPassword => {
-            if let Some(HomeModal::ChangePwInput { ref mut show, .. }) = state.modal {
-                *show = !*show;
-            }
-        }
-        Action::InsertChar(c) => {
-            if let Some(HomeModal::ChangePwInput {
-                ref mut current,
-                ref mut current_cursor,
-                ref mut new_pass,
-                ref mut new_cursor,
-                ref mut confirm,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ref mut error,
-                ..
-            }) = state.modal
-            {
-                *error = None;
-                match *focused {
-                    0 => insert_char_at(current, current_cursor, c),
-                    1 => insert_char_at(new_pass, new_cursor, c),
-                    _ => insert_char_at(confirm, confirm_cursor, c),
-                }
-            }
-        }
-        Action::Backspace => {
-            if let Some(HomeModal::ChangePwInput {
-                ref mut current,
-                ref mut current_cursor,
-                ref mut new_pass,
-                ref mut new_cursor,
-                ref mut confirm,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ref mut error,
-                ..
-            }) = state.modal
-            {
-                *error = None;
-                match *focused {
-                    0 if *current_cursor > 0 => {
-                        *current_cursor = backspace_at(current, *current_cursor);
-                    }
-                    1 if *new_cursor > 0 => {
-                        *new_cursor = backspace_at(new_pass, *new_cursor);
-                    }
-                    2 if *confirm_cursor > 0 => {
-                        *confirm_cursor = backspace_at(confirm, *confirm_cursor);
-                    }
-                    _ => {}
-                }
-            }
-        }
-        Action::DeleteChar => {
-            if let Some(HomeModal::ChangePwInput {
-                ref mut current,
-                ref mut current_cursor,
-                ref mut new_pass,
-                ref mut new_cursor,
-                ref mut confirm,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ref mut error,
-                ..
-            }) = state.modal
-            {
-                *error = None;
-                match *focused {
-                    0 => delete_at(current, *current_cursor),
-                    1 => delete_at(new_pass, *new_cursor),
-                    2 => delete_at(confirm, *confirm_cursor),
-                    _ => {}
-                }
-            }
-        }
+        // The dialog is dismissed: leave the modal closed.
+        Action::Cancel => state.modal = None,
+        Action::NextField => with_change_pw(state, |fields, _| fields.next_field()),
+        Action::PrevField => with_change_pw(state, |fields, _| fields.prev_field()),
+        Action::ToggleShowPassword => with_change_pw(state, |fields, _| fields.toggle_show()),
+        Action::InsertChar(c) => with_change_pw(state, |fields, error| {
+            fields.apply(|field| field.insert(c));
+            *error = None;
+        }),
+        Action::Backspace => with_change_pw(state, |fields, error| {
+            fields.apply(SecretField::backspace);
+            *error = None;
+        }),
+        Action::DeleteChar => with_change_pw(state, |fields, error| {
+            fields.apply(SecretField::delete);
+            *error = None;
+        }),
         Action::CursorLeft => {
-            if let Some(HomeModal::ChangePwInput {
-                ref mut current,
-                ref mut current_cursor,
-                ref mut new_pass,
-                ref mut new_cursor,
-                ref mut confirm,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ..
-            }) = state.modal
-            {
-                match *focused {
-                    0 => *current_cursor = cursor_left(current, *current_cursor),
-                    1 => *new_cursor = cursor_left(new_pass, *new_cursor),
-                    2 => *confirm_cursor = cursor_left(confirm, *confirm_cursor),
-                    _ => {}
-                }
-            }
+            with_change_pw(state, |fields, _| fields.apply(SecretField::move_left))
         }
         Action::CursorRight => {
-            if let Some(HomeModal::ChangePwInput {
-                ref mut current,
-                ref mut current_cursor,
-                ref mut new_pass,
-                ref mut new_cursor,
-                ref mut confirm,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ..
-            }) = state.modal
-            {
-                match *focused {
-                    0 => *current_cursor = cursor_right(current, *current_cursor),
-                    1 => *new_cursor = cursor_right(new_pass, *new_cursor),
-                    2 => *confirm_cursor = cursor_right(confirm, *confirm_cursor),
-                    _ => {}
-                }
-            }
+            with_change_pw(state, |fields, _| fields.apply(SecretField::move_right))
         }
         Action::CursorHome => {
-            if let Some(HomeModal::ChangePwInput {
-                ref mut current_cursor,
-                ref mut new_cursor,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ..
-            }) = state.modal
-            {
-                match *focused {
-                    0 => *current_cursor = 0,
-                    1 => *new_cursor = 0,
-                    _ => *confirm_cursor = 0,
-                }
-            }
+            with_change_pw(state, |fields, _| fields.apply(SecretField::move_home))
         }
-        Action::CursorEnd => {
-            if let Some(HomeModal::ChangePwInput {
-                ref mut current,
-                ref mut current_cursor,
-                ref mut new_pass,
-                ref mut new_cursor,
-                ref mut confirm,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ..
-            }) = state.modal
-            {
-                match *focused {
-                    0 => *current_cursor = current.len(),
-                    1 => *new_cursor = new_pass.len(),
-                    _ => *confirm_cursor = confirm.len(),
-                }
-            }
-        }
-        Action::Cancel => {
-            state.modal = None;
-        }
-        Action::Confirm => {
-            let mut modal = match state.modal.take() {
-                Some(HomeModal::ChangePwInput {
-                    current,
-                    current_cursor,
-                    new_pass,
-                    new_cursor,
-                    confirm,
-                    confirm_cursor,
-                    focused,
-                    show,
-                    error,
-                }) => HomeModal::ChangePwInput {
-                    current,
-                    current_cursor,
-                    new_pass,
-                    new_cursor,
-                    confirm,
-                    confirm_cursor,
-                    focused,
-                    show,
-                    error,
-                },
-                _ => return Ok(()),
-            };
-            let (_current, new_pass, _confirm, has_error) = match &mut modal {
-                HomeModal::ChangePwInput {
-                    current,
-                    new_pass,
-                    confirm,
-                    error,
-                    ..
-                } => {
-                    let is_ok = if current.as_bytes()
-                        != state
-                            .active_vault
-                            .as_ref()
-                            .map(|af| af.passphrase.as_slice())
-                            .unwrap_or(&[])
-                    {
-                        *error = Some(texts::MSG_CURRENT_PW_INCORRECT.to_string());
-                        false
-                    } else if new_pass.is_empty() || confirm.is_empty() {
-                        *error = Some(texts::MSG_PW_EMPTY.to_string());
-                        false
-                    } else if new_pass != confirm {
-                        *error = Some(texts::MSG_PW_MISMATCH.to_string());
-                        false
-                    } else {
-                        true
-                    };
-                    (current.clone(), new_pass.clone(), confirm.clone(), !is_ok)
-                }
-                _ => return Ok(()),
-            };
-            if has_error {
-                state.modal = Some(modal);
-            } else {
-                // Save with new passphrase and reopen
-                if let Some(active_vault) = state.active_vault.clone()
-                    && let (Some(path), Some(node)) =
-                        (active_vault.path.clone(), active_vault.node.clone())
-                {
-                    let new_pass_bytes = zeroize::Zeroizing::new(new_pass.into_bytes());
-                    let save_node = node.clone();
-                    let save_path = path.clone();
-                    let (outcome, new_pass_bytes) =
-                        run_with_spinner(terminal, state, Status::Saving, move || {
-                            let outcome =
-                                file_handling::save_tree(&save_node, &save_path, &new_pass_bytes);
-                            (outcome, new_pass_bytes)
-                        })?;
-                    match outcome {
-                        Err(e) => {
-                            state.modal = Some(HomeModal::ChangePwInput {
-                                current: String::new(),
-                                current_cursor: 0,
-                                new_pass: String::new(),
-                                new_cursor: 0,
-                                confirm: String::new(),
-                                confirm_cursor: 0,
-                                focused: 0,
-                                show: false,
-                                error: Some(format!("{}{e}", texts::MSG_SAVE_FAILED)),
-                            });
-                        }
-                        Ok(()) => {
-                            state.active_vault.as_mut().unwrap().passphrase =
-                                new_pass_bytes.clone();
-                            let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
-                            tree_state.display_full_path = state.config.display_full_path;
-                            tree_state.generator = state.generator;
-                            run_tree(
-                                state,
-                                terminal,
-                                tree_state,
-                                Some(SaveTarget {
-                                    path: path.clone(),
-                                    passphrase: new_pass_bytes,
-                                }),
-                            )?;
-                        }
-                    }
-                }
-            }
-        }
+        Action::CursorEnd => with_change_pw(state, |fields, _| fields.apply(SecretField::move_end)),
+        Action::Confirm => change_master_password(state, terminal)?,
         _ => {}
+    }
+    Ok(())
+}
+
+/// Runs `edit` on the change-password dialog's field group, leaving it open.
+fn with_change_pw(
+    state: &mut HomeState,
+    edit: impl FnOnce(&mut SecretFieldGroup, &mut Option<String>),
+) {
+    if let Some(HomeModal::ChangePwInput { fields, error, .. }) = &mut state.modal {
+        edit(fields, error);
+    }
+}
+
+/// Validates the typed trio against the open vault and, when it is accepted,
+/// re-encrypts the secret file with the new master password and reopens the tree.
+fn change_master_password<B: Backend>(
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
+    let mut fields = match state.modal.take() {
+        Some(HomeModal::ChangePwInput { fields, .. }) => fields,
+        other => {
+            state.modal = other;
+            return Ok(());
+        }
+    };
+
+    let current = fields.field(0).text().to_string();
+    let new_pass = fields.field(1).text().to_string();
+    let confirm = fields.field(2).text().to_string();
+
+    let error = if current.as_bytes()
+        != state
+            .active_vault
+            .as_ref()
+            .map(|active| active.passphrase.as_slice())
+            .unwrap_or(&[])
+    {
+        Some(texts::MSG_CURRENT_PW_INCORRECT.to_string())
+    } else if new_pass.is_empty() || confirm.is_empty() {
+        Some(texts::MSG_PW_EMPTY.to_string())
+    } else if new_pass != confirm {
+        Some(texts::MSG_PW_MISMATCH.to_string())
+    } else {
+        None
+    };
+
+    if let Some(message) = error {
+        state.modal = Some(HomeModal::ChangePwInput {
+            fields,
+            error: Some(message),
+        });
+        return Ok(());
+    }
+
+    let Some((path, node)) = state
+        .active_vault
+        .as_ref()
+        .and_then(|active| Some((active.path.clone()?, active.node.clone()?)))
+    else {
+        return Ok(());
+    };
+
+    let new_pass_bytes = zeroize::Zeroizing::new(new_pass.into_bytes());
+    let save_node = node.clone();
+    let save_path = path.clone();
+    let (outcome, new_pass_bytes) = run_with_spinner(terminal, state, Status::Saving, move || {
+        let outcome = file_handling::save_tree(&save_node, &save_path, &new_pass_bytes);
+        (outcome, new_pass_bytes)
+    })?;
+
+    match outcome {
+        Err(e) => {
+            fields.clear();
+            state.modal = Some(HomeModal::ChangePwInput {
+                fields,
+                error: Some(format!("{}{e}", texts::MSG_SAVE_FAILED)),
+            });
+        }
+        Ok(()) => {
+            state.active_vault.as_mut().unwrap().passphrase = new_pass_bytes.clone();
+            let mut tree_state = crate::tree::widget::TreeState::new(node.clone());
+            tree_state.display_full_path = state.config.display_full_path;
+            tree_state.generator = state.generator;
+            run_tree(
+                state,
+                terminal,
+                tree_state,
+                Some(SaveTarget {
+                    path: path.clone(),
+                    passphrase: new_pass_bytes,
+                }),
+            )?;
+        }
     }
     Ok(())
 }
@@ -1047,12 +868,7 @@ fn handle_confirm_no_passphrase_key<B: Backend>(
         _ => {
             state.modal = Some(HomeModal::CreateSecretFile {
                 file_path,
-                passphrase: String::new(),
-                pass_cursor: 0,
-                confirm: String::new(),
-                confirm_cursor: 0,
-                focused: 0,
-                show: false,
+                fields: SecretFieldGroup::with_fields(2),
                 error: None,
             });
         }
@@ -1232,139 +1048,92 @@ fn handle_passphrase_key<B: Backend>(
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
-    let mut modal = match state.modal.take() {
-        Some(m) => m,
-        None => return Ok(()),
+    match Action::from_passphrase_input(&key) {
+        // The prompt is dismissed: leave the modal closed.
+        Action::Cancel => state.modal = None,
+        Action::ToggleShowPassword => with_unlock(state, |fields, _| fields.toggle_show()),
+        Action::InsertChar(c) => with_unlock(state, |fields, error| {
+            fields.apply(|field| field.insert(c));
+            *error = None;
+        }),
+        Action::Backspace => with_unlock(state, |fields, _| fields.apply(SecretField::backspace)),
+        Action::DeleteChar => with_unlock(state, |fields, _| fields.apply(SecretField::delete)),
+        Action::CursorLeft => with_unlock(state, |fields, _| fields.apply(SecretField::move_left)),
+        Action::CursorRight => {
+            with_unlock(state, |fields, _| fields.apply(SecretField::move_right))
+        }
+        Action::CursorHome => with_unlock(state, |fields, _| fields.apply(SecretField::move_home)),
+        Action::CursorEnd => with_unlock(state, |fields, _| fields.apply(SecretField::move_end)),
+        Action::Confirm => unlock(state, terminal)?,
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Runs `edit` on the unlock prompt's field, leaving the prompt open.
+fn with_unlock(
+    state: &mut HomeState,
+    edit: impl FnOnce(&mut SecretFieldGroup, &mut Option<String>),
+) {
+    if let Some(HomeModal::PassphraseInput { fields, error, .. }) = &mut state.modal {
+        edit(fields, error);
+    }
+}
+
+/// Decrypts the pending file with the typed master password: on success the tree
+/// opens, on failure the prompt is re-shown with the error.
+fn unlock<B: Backend>(state: &mut HomeState, terminal: &mut Terminal<B>) -> io::Result<()> {
+    let (file_path, file_data, mut fields) = match state.modal.take() {
+        Some(HomeModal::PassphraseInput {
+            file_path,
+            file_data,
+            fields,
+            ..
+        }) => (file_path, file_data, fields),
+        // Only the unlock prompt is dispatched here; anything else stays closed.
+        _ => return Ok(()),
     };
 
-    match Action::from_passphrase_input(&key) {
-        Action::Cancel => {}
-        Action::ToggleShowPassword => {
-            if let HomeModal::PassphraseInput { show, .. } = &mut modal {
-                *show = !*show;
-            }
-            state.modal = Some(modal);
-        }
-        Action::InsertChar(c) => {
-            if let HomeModal::PassphraseInput {
-                passphrase,
-                cursor,
-                error,
-                ..
-            } = &mut modal
-            {
-                insert_char_at(passphrase, cursor, c);
-                *error = None;
-            }
-            state.modal = Some(modal);
-        }
-        Action::Backspace => {
-            if let HomeModal::PassphraseInput {
-                passphrase, cursor, ..
-            } = &mut modal
-                && *cursor > 0
-            {
-                *cursor = backspace_at(passphrase, *cursor);
-            }
-            state.modal = Some(modal);
-        }
-        Action::DeleteChar => {
-            if let HomeModal::PassphraseInput {
-                passphrase, cursor, ..
-            } = &mut modal
-            {
-                delete_at(passphrase, *cursor);
-            }
-            state.modal = Some(modal);
-        }
-        Action::CursorLeft => {
-            if let HomeModal::PassphraseInput {
-                cursor, passphrase, ..
-            } = &mut modal
-            {
-                *cursor = cursor_left(passphrase, *cursor);
-            }
-            state.modal = Some(modal);
-        }
-        Action::CursorRight => {
-            if let HomeModal::PassphraseInput {
-                cursor, passphrase, ..
-            } = &mut modal
-            {
-                *cursor = cursor_right(passphrase, *cursor);
-            }
-            state.modal = Some(modal);
-        }
-        Action::CursorHome => {
-            if let HomeModal::PassphraseInput { cursor, .. } = &mut modal {
-                *cursor = 0;
-            }
-            state.modal = Some(modal);
-        }
-        Action::CursorEnd => {
-            if let HomeModal::PassphraseInput {
-                cursor, passphrase, ..
-            } = &mut modal
-            {
-                *cursor = passphrase.len();
-            }
-            state.modal = Some(modal);
-        }
-        Action::Confirm => match modal {
-            HomeModal::PassphraseInput {
+    let passphrase = fields.field(0).text().to_string();
+    let (outcome, file_data, passphrase) =
+        run_with_spinner(terminal, state, Status::Loading, move || {
+            let outcome = file_handling::decrypt_to_node(&file_data, &passphrase);
+            (outcome, file_data, passphrase)
+        })?;
+
+    match outcome {
+        Err(e) => {
+            fields.reset_cursors();
+            state.modal = Some(HomeModal::PassphraseInput {
                 file_path,
                 file_data,
-                passphrase,
-                show,
-                ..
-            } => {
-                let (outcome, file_data, passphrase) =
-                    run_with_spinner(terminal, state, Status::Loading, move || {
-                        let outcome = file_handling::decrypt_to_node(&file_data, &passphrase);
-                        (outcome, file_data, passphrase)
-                    })?;
-                match outcome {
-                    Err(e) => {
-                        state.modal = Some(HomeModal::PassphraseInput {
-                            file_path,
-                            file_data,
-                            passphrase,
-                            cursor: 0,
-                            show,
-                            error: Some(format!("{}{e}", texts::MSG_WRONG_PW)),
-                        });
-                    }
-                    Ok(node) => {
-                        let pp_bytes = zeroize::Zeroizing::new(passphrase.into_bytes());
-                        let active_vault = ActiveVaultState {
-                            path: Some(file_path.clone()),
-                            passphrase: pp_bytes.clone(),
-                            node: Some(node.clone()),
-                        };
-                        state.active_vault = Some(active_vault);
+                fields,
+                error: Some(format!("{}{e}", texts::MSG_WRONG_PW)),
+            });
+        }
+        Ok(node) => {
+            let pp_bytes = zeroize::Zeroizing::new(passphrase.into_bytes());
+            let active_vault = ActiveVaultState {
+                path: Some(file_path.clone()),
+                passphrase: pp_bytes.clone(),
+                node: Some(node.clone()),
+            };
+            state.active_vault = Some(active_vault);
 
-                        let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
+            let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
 
-                        let mut tree_state = crate::tree::widget::TreeState::new(node);
-                        tree_state.display_full_path = state.config.display_full_path;
-                        tree_state.generator = state.generator;
-                        run_tree(
-                            state,
-                            terminal,
-                            tree_state,
-                            Some(SaveTarget {
-                                path: file_path,
-                                passphrase: pp_bytes,
-                            }),
-                        )?;
-                    }
-                }
-            }
-            HomeModal::Alert { .. } => {}
-            _ => {}
-        },
-        _ => {
-            state.modal = Some(modal);
+            let mut tree_state = crate::tree::widget::TreeState::new(node);
+            tree_state.display_full_path = state.config.display_full_path;
+            tree_state.generator = state.generator;
+            run_tree(
+                state,
+                terminal,
+                tree_state,
+                Some(SaveTarget {
+                    path: file_path,
+                    passphrase: pp_bytes,
+                }),
+            )?;
         }
     }
     Ok(())
@@ -1381,232 +1150,120 @@ fn handle_create_secret_file_key<B: Backend>(
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     match Action::from_create_secret_file(&key) {
-        Action::NextField => {
-            if let Some(HomeModal::CreateSecretFile {
-                ref mut focused, ..
-            }) = state.modal
-            {
-                *focused = (*focused + 1) % 2;
-            }
-        }
-        Action::PrevField => {
-            if let Some(HomeModal::CreateSecretFile {
-                ref mut focused, ..
-            }) = state.modal
-            {
-                *focused = focused.saturating_sub(1);
-            }
-        }
-        Action::ToggleShowPassword => {
-            if let Some(HomeModal::CreateSecretFile { ref mut show, .. }) = state.modal {
-                *show = !*show;
-            }
-        }
-        Action::InsertChar(c) => {
-            if let Some(HomeModal::CreateSecretFile {
-                ref mut passphrase,
-                ref mut pass_cursor,
-                ref mut confirm,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ref mut error,
-                ..
-            }) = state.modal
-            {
-                *error = None;
-                match *focused {
-                    0 => insert_char_at(passphrase, pass_cursor, c),
-                    _ => insert_char_at(confirm, confirm_cursor, c),
-                }
-            }
-        }
-        Action::Backspace => {
-            if let Some(HomeModal::CreateSecretFile {
-                ref mut passphrase,
-                ref mut pass_cursor,
-                ref mut confirm,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ref mut error,
-                ..
-            }) = state.modal
-            {
-                *error = None;
-                match *focused {
-                    0 if *pass_cursor > 0 => {
-                        *pass_cursor = backspace_at(passphrase, *pass_cursor);
-                    }
-                    1 if *confirm_cursor > 0 => {
-                        *confirm_cursor = backspace_at(confirm, *confirm_cursor);
-                    }
-                    _ => {}
-                }
-            }
-        }
-        Action::DeleteChar => {
-            if let Some(HomeModal::CreateSecretFile {
-                ref mut passphrase,
-                ref mut pass_cursor,
-                ref mut confirm,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ref mut error,
-                ..
-            }) = state.modal
-            {
-                *error = None;
-                match *focused {
-                    0 => delete_at(passphrase, *pass_cursor),
-                    _ => delete_at(confirm, *confirm_cursor),
-                }
-            }
-        }
-        Action::CursorLeft => {
-            if let Some(HomeModal::CreateSecretFile {
-                ref mut passphrase,
-                ref mut pass_cursor,
-                ref mut confirm,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ..
-            }) = state.modal
-            {
-                match *focused {
-                    0 => *pass_cursor = cursor_left(passphrase, *pass_cursor),
-                    _ => *confirm_cursor = cursor_left(confirm, *confirm_cursor),
-                }
-            }
-        }
+        // The dialog is dismissed: leave the modal closed.
+        Action::Cancel => state.modal = None,
+        Action::NextField => with_create(state, |fields, _| fields.next_field()),
+        Action::PrevField => with_create(state, |fields, _| fields.prev_field()),
+        Action::ToggleShowPassword => with_create(state, |fields, _| fields.toggle_show()),
+        Action::InsertChar(c) => with_create(state, |fields, error| {
+            fields.apply(|field| field.insert(c));
+            *error = None;
+        }),
+        Action::Backspace => with_create(state, |fields, error| {
+            fields.apply(SecretField::backspace);
+            *error = None;
+        }),
+        Action::DeleteChar => with_create(state, |fields, error| {
+            fields.apply(SecretField::delete);
+            *error = None;
+        }),
+        Action::CursorLeft => with_create(state, |fields, _| fields.apply(SecretField::move_left)),
         Action::CursorRight => {
-            if let Some(HomeModal::CreateSecretFile {
-                ref mut passphrase,
-                ref mut pass_cursor,
-                ref mut confirm,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ..
-            }) = state.modal
-            {
-                match *focused {
-                    0 => *pass_cursor = cursor_right(passphrase, *pass_cursor),
-                    _ => *confirm_cursor = cursor_right(confirm, *confirm_cursor),
-                }
-            }
+            with_create(state, |fields, _| fields.apply(SecretField::move_right))
         }
-        Action::CursorHome => {
-            if let Some(HomeModal::CreateSecretFile {
-                ref mut pass_cursor,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ..
-            }) = state.modal
-            {
-                match *focused {
-                    0 => *pass_cursor = 0,
-                    _ => *confirm_cursor = 0,
-                }
-            }
-        }
-        Action::CursorEnd => {
-            if let Some(HomeModal::CreateSecretFile {
-                ref mut passphrase,
-                ref mut pass_cursor,
-                ref mut confirm,
-                ref mut confirm_cursor,
-                ref mut focused,
-                ..
-            }) = state.modal
-            {
-                match *focused {
-                    0 => *pass_cursor = passphrase.len(),
-                    _ => *confirm_cursor = confirm.len(),
-                }
-            }
-        }
-        Action::Cancel => {
-            state.modal = None;
-        }
-        Action::Confirm => {
-            let (file_path, passphrase, confirm, show) = match &state.modal {
-                Some(HomeModal::CreateSecretFile {
-                    file_path,
-                    passphrase,
-                    confirm,
-                    show,
-                    ..
-                }) => (
-                    file_path.clone(),
-                    passphrase.clone(),
-                    confirm.clone(),
-                    *show,
-                ),
-                _ => return Ok(()),
-            };
-
-            if passphrase.is_empty() && confirm.is_empty() {
-                state.modal = Some(HomeModal::ConfirmNoPassphrase { file_path });
-                return Ok(());
-            }
-            if passphrase != confirm {
-                state.modal = Some(HomeModal::CreateSecretFile {
-                    file_path,
-                    passphrase,
-                    pass_cursor: 0,
-                    confirm,
-                    confirm_cursor: 0,
-                    focused: 0,
-                    show,
-                    error: Some(texts::MSG_PW_MISMATCH.to_string()),
-                });
-                return Ok(());
-            }
-
-            let (outcome, file_path, passphrase) =
-                run_with_spinner(terminal, state, Status::Saving, move || {
-                    let outcome = file_handling::create_secret_file(&file_path, &passphrase);
-                    (outcome, file_path, passphrase)
-                })?;
-            match outcome {
-                Err(e) => {
-                    state.modal = Some(HomeModal::CreateSecretFile {
-                        file_path,
-                        passphrase,
-                        pass_cursor: 0,
-                        confirm,
-                        confirm_cursor: 0,
-                        focused: 0,
-                        show,
-                        error: Some(format!("{e}")),
-                    });
-                }
-                Ok(node) => {
-                    state.modal = None;
-                    let pp_bytes = zeroize::Zeroizing::new(passphrase.into_bytes());
-                    let active_vault = ActiveVaultState {
-                        path: Some(file_path.clone()),
-                        passphrase: pp_bytes.clone(),
-                        node: Some(node.clone()),
-                    };
-                    state.active_vault = Some(active_vault);
-
-                    let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
-
-                    let mut tree_state = crate::tree::widget::TreeState::new(node);
-                    tree_state.display_full_path = state.config.display_full_path;
-                    tree_state.generator = state.generator;
-                    run_tree(
-                        state,
-                        terminal,
-                        tree_state,
-                        Some(SaveTarget {
-                            path: file_path,
-                            passphrase: pp_bytes,
-                        }),
-                    )?;
-                }
-            }
-        }
+        Action::CursorHome => with_create(state, |fields, _| fields.apply(SecretField::move_home)),
+        Action::CursorEnd => with_create(state, |fields, _| fields.apply(SecretField::move_end)),
+        Action::Confirm => create_secret_file(state, terminal)?,
         _ => {}
+    }
+    Ok(())
+}
+
+/// Runs `edit` on the create dialog's field group, leaving the dialog open.
+fn with_create(
+    state: &mut HomeState,
+    edit: impl FnOnce(&mut SecretFieldGroup, &mut Option<String>),
+) {
+    if let Some(HomeModal::CreateSecretFile { fields, error, .. }) = &mut state.modal {
+        edit(fields, error);
+    }
+}
+
+/// Validates the typed pair, creates the encrypted file, and launches the tree.
+///
+/// An all-empty pair is not a password: it falls through to the no-passphrase
+/// confirmation. A mismatched pair re-shows the dialog with the typed text.
+fn create_secret_file<B: Backend>(
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
+    let (file_path, mut fields) = match state.modal.take() {
+        Some(HomeModal::CreateSecretFile {
+            file_path, fields, ..
+        }) => (file_path, fields),
+        other => {
+            state.modal = other;
+            return Ok(());
+        }
+    };
+
+    let passphrase = fields.field(0).text().to_string();
+    let confirm = fields.field(1).text().to_string();
+
+    if passphrase.is_empty() && confirm.is_empty() {
+        state.modal = Some(HomeModal::ConfirmNoPassphrase { file_path });
+        return Ok(());
+    }
+    if passphrase != confirm {
+        fields.reset_cursors();
+        state.modal = Some(HomeModal::CreateSecretFile {
+            file_path,
+            fields,
+            error: Some(texts::MSG_PW_MISMATCH.to_string()),
+        });
+        return Ok(());
+    }
+
+    let (outcome, file_path, passphrase) =
+        run_with_spinner(terminal, state, Status::Saving, move || {
+            let outcome = file_handling::create_secret_file(&file_path, &passphrase);
+            (outcome, file_path, passphrase)
+        })?;
+
+    match outcome {
+        Err(e) => {
+            fields.reset_cursors();
+            state.modal = Some(HomeModal::CreateSecretFile {
+                file_path,
+                fields,
+                error: Some(format!("{e}")),
+            });
+        }
+        Ok(node) => {
+            state.modal = None;
+            let pp_bytes = zeroize::Zeroizing::new(passphrase.into_bytes());
+            let active_vault = ActiveVaultState {
+                path: Some(file_path.clone()),
+                passphrase: pp_bytes.clone(),
+                node: Some(node.clone()),
+            };
+            state.active_vault = Some(active_vault);
+
+            let _ = utils::push_recent_secret_file(&mut state.config, &file_path);
+
+            let mut tree_state = crate::tree::widget::TreeState::new(node);
+            tree_state.display_full_path = state.config.display_full_path;
+            tree_state.generator = state.generator;
+            run_tree(
+                state,
+                terminal,
+                tree_state,
+                Some(SaveTarget {
+                    path: file_path,
+                    passphrase: pp_bytes,
+                }),
+            )?;
+        }
     }
     Ok(())
 }
@@ -1971,87 +1628,11 @@ fn render_confirm_no_passphrase_modal(frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-/// Builds one password field line. When `show` is true the plaintext is
-/// displayed, otherwise the value is masked with `*`. The character under the
-/// cursor is inverted so the user can see where edits land.
-fn password_field_spans(
-    label: &str,
-    value: &str,
-    cursor: usize,
-    focused: bool,
-    show: bool,
-) -> Vec<Span<'static>> {
-    let display: String = if show {
-        value.to_string()
-    } else {
-        "*".repeat(value.len())
-    };
-
-    if !focused {
-        return vec![
-            Span::styled(
-                format!("  {}: ", label),
-                ElementStyle::HomeFieldLabel.style(),
-            ),
-            Span::styled(display, ElementStyle::HomeFieldLabel.style()),
-        ];
-    }
-
-    let pos = cursor.min(display.len());
-    let (before, rest) = display.split_at(pos);
-    let ch = rest.chars().next();
-    let after = &rest[ch.map(|c| c.len_utf8()).unwrap_or(0)..];
-
-    let mut spans = vec![Span::styled(
-        format!("  {}: ", label),
-        ElementStyle::HomeFieldLabel.style(),
-    )];
-    if !before.is_empty() {
-        spans.push(Span::raw(before.to_string()));
-    }
-    spans.push(Span::styled(
-        ch.map(|c| c.to_string()).unwrap_or_else(|| " ".to_string()),
-        ElementStyle::InvertedCursor.style(),
-    ));
-    if !after.is_empty() {
-        spans.push(Span::raw(after.to_string()));
-    }
-    spans
-}
-
+/// Renders the change-master-password dialog: the current, new, and
+/// confirmation master-password fields, plus a validation error when present.
 fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
-    let (
-        current,
-        current_cursor,
-        new_pass,
-        new_cursor,
-        confirm,
-        confirm_cursor,
-        focused,
-        show,
-        error,
-    ) = match &state.modal {
-        Some(HomeModal::ChangePwInput {
-            current,
-            current_cursor,
-            new_pass,
-            new_cursor,
-            confirm,
-            confirm_cursor,
-            focused,
-            show,
-            error,
-        }) => (
-            current.clone(),
-            *current_cursor,
-            new_pass.clone(),
-            *new_cursor,
-            confirm.clone(),
-            *confirm_cursor,
-            *focused,
-            *show,
-            error.clone(),
-        ),
+    let (fields, error) = match &state.modal {
+        Some(HomeModal::ChangePwInput { fields, error }) => (fields, error),
         _ => return,
     };
 
@@ -2063,26 +1644,25 @@ fn render_change_pw_input_modal(frame: &mut Frame, area: Rect, state: &HomeState
 
     let inner = block.inner(overlay_area);
 
-    let fields = [
-        (texts::LABEL_CURRENT_PW, &current, current_cursor),
-        (texts::LABEL_NEW_PW, &new_pass, new_cursor),
-        (texts::LABEL_CONFIRM_PW, &confirm, confirm_cursor),
+    let labels = [
+        texts::LABEL_CURRENT_PW,
+        texts::LABEL_NEW_PW,
+        texts::LABEL_CONFIRM_PW,
     ];
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
 
-    for (i, (label, value, cursor_pos)) in fields.iter().enumerate() {
+    for (i, label) in labels.iter().enumerate() {
         lines.push(Line::from(password_field_spans(
             label,
-            value,
-            *cursor_pos,
-            i == focused,
-            show,
+            fields.field(i),
+            i == fields.focused_index(),
+            fields.show(),
         )));
     }
 
-    if let Some(ref err_msg) = error {
+    if let Some(err_msg) = error {
         lines.push(Line::from(Span::styled(
             format!(" {}", err_msg),
             ElementStyle::HomeErrorBar.style(),
@@ -2167,15 +1747,13 @@ fn render_export_confirm_modal(frame: &mut Frame, area: Rect, export_type: &str)
 }
 
 fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
-    let (file_path, passphrase, cursor, show, error) = match &state.modal {
+    let (file_path, fields, error) = match &state.modal {
         Some(HomeModal::PassphraseInput {
             file_path,
-            passphrase,
-            cursor,
-            show,
+            fields,
             error,
             ..
-        }) => (file_path, passphrase, *cursor, *show, error),
+        }) => (file_path, fields, error),
         _ => return,
     };
 
@@ -2205,30 +1783,13 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
     )));
     lines.push(Line::from(""));
 
-    let display: String = if show {
-        passphrase.clone()
-    } else {
-        "*".repeat(passphrase.len())
-    };
-    let before = &display[..cursor.min(display.len())];
-    let at = display
-        .get(cursor..)
-        .and_then(|s: &str| s.chars().next())
-        .map(|c: char| c.to_string())
-        .unwrap_or_default();
-    let after = &display[cursor + at.len()..];
+    let mut passphrase_spans = vec![Span::styled(
+        texts::LABEL_PASSPHRASE,
+        ElementStyle::HomePassLabel.style(),
+    )];
+    passphrase_spans.extend(secret_field_spans(fields.field(0), true, fields.show()));
 
-    let cursor_char = if at.is_empty() { " " } else { &at };
-
-    lines.push(Line::from(vec![
-        Span::styled(texts::LABEL_PASSPHRASE, ElementStyle::HomePassLabel.style()),
-        Span::raw(before.to_string()),
-        Span::styled(
-            cursor_char.to_string(),
-            ElementStyle::InvertedCursor.style(),
-        ),
-        Span::raw(after.to_string()),
-    ]));
+    lines.push(Line::from(passphrase_spans));
 
     if let Some(err_msg) = error {
         lines.push(Line::from(Span::styled(
@@ -2245,29 +1806,15 @@ fn render_passphrase_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
 }
 
 fn render_create_secret_file_modal(frame: &mut Frame, area: Rect, state: &HomeState) {
-    let (file_path, passphrase, pass_cursor, confirm, confirm_cursor, focused, show, error) =
-        match &state.modal {
-            Some(HomeModal::CreateSecretFile {
-                file_path,
-                passphrase,
-                pass_cursor,
-                confirm,
-                confirm_cursor,
-                focused,
-                show,
-                error,
-            }) => (
-                file_path,
-                passphrase,
-                *pass_cursor,
-                confirm,
-                *confirm_cursor,
-                *focused,
-                *show,
-                error,
-            ),
-            _ => return,
-        };
+    let (file_path, fields, error) = match &state.modal {
+        Some(HomeModal::CreateSecretFile {
+            file_path,
+            fields,
+            error,
+            ..
+        }) => (file_path, fields, error),
+        _ => return,
+    };
 
     let display_path = if state.config.display_full_path {
         file_path.to_string()
@@ -2296,17 +1843,15 @@ fn render_create_secret_file_modal(frame: &mut Frame, area: Rect, state: &HomeSt
 
     lines.push(Line::from(password_field_spans(
         texts::LABEL_PASSPHRASE_FIELD,
-        passphrase,
-        pass_cursor,
-        focused == 0,
-        show,
+        fields.field(0),
+        fields.focused_index() == 0,
+        fields.show(),
     )));
     lines.push(Line::from(password_field_spans(
         texts::LABEL_PASSPHRASE_CONFIRM,
-        confirm,
-        confirm_cursor,
-        focused == 1,
-        show,
+        fields.field(1),
+        fields.focused_index() == 1,
+        fields.show(),
     )));
 
     if let Some(err_msg) = error {
