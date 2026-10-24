@@ -100,7 +100,10 @@ fn copy_to_clipboard(text: &str) {
             .stdin(std::process::Stdio::piped())
             .spawn()
         {
-            if let Some(ref mut stdin) = child.stdin {
+            // Take the pipe out of the child and let it drop at the end of the
+            // block: the helper (xclip/xsel) reads stdin to EOF before it takes
+            // the selection, so the write end must be closed before `wait`.
+            if let Some(mut stdin) = child.stdin.take() {
                 let _ = stdin.write_all(text.as_bytes());
             }
             let _ = child.wait();

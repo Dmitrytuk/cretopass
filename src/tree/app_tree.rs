@@ -5,8 +5,8 @@ use crate::theming::Action;
 use crate::theming::{ElementStyle, SPINNER_TICK, paint_background, render_status_bar, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::{
-    AddPosition, Detail, ExportWizard, Help, InputMode, Modal, SaveExit, SaveState, TreeState,
-    TreeWidget, execute,
+    AddPosition, Detail, ExportWizard, Help, InputMode, Modal, SaveExit, SaveState, TreeAction,
+    TreeState, TreeWidget, execute,
 };
 use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
@@ -408,7 +408,31 @@ fn handle_modal_key(key: event::KeyEvent, state: &mut TreeState) -> io::Result<(
             state.modal = Some(modal);
             Ok(())
         }
-        Some(action) => execute(state, action),
+        Some(action) => {
+            let keeps_produced = !matches!(action, TreeAction::Close);
+            let result = execute(state, action);
+            state.modal = retained_modal(keeps_produced, modal, state.modal.take());
+            result
+        }
+    }
+}
+
+/// The modal showing after a modal action runs.
+///
+/// A `Close` action leaves the slot as `execute` left it (normally empty). Any
+/// other action keeps the modal that produced it, unless `execute` installed a
+/// replacement (Export reports its result as an Alert). Keeping the produced
+/// modal is what lets the Detail modal stay up to show its transient "copied"
+/// alert.
+fn retained_modal(
+    keeps_produced: bool,
+    produced: Modal,
+    installed: Option<Modal>,
+) -> Option<Modal> {
+    if keeps_produced {
+        installed.or(Some(produced))
+    } else {
+        installed
     }
 }
 
@@ -798,13 +822,8 @@ mod tests {
     /// Drives one key through the same routing the event loop uses: the active
     /// modal first, then the navigation mode.
     fn dispatch_key(key: KeyEvent, state: &mut TreeState) {
-        if let Some(mut modal) = state.modal.take() {
-            match modal.handle_key(key, state) {
-                None => state.modal = Some(modal),
-                Some(action) => {
-                    let _ = execute(state, action);
-                }
-            }
+        if state.modal.is_some() {
+            let _ = super::handle_modal_key(key, state);
         } else {
             super::dispatch_key(key, state);
         }
@@ -1299,6 +1318,34 @@ mod tests {
         handle_confirm_delete(key(KeyCode::Char('y')), &mut state);
         assert_eq!(values(&state), vec!["a", "c"]);
         assert!(form_of(&state).selected_row < form_of(&state).rows(&state.root).len());
+    }
+
+    #[test]
+    fn a_copy_action_keeps_the_modal_that_produced_it() {
+        // Regression: the routing used to drop the modal whenever it returned a
+        // non-Close action, so a copy closed the Detail screen and the "copied"
+        // alert never showed.
+        let produced = Modal::Detail(Box::new(Detail::browse()));
+        assert!(matches!(
+            retained_modal(true, produced, None),
+            Some(Modal::Detail(_))
+        ));
+    }
+
+    #[test]
+    fn a_close_action_dismisses_the_modal() {
+        let produced = Modal::Help(Help);
+        assert!(retained_modal(false, produced, None).is_none());
+    }
+
+    #[test]
+    fn a_modal_installed_by_execute_replaces_the_produced_one() {
+        let produced = Modal::Help(Help);
+        let installed = Modal::alert("exported");
+        assert!(matches!(
+            retained_modal(true, produced, Some(installed)),
+            Some(Modal::Alert(_))
+        ));
     }
 
     #[test]
