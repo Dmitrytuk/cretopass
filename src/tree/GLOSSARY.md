@@ -41,26 +41,32 @@ _Avoid_: generator config, password defaults
 **Tree**: The main workspace where the node tree is navigated, searched, and edited. Entered from Home after opening a secret file.
 _Avoid_: Tree view, Tree app, Workspace
 
+**Modal**: A window that takes over the keyboard until it is dismissed. At most one is open at a time, over the Tree's Normal navigation. Nothing outside it reacts to keys while it is up. Help, Detail, Alert, and Export are Modals.
+_Avoid_: Overlay, Dialog, Window
+
+**Popup**: A window nested inside a Modal — the Form inside Detail, or the field-type picker inside Form. It never outlives the Modal that opened it and returns to it when dismissed.
+_Avoid_: Sub-dialog, Overlay
+
 **Autosave**: The background writer that persists committed Tree changes. Each commit submits the current root; a newer submission replaces one that is still waiting, and `SaveState` shows a spinning glyph with `Saving` (or a static `Save failed`) in the title bar while the latest generation is tracked. Leaving the Tree waits for that generation for at most `SAVE_TIMEOUT`; if the final flush fails or times out, the user may retry or explicitly quit without saving (see `SaveExit`). The writer is stopped with a bounded `shutdown`, or detached on a force-quit.
 _Avoid_: Auto-save, background save, sync
 
-**Detail**: Overlay listing a selected Node's ExtraFields. Rows can be navigated and copied to the system clipboard.
+**Detail**: Modal listing a selected Node's ExtraFields. Rows can be navigated and copied to the system clipboard. Opens the Form Popup for editing.
 _Avoid_: Info panel, View mode
 
-**Edit**: Live inline form for modifying an existing Node's name and ExtraFields. Nav level moves fields and triggers actions; Input level edits text. Leaving the Input level commits the edited field straight into the Node.
+**Edit**: Form Popup for modifying an existing Node's name and ExtraFields. Nav level moves fields and triggers actions; Input level edits text. Leaving the Input level commits the edited field straight into the Node.
 _Avoid_: Editing mode
 
-**Add**: Live inline form for creating a new Node. Starts with the Name row alone; Description and ExtraFields are added via `+ Add Field`. The first committed change creates the Node at the pending position, after which the session behaves as Edit. An empty name defaults to "Untitled".
+**Add**: Form Popup for creating a new Node. Starts with the Name row alone; Description and ExtraFields are added via `+ Add Field`. The first committed change creates the Node at the pending position, after which the session behaves as Edit. An empty name defaults to "Untitled".
 _Avoid_: Adding mode
 
-**Form**: The shared Add/Edit state (`FormState`). Holds the Node being edited (or the Add draft), the ordered row list (`FormRow`), the focused row, the Nav/Input level, the field cut buffer, and the undo history.
+**Form**: The Add/Edit Popup inside Detail. Two levels: Nav moves between fields and triggers actions; Input edits the focused field's text.
 
 **Draft**: The form-local Node holding an Add session's data before its first commit inserts it into the Tree. Discarded if the Add is cancelled; unused by Edit.
 
-**Field cut buffer**: The form-local slot (`FormState::field_cut_buffer`) holding an ExtraField removed with `dd`, ready to be pasted with `p`/`P`. Reorders fields without touching the node until the form is saved; discarded with the form.
+**Field cut buffer**: A holding slot for an ExtraField removed with `dd`, ready to be pasted with `p`/`P`. Discarded when the form closes.
 _Avoid_: Clipboard, Yank buffer
 
-**Undo history**: The form-local record of a Node's successive committed states during one Edit session, capped by a redo tail. Consecutive generations collapse into one entry. Cleared when the session ends. Distinct from the system clipboard and the Cut buffer.
+**Undo history**: The form's record of successive committed states during one Edit session, capped by a redo tail. Consecutive generations collapse into one entry. Cleared when the form closes.
 _Avoid_: Change log, Version history
 
 **Expand**: Revealing a Branch Node's children in the Tree view. Collapse hides them again.
@@ -71,5 +77,11 @@ _Avoid_: Open
 **Cut buffer**: The internal clipboard holding a cut Node, ready for paste. Move-style: the next successful paste consumes the node, so it can be inserted only once. A failed paste leaves the node in the buffer. Distinct from the system clipboard.
 _Avoid_: Clipboard, Yank buffer
 
-**Search**: Filtering the visible tree by node name. Activated with `/`. Matched nodes are highlighted; navigation is constrained to matches while search is active.
+**Help**: Modal opened with `?`. Lists the Tree's key bindings. Any key dismisses it.
+
+**Alert**: Modal shown on save errors and other unexpected conditions. Displays a message; any key dismisses it.
+
+**Export**: Modal for writing a Node (with or without children) to a plain-text file beside the secret file. Two steps: pick the scope, then the format (JSON, XML, or CSV).
+
+**Search**: A navigation mode that filters the visible tree by node name. Activated with `/`. Matched nodes are highlighted; navigation is constrained to matches while search is active.
 _Avoid_: Filter, Find
