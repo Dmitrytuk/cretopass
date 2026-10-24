@@ -7,8 +7,17 @@ Vault lifecycle: opening, creating, browsing for, configuring, and exchanging se
 **Home**: The launcher shown on startup. Lists Open secret file, Create new secret file, Configuration, Change file password, Export/Import actions, and Recent secret files.
 _Avoid_: Settings menu, Launcher
 
-**About overlay**: The Home modal opened with `?`. Shows the app name, version, tagline, the Feedback channel link, the private security-reporting form, and the license. Dismissed by any key, like the Tree's help overlay.
-_Avoid_: Help screen, Info dialog
+**Modal**: A window that takes over the keyboard until it is dismissed. At most one is open at a time, over the Home menu or the Tree. Nothing outside it reacts to keys while it is up.
+_Avoid_: Overlay, Dialog, Popup (a Popup is the nested case)
+
+**Popup**: A window nested inside a Modal — the File Browser's Locations list, its name and rename prompts. It never outlives the Modal that opened it.
+_Avoid_: Sub-dialog, Overlay
+
+**Confirmation**: A Modal that asks yes or no before something surprising or hard to undo: dropping a Recent secret file, re-encrypting the open file, creating one with no Master password.
+_Avoid_: Prompt, Warning
+
+**About modal**: The Home Modal opened with `?`. Shows the app name, version, tagline, the Feedback channel link, the private security-reporting form, and the license. Dismissed by any key, like the Tree's help overlay.
+_Avoid_: Help screen, Info dialog, About overlay
 
 **File Browser**: Modal for navigating the filesystem to pick a secret file (Open), name a new one (Create), or select a file for import.
 _Avoid_: File Picker, Directory Browser
@@ -22,7 +31,7 @@ _Avoid_: Previous folder, Current path
 **Hidden entry**: A filesystem entry whose name starts with `.`. Browsing shows or hides these entries with the Hidden-entry toggle; no other names are treated as hidden.
 _Avoid_: Dotfile, Secret file (reserved for encrypted vault files)
 
-**Location**: A selectable row in the File Browser's Locations overlay: either the pinned Home shortcut or a Mounted disk.
+**Location**: A selectable row in the File Browser's Locations popup: either the pinned Home shortcut or a Mounted disk.
 _Avoid_: Bookmark, Sidebar item
 
 **Mounted disk**: A filesystem volume reported by the OS and offered as a Location, identified by its mount point, filesystem type, and free/total space.
@@ -32,7 +41,7 @@ _Avoid_: Drive, Partition, Volume
 _Avoid_: Encrypted file, Vault file
 
 **Master password**: The passphrase used to encrypt and decrypt a secret file via the age protocol. Distinct from Password ExtraFields stored inside the tree.
-_Avoid_: Passphrase, Encryption key
+_Avoid_: Encryption key. "Passphrase" is acceptable for the input field the user types into, never for the cryptography itself.
 
 **Active vault**: The currently open secret file and its state: file path, master password, and decrypted tree.
 _Avoid_: Active file, Opened file
