@@ -13,8 +13,8 @@ use crate::theming::{
 };
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{
-    AddPosition, FormFocus, FormPending, FormRow, FormState, GeneratorModal, Help, InputMode,
-    Modal, SaveExit, SaveState, TreeState, TreeWidget, execute,
+    AddPosition, Alert, FormFocus, FormPending, FormRow, FormState, GeneratorModal, Help,
+    InputMode, Modal, SaveExit, SaveState, TreeState, TreeWidget, execute,
 };
 use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
@@ -406,7 +406,6 @@ fn dispatch_key(key: event::KeyEvent, state: &mut TreeState) {
         InputMode::Detail { .. } => handle_detail(key, state),
         InputMode::ExportNodeSelect { .. } => handle_export_node_select(key, state),
         InputMode::ExportNodeFormat { .. } => handle_export_node_format(key, state),
-        InputMode::Alert { .. } => handle_alert(key, state),
     }
 }
 
@@ -1464,9 +1463,9 @@ fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
             let base_path = match &state.active_vault_path {
                 Some(p) => p.clone(),
                 None => {
-                    state.mode = InputMode::Alert {
+                    state.modal = Some(Modal::Alert(Alert {
                         message: texts::MSG_NO_ACTIVE_FILE.to_string(),
-                    };
+                    }));
                     return;
                 }
             };
@@ -1493,14 +1492,14 @@ fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
 
             match export_tree(&export_node, &export_path_str, format) {
                 Ok(out_path) => {
-                    state.mode = InputMode::Alert {
+                    state.modal = Some(Modal::Alert(Alert {
                         message: format!("{}{}", texts::MSG_EXPORT_NODE_SUCCESS, out_path),
-                    };
+                    }));
                 }
                 Err(e) => {
-                    state.mode = InputMode::Alert {
+                    state.modal = Some(Modal::Alert(Alert {
                         message: format!("{e}"),
-                    };
+                    }));
                 }
             }
         }
@@ -1512,11 +1511,6 @@ fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
             };
         }
     }
-}
-
-fn handle_alert(key: event::KeyEvent, state: &mut TreeState) {
-    let _ = key;
-    state.mode = InputMode::Normal;
 }
 
 fn ui(frame: &mut Frame, state: &mut TreeState) {
@@ -1560,14 +1554,14 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
         InputMode::ExportNodeFormat { .. } => {
             render_export_node_format_overlay(frame, area, state);
         }
-        InputMode::Alert { message } => {
-            render_alert_overlay(frame, area, message);
-        }
         _ => {}
     }
 
-    if let Some(Modal::Help(help)) = &state.modal {
-        help.render(frame, area);
+    if let Some(modal) = &state.modal {
+        match modal {
+            Modal::Help(help) => help.render(frame, area),
+            Modal::Alert(alert) => alert.render(frame, area),
+        }
     }
 
     match state.save_exit {
@@ -1599,8 +1593,11 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
         return ("", ElementStyle::ModeNormal, texts::HINT_DETAIL_ALERT);
     }
 
-    if let Some(Modal::Help(help)) = &state.modal {
-        return help.status_parts();
+    if let Some(modal) = &state.modal {
+        return match modal {
+            Modal::Help(help) => help.status_parts(),
+            Modal::Alert(alert) => alert.status_parts(),
+        };
     }
 
     match &state.mode {
@@ -1685,11 +1682,6 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
             texts::MODE_EXPORT_FORMAT,
             ElementStyle::ModeFieldType,
             texts::HINT_EXPORT_NODE_FORMAT,
-        ),
-        InputMode::Alert { .. } => (
-            texts::MODE_NORMAL,
-            ElementStyle::ModeNormal,
-            texts::HINT_DETAIL_ALERT,
         ),
     }
 }
@@ -1781,33 +1773,6 @@ fn render_export_node_format_overlay(frame: &mut Frame, area: Rect, state: &Tree
 
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
-fn render_alert_overlay(frame: &mut Frame, area: Rect, message: &str) {
-    let overlay_area = Rect {
-        x: area.width / 6,
-        y: area.height / 2 - 2,
-        width: area.width * 2 / 3,
-        height: 4,
-    };
-
-    let block = Block::default()
-        .title(texts::ALERT_TITLE)
-        .borders(Borders::ALL)
-        .style(ElementStyle::CopiedBlock.style());
-
-    let lines = vec![
-        Line::from(Span::styled(
-            format!(" {}", message),
-            ElementStyle::CopiedText.style(),
-        )),
-        Line::from(""),
-    ];
-
-    let inner = block.inner(overlay_area);
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(&block, overlay_area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 

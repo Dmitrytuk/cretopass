@@ -16,7 +16,7 @@ use crate::theming::{ElementStyle, Icon, Spinner, Status, texts};
 mod modal;
 mod orchestrator;
 
-pub use modal::{Help, Modal, TreeAction};
+pub use modal::{Alert, Help, Modal, TreeAction};
 pub use orchestrator::execute;
 
 /// A single visible row in the flattened tree display.
@@ -86,8 +86,6 @@ pub enum InputMode {
         /// 0 = JSON, 1 = XML, 2 = CSV.
         selected_format: usize,
     },
-    /// Simple alert message popup (any key dismisses).
-    Alert { message: String },
 }
 
 /// Where a pending "Add" form should place the newly created node.

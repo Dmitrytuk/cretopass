@@ -8,8 +8,10 @@
 //!
 //! This is the seam that lets the Tree's flows be tested without a terminal.
 
+mod alert;
 mod help;
 
+pub use alert::Alert;
 pub use help::Help;
 
 use crossterm::event::KeyEvent;
@@ -29,6 +31,8 @@ pub enum TreeAction {
 pub enum Modal {
     /// The key-binding list, opened with `?`.
     Help(Help),
+    /// A passive message the user acknowledges with any key.
+    Alert(Alert),
 }
 
 impl Modal {
@@ -37,6 +41,7 @@ impl Modal {
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<TreeAction> {
         match self {
             Self::Help(help) => help.handle_key(key),
+            Self::Alert(alert) => alert.handle_key(key),
         }
     }
 }
