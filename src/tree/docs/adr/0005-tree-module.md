@@ -1,8 +1,10 @@
 # 0005 — tree module
 
 The tree module is the core of the application: it owns the `Node` data model,
-renders the tree UI, runs the event loop, and handles all tree-screen overlays
-(search, detail, edit/add forms, export, help, confirm dialogs).
+renders the tree UI, runs the event loop, and hosts the Tree's input-capturing
+windows. Those are `Modal`s — Detail (with the Add/Edit `Form` Popup nested in
+it), Help, Alert, and Export — over a small set of navigation *modes* (Normal,
+Search, the cut/paste/add prefixes).
 
 **Decision:** represent the tree as a recursive `Node` struct and flatten it to
 a `Vec<VisibleNode>` via DFS for rendering. Navigation happens on the flat index
@@ -17,8 +19,11 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 | File | Responsibility |
 |------|---------------|
 | `node.rs` | `Node` struct (id, name, children, extra_fields), `ExtraField`, `FieldType` enum, legacy-`description` migration, recursive `find`/`find_mut`/`contains`, wire-label helpers for import/export |
-| `widget.rs` | `TreeState` (root, expanded set, selected index, visible list, mode, vault path, modified flag, `SaveState`, `SaveExit`, cut buffer, search state), `VisibleNode`, `InputMode` enum, `FormState` + undo/redo history, `TreeWidget::render()` DFS flat-list, all tree mutation operations |
-| `app_tree.rs` | `run_app()` async event loop (`EventStream` + `tokio::select!`), key handlers per `InputMode`, autosave submission, bounded exit flush with the force-quit escape hatch, overlay rendering (search bar, detail, edit/add forms, generator modal + symbol checklist, help, export, confirm dialogs, save errors, status bar), clipboard integration |
+| `widget.rs` | module facade: `TreeState` (root, expanded set, selected index, visible list, navigation mode, vault path, modified flag, `SaveState`, `SaveExit`, cut buffer, search state, the `Modal` slot), `VisibleNode`, the five-variant `InputMode` enum, `FormState` + undo/redo history, `GeneratorModal`, `TreeWidget::render()` DFS flat-list, all tree mutation operations |
+| `widget/modal.rs` | the `Modal` slot, the `TreeAction` intent enum, and the `handle_key(key, &mut TreeState) -> Option<TreeAction>` contract; declares the per-modal sub-modules |
+| `widget/modal/*.rs` | one file per modal (or popup): `help`, `alert`, `detail` (the Form and its picker/name/confirm/generator popups), `export`; `chrome.rs` holds the shared overlay geometry |
+| `widget/orchestrator.rs` | the one place a `TreeAction` becomes real work: system clipboard, export file write, screen transitions |
+| `app_tree.rs` | `run_app()` async event loop (`EventStream` + `tokio::select!`), navigation-mode key handlers, routing to the active modal, autosave submission, bounded exit flush with the force-quit escape hatch, search overlay, save-error and status-bar rendering |
 
 ## Data model
 
@@ -35,7 +40,7 @@ any other field: it can be added, reordered (`dd`/`p`), duplicated and deleted,
 and a Node simply has no description until such a field is added.
 
 **Rejected alternative:** keep `Node.description: String`. It forced a special
-case through the form (`show_desc`, `FormRow::Desc`), the Detail overlay
+case through the form (`show_desc`, `FormRow::Desc`), the Detail modal
 (hard-coded row 0) and every import/export format (a dedicated
 `description` attribute/column), and made "no description" indistinguishable
 from "empty description".
@@ -48,29 +53,43 @@ an empty or absent one yields no field. The same migration is applied by the
 XML/CSV importers (`migrate_legacy_description`), so old interchange files keep
 their descriptions. Once a migrated vault is saved, the legacy key is gone.
 
-## InputMode state machine
+## Navigation modes
 
-16 variants: `Normal`, `Search`, `PendingCut`, `PendingPaste`, `PendingAdd`,
-`Detail{selected, alert}`,
-`Form(FormState)`, `SelectFieldType{form, selected}`,
-`CustomFieldName{form, input}`, `GeneratePassword(GeneratorModal)`,
-`SymbolChecklist(GeneratorModal)`, `ConfirmDeleteField{form, target_index}`,
-`ExportNodeSelect{...}`,
-`ExportNodeFormat{...}`, `Alert{message}`, `Help`.
+`InputMode` is a five-variant enum of navigation modes, each carrying no
+payload: `Normal`, `Search`, `PendingCut`, `PendingPaste`, `PendingAdd`. They
+change how a key is interpreted in the tree itself; none of them is a window.
 
-Each variant carries its transient state inline. Key handlers dispatch on the
-current variant, transform state, and return the next mode.
+Each mode has one handler in `app_tree.rs`; the handlers transform state and set
+the next mode (or open a modal).
 
-All Add/Edit form state lives in a single `FormState` (`node_id`, `draft`,
-`selected_row`, `cursor`, `focus`, `pending`, `field_cut_buffer`, `scratch`,
-`history`, `history_cursor`, `history_coalesce`). The picker, custom-name and
-delete-confirm popups carry it as `form`; the two generator variants carry it
-inside `GeneratorModal`, alongside the raw length buffer and the last valid
-`PasswordParams`. `Ctrl+G` at the form's Input level dispatches on the focused
-row's field type: a `Password` field opens the generator modal (see
-[0012](../../../../docs/adr/0012-password-generator.md)), while a `Login` field
-generates a word immediately (see
-[0013](../../../../docs/adr/0013-login-word-generator.md)).
+## Modals
+
+Every input-capturing window is a `Modal` in the `TreeState::modal` slot — at
+most one at a time. `Modal::handle_key` reads a key and returns a `TreeAction`;
+`orchestrator::execute` performs it. A modal may read and mutate the tree (the
+Detail modal's Form Popup live-edits a Node), but anything outside the process —
+the system clipboard, the export file write, screen transitions — is a
+`TreeAction`. This is the same intent contract the Home screen uses (see
+[0021](../../../../docs/adr/0021-home-intent-contract.md)); `Modal` and `Popup`
+are the vocabulary of [GLOSSARY.md](../../GLOSSARY.md). Because the modals are
+pure over their own state, their `handle_key` is testable without a terminal.
+
+- `Modal::Detail` browses a Node's extra fields (copying a value to the
+  clipboard is its only I/O). Its Form Popup carries all Add/Edit state in a
+  single `FormState` (`node_id`, `draft`, `selected_row`, `cursor`, `focus`,
+  `pending`, `field_cut_buffer`, `scratch`, `history`, `history_cursor`,
+  `history_coalesce`), with the field-type picker, custom-name prompt, delete
+  confirmation, and the generator (parameter modal + symbol checklist) nested
+  inside it. `Ctrl+G` at the Form's Input level dispatches on the focused row's
+  field type: a `Password` field opens the generator popup (see
+  [0012](../../../../docs/adr/0012-password-generator.md)), while a `Login`
+  field generates a word immediately (see
+  [0013](../../../../docs/adr/0013-login-word-generator.md)).
+- `Modal::Help` lists the key bindings; any key closes it.
+- `Modal::Alert` shows a message; any key closes it.
+- `Modal::Export` is the two-step wizard (scope, then format); confirming
+  reports `TreeAction::Export`, which the orchestrator writes to disk beside the
+  secret file.
 
 ## Prefix modes
 
@@ -118,17 +137,18 @@ parent row (`collapse_or_select_parent`).
   `Input` (or open the field-type picker on the `+ Add Field` row), `u`/`r`
   undo/redo, `Esc` closes the form. `Delete` on an extra field row opens the
   confirm-delete popup.
-- Closing the form: an Edit session (including a created Add session) returns to
-  the node's `Detail` overlay; an empty Add session returns to `Normal`. There
-  is no discard prompt — every change is already committed.
+- Closing the form: an Edit session (including a created Add session) drops back
+  to browsing the node in the `Detail` modal; an empty Add session closes the
+  modal back to `Normal`. There is no discard prompt — every change is already
+  committed.
 - Password values render as `*****` at every level except an actively edited
   (`Input`) row.
 - Delete on extra field: `Delete` key → `ConfirmDeleteField` popup → `y`
   confirms, any other key cancels. A confirmed deletion commits immediately.
 - Field reordering: `dd` moves the focused extra field into
   `FormState::field_cut_buffer`; `p` / `P` paste it after / before the focused
-  field. The prefix state is `FormState::pending` (`FormPending`), so no new
-  `InputMode` is introduced; any other key cancels the prefix. `Name` and
+  field. The prefix state is `FormState::pending` (`FormPending`), so the open
+  screen never changes; any other key cancels the prefix. `Name` and
   `AddButton` are never movable, and paste is only allowed with an
   `Extra(i)` row focused. Each cut/paste is a live commit.
 
@@ -163,7 +183,7 @@ parent row (`collapse_or_select_parent`).
   on the root, which has no sibling slot) puts the node back in the buffer.
 - `p` enters `PendingPaste` only when the buffer is non-empty; `p` pastes after,
   `P` pastes before, `l`/`→` pastes as last child.
-- System clipboard only used in detail overlay (Enter on a row). Targets: `pbcopy` (macOS), `wl-copy`/`xclip`/`xsel` (Linux).
+- System clipboard only used in the Detail modal (copy a row's value). Targets: `pbcopy` (macOS), `wl-copy`/`xclip`/`xsel` (Linux).
 - `remove_node()` only targets children (not root). Root cannot be cut.
 
 ## Autosave flow

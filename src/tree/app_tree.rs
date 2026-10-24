@@ -969,6 +969,36 @@ mod tests {
     }
 
     #[test]
+    fn editing_through_the_modal_router_commits_and_returns_to_normal() {
+        // Drive the same routing the event loop uses, end to end:
+        // Normal -> Detail -> Form -> commit -> back.
+        let mut state = TreeState::new(Node::new("Root"));
+        assert!(matches!(state.mode, InputMode::Normal));
+
+        dispatch_key(key(KeyCode::Enter), &mut state); // open Detail (a leaf)
+        assert!(matches!(state.modal, Some(Modal::Detail(_))));
+
+        dispatch_key(key(KeyCode::Char('i')), &mut state); // open the Form
+        assert!(detail(&state).form().is_some());
+
+        dispatch_key(key(KeyCode::Char('i')), &mut state); // enter Input
+        assert_eq!(form_of(&state).focus, FormFocus::Input);
+
+        type_text(&mut state, "!");
+        dispatch_key(key(KeyCode::Enter), &mut state); // commit
+        assert_eq!(state.root.name, "Root!");
+        assert!(state.modified);
+
+        dispatch_key(key(KeyCode::Esc), &mut state); // Form -> browse
+        assert!(detail(&state).form().is_none());
+        assert!(matches!(state.modal, Some(Modal::Detail(_))));
+
+        dispatch_key(key(KeyCode::Esc), &mut state); // Detail -> Normal
+        assert!(state.modal.is_none());
+        assert!(matches!(state.mode, InputMode::Normal));
+    }
+
+    #[test]
     fn typing_is_committed_on_input_exit() {
         let mut state = editing_state();
         handle_form(key(KeyCode::Char('i')), &mut state);
