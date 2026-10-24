@@ -1,20 +1,13 @@
-use std::borrow::Cow;
 use std::io;
 
-use crate::cursor::{
-    backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
-    selected_span,
-};
+use crate::cursor::selected_span;
 use crate::file_handling::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree};
-use crate::generator::{self, PasswordLength, PasswordParams};
 use crate::theming::Action;
-use crate::theming::{
-    ElementStyle, Icon, SPINNER_TICK, paint_background, render_status_bar, texts,
-};
-use crate::tree::node::{ExtraField, FieldType, Node};
+use crate::theming::{ElementStyle, SPINNER_TICK, paint_background, render_status_bar, texts};
+use crate::tree::node::Node;
 use crate::tree::widget::{
-    AddPosition, Alert, Detail, FormFocus, FormPending, FormRow, FormState, GeneratorModal, Help,
-    InputMode, Modal, SaveExit, SaveState, TreeState, TreeWidget, execute, make_overlay_area,
+    AddPosition, Alert, Detail, Help, InputMode, Modal, SaveExit, SaveState, TreeState, TreeWidget,
+    execute,
 };
 use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
@@ -397,12 +390,6 @@ fn dispatch_key(key: event::KeyEvent, state: &mut TreeState) {
         InputMode::PendingCut => handle_pending_cut(key, state),
         InputMode::PendingPaste => handle_pending_paste(key, state),
         InputMode::PendingAdd => handle_pending_add(key, state),
-        InputMode::Form(_) => handle_form(key, state),
-        InputMode::SelectFieldType { .. } => handle_select_field_type(key, state),
-        InputMode::CustomFieldName { .. } => handle_custom_field_name(key, state),
-        InputMode::GeneratePassword(_) => handle_generate_password(key, state),
-        InputMode::SymbolChecklist(_) => handle_symbol_checklist(key, state),
-        InputMode::ConfirmDeleteField { .. } => handle_confirm_delete(key, state),
         InputMode::ExportNodeSelect { .. } => handle_export_node_select(key, state),
         InputMode::ExportNodeFormat { .. } => handle_export_node_format(key, state),
     }
@@ -453,7 +440,7 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
         }
         Action::NavRight => {
             if is_leaf_selected(state) {
-                state.modal = Some(Modal::Detail(Detail::default()));
+                state.modal = Some(Modal::Detail(Box::new(Detail::browse())));
             } else {
                 state.expand_collapse(true);
             }
@@ -463,7 +450,7 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
         }
         Action::Confirm => {
             if is_leaf_selected(state) {
-                state.modal = Some(Modal::Detail(Detail::default()));
+                state.modal = Some(Modal::Detail(Box::new(Detail::browse())));
             } else {
                 state.toggle_expand();
             }
@@ -483,7 +470,7 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
             state.mode = InputMode::PendingAdd;
         }
         Action::OpenDetail => {
-            state.modal = Some(Modal::Detail(Detail::default()));
+            state.modal = Some(Modal::Detail(Box::new(Detail::browse())));
         }
         Action::ToggleSearch => {
             state.mode = InputMode::Search;
@@ -544,7 +531,9 @@ fn handle_pending_add(key: event::KeyEvent, state: &mut TreeState) {
         }
     };
     state.add_position = position;
-    state.mode = InputMode::Form(FormState::new_add());
+    // The Add form is the Detail modal's Form Popup; the prefix mode ends here.
+    state.mode = InputMode::Normal;
+    state.modal = Some(Modal::Detail(Box::new(Detail::adding())));
 }
 
 fn handle_search(key: event::KeyEvent, state: &mut TreeState) {
@@ -568,670 +557,6 @@ fn handle_search(key: event::KeyEvent, state: &mut TreeState) {
         }
         _ => {}
     }
-}
-
-/// An entry offered by the field-type picker.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PickerItem {
-    Login,
-    Password,
-    Custom,
-    /// Adds a Description extra field (`Custom("Description")`).
-    Desc,
-}
-
-impl PickerItem {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Login => texts::FIELD_LOGIN,
-            Self::Password => texts::FIELD_PASSWORD,
-            Self::Custom => texts::FIELD_ITEM_CUSTOM,
-            Self::Desc => texts::FIELD_ITEM_DESC,
-        }
-    }
-}
-
-/// Applies an edit to the form's scratch text while at the Input level.
-fn scratch_edit<F>(form: &mut FormState, edit: F)
-where
-    F: FnOnce(&mut String, &mut usize),
-{
-    if let Some(scratch) = form.scratch.as_mut() {
-        edit(&mut scratch.text, &mut scratch.cursor);
-    }
-}
-
-/// Records a committed change on the form's node.
-///
-/// On the Add form's first commit this inserts the draft into the tree at
-/// [`TreeState::add_position`], switches the form to editing that node, and
-/// seeds the undo history. In all cases the resulting node state is pushed onto
-/// the history and the tree is marked dirty (triggering autosave).
-fn commit_form_change(state: &mut TreeState, form: &mut FormState) {
-    if form.is_adding() {
-        let placeholder = Node::new(String::new());
-        let mut draft = std::mem::replace(&mut form.draft, placeholder);
-        if draft.name.is_empty() {
-            draft.name = texts::DEFAULT_NAME.to_string();
-        }
-        match state.insert_node_at_position(state.add_position, draft) {
-            Ok(id) => {
-                form.node_id = Some(id);
-                // The creating commit defines the baseline; it is not itself
-                // undoable.
-                form.seed_history(&state.root);
-            }
-            // The position is unavailable (e.g. a sibling slot for the root);
-            // keep the draft so the user can keep editing.
-            Err(node) => {
-                form.draft = node;
-                return;
-            }
-        }
-    } else {
-        form.push_history(&state.root);
-        // A commit can rename the node, but the flat visible list caches names.
-        // Rebuild it so the tree shows the new name. (The Add path above already
-        // refreshes visibility via `insert_node_at_position`.)
-        state.update_visible();
-    }
-    state.modified = true;
-}
-
-/// Records a generation as a committed change.
-///
-/// Like [`commit_form_change`] it marks the tree modified (triggering autosave);
-/// unlike it, consecutive generations coalesce into a single undo step. An Add
-/// form's first commit still creates its node and seeds the baseline.
-fn commit_generation(state: &mut TreeState, form: &mut FormState) {
-    if form.is_adding() {
-        commit_form_change(state, form);
-        return;
-    }
-    form.push_history_coalescing(&state.root);
-    state.modified = true;
-}
-
-/// Writes a generated `value` into the form's focused field.
-///
-/// Sets the field, keeps the Input-level scratch buffer in step (so a revealed
-/// field shows the value immediately and leaving Input does not restore the old
-/// value), places the cursor at the end, and records a coalescing commit. Leaves
-/// the value untouched and returns `false` when the focused row is not an extra
-/// field.
-fn write_generated_value(state: &mut TreeState, form: &mut FormState, value: String) -> bool {
-    if !form.set_focused_value(&mut state.root, value.clone()) {
-        return false;
-    }
-    // The generator is invoked from the Input level, so the focused text lives
-    // in the scratch buffer.
-    if form.focus == FormFocus::Input
-        && let Some(scratch) = form.scratch.as_mut()
-    {
-        scratch.text = value;
-        scratch.cursor = scratch.text.len();
-    }
-    form.cursor = form.active_len(&state.root);
-    commit_generation(state, form);
-    true
-}
-
-/// Where the Edit/Add form returns to when closed.
-///
-/// An Edit session (including an Add session whose first commit created its
-/// node) reopens the node's Detail modal; an empty Add session cancels back to
-/// the Normal tree.
-fn close_form(form: &FormState) -> Option<Modal> {
-    if form.is_adding() {
-        None
-    } else {
-        Some(Modal::Detail(Detail::default()))
-    }
-}
-
-/// Which generator a field type has, if any.
-///
-/// An enum rather than a trait: a new variant forces every `match` to be
-/// revisited. It is the single source of truth for both the key handler and the
-/// form hint. It carries no parameters — those differ per field type (a login
-/// word has none, a password has [`PasswordParams`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FieldGenerator {
-    Login,
-    Password,
-}
-
-impl FieldGenerator {
-    /// The generator for `field_type`, or `None` when it has none.
-    fn for_field(field_type: Option<&FieldType>) -> Option<Self> {
-        match field_type {
-            Some(FieldType::Login) => Some(Self::Login),
-            Some(FieldType::Password) => Some(Self::Password),
-            _ => None,
-        }
-    }
-}
-
-/// Rows of the password-generator modal, in display order.
-const GENERATOR_ROW_LENGTH: usize = 0;
-const GENERATOR_ROW_SYMBOLS: usize = 1;
-const GENERATOR_ROW_GENERATE: usize = 2;
-const GENERATOR_ROWS: usize = 3;
-
-/// Columns in the symbol checklist grid.
-const SYMBOL_COLUMNS: usize = 3;
-
-fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
-    let mut form = match std::mem::replace(&mut state.mode, InputMode::Normal) {
-        InputMode::Form(form) => form,
-        other => {
-            state.mode = other;
-            return;
-        }
-    };
-
-    form.clamp_selection(&state.root);
-    let row = form.current_row(&state.root);
-
-    let action = match form.pending {
-        FormPending::Cut => Action::from_form_pending(&key, false),
-        FormPending::Paste => Action::from_form_pending(&key, true),
-        FormPending::None => match form.focus {
-            FormFocus::Nav => Action::from_form_nav(&key),
-            FormFocus::Input => Action::from_form_input(&key),
-        },
-    };
-
-    // Any unmapped key while a field prefix is pending cancels just the prefix.
-    if form.pending != FormPending::None && action == Action::Cancel {
-        form.pending = FormPending::None;
-        state.mode = InputMode::Form(form);
-        return;
-    }
-
-    match action {
-        Action::Generate => {
-            // `Ctrl+G` is bound at the Input level and only when the focused
-            // row carries a generator (a Login or Password field). Other rows
-            // fall through and the form is restored untouched.
-            match FieldGenerator::for_field(form.focused_field_type(&state.root)) {
-                Some(FieldGenerator::Password) => {
-                    let length_input = state.generator.length.value().to_string();
-                    let length_cursor = length_input.len();
-                    state.mode = InputMode::GeneratePassword(GeneratorModal {
-                        params: state.generator,
-                        length_input,
-                        length_cursor,
-                        length_fresh: true,
-                        error: None,
-                        selected: GENERATOR_ROW_LENGTH,
-                        form,
-                    });
-                    return;
-                }
-                Some(FieldGenerator::Login) => {
-                    // A login word has no parameters, so it is generated on the
-                    // spot: no modal, and `Ctrl+G` again rerolls.
-                    let value = generator::generate_login();
-                    write_generated_value(state, &mut form, value);
-                    state.mode = InputMode::Form(form);
-                    return;
-                }
-                None => {}
-            }
-        }
-        Action::Cut if form.pending == FormPending::None => {
-            if matches!(row, FormRow::Extra(_)) {
-                form.pending = FormPending::Cut;
-            }
-        }
-        Action::Cut => {
-            if form.cut_focused_field(&mut state.root) {
-                commit_form_change(state, &mut form);
-            }
-            form.pending = FormPending::None;
-        }
-        Action::PasteStart => {
-            if form.field_cut_buffer.is_some() && matches!(row, FormRow::Extra(_)) {
-                form.pending = FormPending::Paste;
-            }
-        }
-        Action::PasteSibling => {
-            if form.paste_field_after(&mut state.root) {
-                commit_form_change(state, &mut form);
-            }
-            form.pending = FormPending::None;
-        }
-        Action::PasteBefore => {
-            if form.paste_field_before(&mut state.root) {
-                commit_form_change(state, &mut form);
-            }
-            form.pending = FormPending::None;
-        }
-        Action::BeginInput if row == FormRow::AddButton => {
-            state.mode = InputMode::SelectFieldType { form, selected: 0 };
-            return;
-        }
-        Action::BeginInput => {
-            form.begin_input(&state.root);
-        }
-        Action::ExitInput => {
-            if form.commit_input(&mut state.root) {
-                commit_form_change(state, &mut form);
-            }
-        }
-        Action::Undo => {
-            if form.undo(&mut state.root) {
-                state.modified = true;
-                // Undo can restore a different name; refresh the visible list.
-                state.update_visible();
-            }
-        }
-        Action::Redo => {
-            if form.redo(&mut state.root) {
-                state.modified = true;
-                // Redo can restore a different name; refresh the visible list.
-                state.update_visible();
-            }
-        }
-        // Delete on a Name row or the add button has no meaning in Nav.
-        Action::DeleteChar if row == FormRow::AddButton => {}
-        Action::DeleteChar if row == FormRow::Name && form.focus == FormFocus::Nav => {}
-        Action::DeleteChar => {
-            if let FormRow::Extra(i) = row
-                && form.focus == FormFocus::Nav
-            {
-                state.mode = InputMode::ConfirmDeleteField {
-                    form,
-                    target_index: i,
-                };
-                return;
-            }
-            scratch_edit(&mut form, |text, cursor| delete_at(text, *cursor));
-        }
-        Action::Cancel => {
-            state.mode = InputMode::Normal;
-            state.modal = close_form(&form);
-            return;
-        }
-        Action::NextField => {
-            let len = form.rows(&state.root).len();
-            let next = (form.selected_row + 1) % len;
-            form.select_row(&state.root, next);
-        }
-        Action::PrevField => {
-            let len = form.rows(&state.root).len();
-            let prev = (form.selected_row + len - 1) % len;
-            form.select_row(&state.root, prev);
-        }
-        Action::CursorLeft => {
-            scratch_edit(&mut form, |text, cursor| {
-                *cursor = cursor_left(text, *cursor)
-            });
-        }
-        Action::CursorRight => {
-            scratch_edit(&mut form, |text, cursor| {
-                *cursor = cursor_right(text, *cursor)
-            });
-        }
-        Action::CursorHome => {
-            scratch_edit(&mut form, |_, cursor| *cursor = 0);
-        }
-        Action::CursorEnd => {
-            scratch_edit(&mut form, |text, cursor| *cursor = text.len());
-        }
-        Action::Backspace => {
-            scratch_edit(&mut form, |text, cursor| {
-                *cursor = backspace_at(text, *cursor);
-            });
-        }
-        Action::InsertChar(c) => {
-            scratch_edit(&mut form, |text, cursor| insert_char_at(text, cursor, c));
-        }
-        _ => {}
-    }
-
-    state.mode = InputMode::Form(form);
-}
-
-fn handle_select_field_type(key: event::KeyEvent, state: &mut TreeState) {
-    let (mut form, selected) = match std::mem::replace(&mut state.mode, InputMode::Normal) {
-        InputMode::SelectFieldType { form, selected } => (form, selected),
-        other => {
-            state.mode = other;
-            return;
-        }
-    };
-
-    let items = picker_items(&form);
-    let selected = selected.min(items.len().saturating_sub(1));
-
-    match Action::from_select_field_type(&key) {
-        Action::Cancel => {
-            state.mode = InputMode::Form(form);
-        }
-        Action::NavDown => {
-            let next = (selected + 1) % items.len();
-            state.mode = InputMode::SelectFieldType {
-                form,
-                selected: next,
-            };
-        }
-        Action::NavUp => {
-            let prev = (selected + items.len() - 1) % items.len();
-            state.mode = InputMode::SelectFieldType {
-                form,
-                selected: prev,
-            };
-        }
-        Action::SelectIndex(i) => {
-            if i < items.len() {
-                state.mode = InputMode::SelectFieldType { form, selected: i };
-            } else {
-                state.mode = InputMode::SelectFieldType { form, selected };
-            }
-        }
-        Action::Confirm => match items[selected] {
-            PickerItem::Login => {
-                let index = form.push_field(
-                    &mut state.root,
-                    ExtraField {
-                        field_type: FieldType::Login,
-                        value: String::new(),
-                    },
-                );
-                form.focus_new_field(&state.root, index);
-                commit_form_change(state, &mut form);
-                state.mode = InputMode::Form(form);
-            }
-            PickerItem::Password => {
-                let index = form.push_field(
-                    &mut state.root,
-                    ExtraField {
-                        field_type: FieldType::Password,
-                        value: String::new(),
-                    },
-                );
-                form.focus_new_field(&state.root, index);
-                commit_form_change(state, &mut form);
-                state.mode = InputMode::Form(form);
-            }
-            PickerItem::Custom => {
-                state.mode = InputMode::CustomFieldName {
-                    form,
-                    input: String::new(),
-                };
-            }
-            PickerItem::Desc => {
-                let index =
-                    form.push_field(&mut state.root, ExtraField::description(String::new()));
-                form.focus_new_field(&state.root, index);
-                commit_form_change(state, &mut form);
-                state.mode = InputMode::Form(form);
-            }
-        },
-        _ => {
-            state.mode = InputMode::SelectFieldType { form, selected };
-        }
-    }
-}
-
-/// Items offered by the field-type picker for the given form.
-fn picker_items(_form: &FormState) -> Vec<PickerItem> {
-    vec![
-        PickerItem::Login,
-        PickerItem::Password,
-        PickerItem::Desc,
-        PickerItem::Custom,
-    ]
-}
-
-fn handle_custom_field_name(key: event::KeyEvent, state: &mut TreeState) {
-    let (mut form, input) = match std::mem::replace(&mut state.mode, InputMode::Normal) {
-        InputMode::CustomFieldName { form, input } => (form, input),
-        other => {
-            state.mode = other;
-            return;
-        }
-    };
-
-    match Action::from_custom_field_name(&key) {
-        Action::Cancel => {
-            state.mode = InputMode::SelectFieldType { form, selected: 3 };
-        }
-        Action::Confirm => {
-            let label = if input.is_empty() {
-                texts::CUSTOM_FIELD_DEFAULT.to_string()
-            } else {
-                input
-            };
-            let index = form.push_field(
-                &mut state.root,
-                ExtraField {
-                    field_type: FieldType::Custom(label),
-                    value: String::new(),
-                },
-            );
-            form.focus_new_field(&state.root, index);
-            commit_form_change(state, &mut form);
-            state.mode = InputMode::Form(form);
-        }
-        Action::Backspace => {
-            let mut new_input = input;
-            new_input.pop();
-            state.mode = InputMode::CustomFieldName {
-                form,
-                input: new_input,
-            };
-        }
-        Action::InsertChar(c) => {
-            let mut new_input = input;
-            new_input.push(c);
-            state.mode = InputMode::CustomFieldName {
-                form,
-                input: new_input,
-            };
-        }
-        _ => {
-            state.mode = InputMode::CustomFieldName { form, input };
-        }
-    }
-}
-
-/// Keys for the password-generator parameter modal.
-///
-/// `Ctrl+G` opened this from the Add/Edit form's Input level. On the length row,
-/// the first digit replaces the seeded value and the caret can then be moved with
-/// `Left`/`Right`/`Home`/`End`, inserting/removing at most three digits.
-/// Generating writes the value into the focused field (and its scratch buffer),
-/// commits it (undo entry + autosave) and returns to the form still editing the
-/// field. `Esc` returns without touching the field.
-fn handle_generate_password(key: event::KeyEvent, state: &mut TreeState) {
-    let mut modal = match std::mem::replace(&mut state.mode, InputMode::Normal) {
-        InputMode::GeneratePassword(modal) => modal,
-        other => {
-            state.mode = other;
-            return;
-        }
-    };
-
-    match Action::from_generator(&key) {
-        Action::Cancel => {
-            state.mode = InputMode::Form(modal.form);
-        }
-        Action::NavDown => {
-            modal.selected = (modal.selected + 1) % GENERATOR_ROWS;
-            state.mode = InputMode::GeneratePassword(modal);
-        }
-        Action::NavUp => {
-            modal.selected = (modal.selected + GENERATOR_ROWS - 1) % GENERATOR_ROWS;
-            state.mode = InputMode::GeneratePassword(modal);
-        }
-        Action::Toggle => {
-            if modal.selected == GENERATOR_ROW_SYMBOLS {
-                modal.params.symbols.toggle_all();
-            }
-            state.mode = InputMode::GeneratePassword(modal);
-        }
-        Action::CursorLeft if modal.selected == GENERATOR_ROW_LENGTH => {
-            modal.length_fresh = false;
-            modal.length_cursor = cursor_left(&modal.length_input, modal.length_cursor);
-            state.mode = InputMode::GeneratePassword(modal);
-        }
-        Action::CursorRight if modal.selected == GENERATOR_ROW_LENGTH => {
-            modal.length_fresh = false;
-            modal.length_cursor = cursor_right(&modal.length_input, modal.length_cursor);
-            state.mode = InputMode::GeneratePassword(modal);
-        }
-        Action::CursorHome if modal.selected == GENERATOR_ROW_LENGTH => {
-            modal.length_fresh = false;
-            modal.length_cursor = 0;
-            state.mode = InputMode::GeneratePassword(modal);
-        }
-        Action::CursorEnd if modal.selected == GENERATOR_ROW_LENGTH => {
-            modal.length_fresh = false;
-            modal.length_cursor = modal.length_input.len();
-            state.mode = InputMode::GeneratePassword(modal);
-        }
-        Action::InsertChar(c) if modal.selected == GENERATOR_ROW_LENGTH && c.is_ascii_digit() => {
-            if modal.length_fresh {
-                modal.length_input.clear();
-                modal.length_cursor = 0;
-                modal.length_fresh = false;
-            }
-            if modal.length_input.len() < 3 {
-                insert_char_at(&mut modal.length_input, &mut modal.length_cursor, c);
-            }
-            modal.error = None;
-            state.mode = InputMode::GeneratePassword(modal);
-        }
-        Action::Backspace if modal.selected == GENERATOR_ROW_LENGTH => {
-            if modal.length_fresh {
-                modal.length_input.clear();
-                modal.length_cursor = 0;
-                modal.length_fresh = false;
-            } else {
-                modal.length_cursor = backspace_at(&mut modal.length_input, modal.length_cursor);
-            }
-            modal.error = None;
-            state.mode = InputMode::GeneratePassword(modal);
-        }
-        Action::DeleteChar if modal.selected == GENERATOR_ROW_LENGTH => {
-            if modal.length_fresh {
-                modal.length_input.clear();
-                modal.length_cursor = 0;
-                modal.length_fresh = false;
-            } else {
-                delete_at(&mut modal.length_input, modal.length_cursor);
-            }
-            modal.error = None;
-            state.mode = InputMode::GeneratePassword(modal);
-        }
-        Action::Confirm if modal.selected == GENERATOR_ROW_LENGTH => {
-            modal.selected = GENERATOR_ROW_SYMBOLS;
-            state.mode = InputMode::GeneratePassword(modal);
-        }
-        Action::Confirm if modal.selected == GENERATOR_ROW_SYMBOLS => {
-            modal.selected = 0;
-            state.mode = InputMode::SymbolChecklist(modal);
-        }
-        Action::Confirm if modal.selected == GENERATOR_ROW_GENERATE => {
-            match modal.length_input.parse::<PasswordLength>() {
-                Ok(length) => {
-                    let params = PasswordParams {
-                        length,
-                        symbols: modal.params.symbols,
-                    };
-                    let Some(FieldGenerator::Password) =
-                        FieldGenerator::for_field(modal.form.focused_field_type(&state.root))
-                    else {
-                        // The row lost its generator (defensive); leave the
-                        // value untouched and return to the form.
-                        state.mode = InputMode::Form(modal.form);
-                        return;
-                    };
-                    let value = generator::generate_password(&params);
-                    write_generated_value(state, &mut modal.form, value);
-                    state.generator = params;
-                    state.mode = InputMode::Form(modal.form);
-                }
-                Err(error) => {
-                    modal.error = Some(error);
-                    state.mode = InputMode::GeneratePassword(modal);
-                }
-            }
-        }
-        _ => {
-            state.mode = InputMode::GeneratePassword(modal);
-        }
-    }
-}
-
-/// Keys for the per-symbol checklist opened from the generator modal.
-///
-/// The 17 symbols are laid out in a [`SYMBOL_COLUMNS`]-wide grid; `h`/`l`
-/// move one cell and `j`/`k` move one row. `Space`/`Enter` toggle the focused
-/// symbol, `Esc` returns to the parameter modal focused on the summary row.
-fn handle_symbol_checklist(key: event::KeyEvent, state: &mut TreeState) {
-    let mut modal = match std::mem::replace(&mut state.mode, InputMode::Normal) {
-        InputMode::SymbolChecklist(modal) => modal,
-        other => {
-            state.mode = other;
-            return;
-        }
-    };
-
-    let last = generator::SYMBOLS.len() - 1;
-    match Action::from_symbol_checklist(&key) {
-        Action::Cancel => {
-            modal.selected = GENERATOR_ROW_SYMBOLS;
-            state.mode = InputMode::GeneratePassword(modal);
-        }
-        Action::NavLeft => {
-            modal.selected = modal.selected.saturating_sub(1);
-            state.mode = InputMode::SymbolChecklist(modal);
-        }
-        Action::NavRight => {
-            modal.selected = (modal.selected + 1).min(last);
-            state.mode = InputMode::SymbolChecklist(modal);
-        }
-        Action::NavUp => {
-            modal.selected = modal.selected.saturating_sub(SYMBOL_COLUMNS);
-            state.mode = InputMode::SymbolChecklist(modal);
-        }
-        Action::NavDown => {
-            modal.selected = (modal.selected + SYMBOL_COLUMNS).min(last);
-            state.mode = InputMode::SymbolChecklist(modal);
-        }
-        Action::Toggle => {
-            if let Some(&symbol) = generator::SYMBOLS.get(modal.selected) {
-                modal.params.symbols.toggle(symbol);
-            }
-            state.mode = InputMode::SymbolChecklist(modal);
-        }
-        _ => {
-            state.mode = InputMode::SymbolChecklist(modal);
-        }
-    }
-}
-
-fn handle_confirm_delete(key: event::KeyEvent, state: &mut TreeState) {
-    let (mut form, target_index) = match std::mem::replace(&mut state.mode, InputMode::Normal) {
-        InputMode::ConfirmDeleteField { form, target_index } => (form, target_index),
-        other => {
-            state.mode = other;
-            return;
-        }
-    };
-
-    if Action::from_confirm(&key) == Action::Yes && form.remove_field(&mut state.root, target_index)
-    {
-        form.focus = FormFocus::Nav;
-        form.clamp_selection(&state.root);
-        form.cursor = form.active_len(&state.root);
-        commit_form_change(state, &mut form);
-    }
-    state.mode = InputMode::Form(form);
 }
 
 fn handle_export_node_select(key: event::KeyEvent, state: &mut TreeState) {
@@ -1403,19 +728,6 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
 
     match &state.mode {
         InputMode::Search => render_search_overlay(frame, area, state),
-        InputMode::Form(form) => {
-            let title = if form.is_adding() {
-                texts::OVERLAY_ADD_NODE
-            } else {
-                texts::OVERLAY_EDIT_NODE
-            };
-            render_edit_overlay(frame, area, form, &state.root, title);
-        }
-        InputMode::SelectFieldType { .. } => render_select_field_type_overlay(frame, area, state),
-        InputMode::CustomFieldName { .. } => render_custom_field_name_overlay(frame, area, state),
-        InputMode::GeneratePassword(modal) => render_generate_password_overlay(frame, area, modal),
-        InputMode::SymbolChecklist(modal) => render_symbol_checklist_overlay(frame, area, modal),
-        InputMode::ConfirmDeleteField { .. } => render_confirm_delete_overlay(frame, area, state),
         InputMode::ExportNodeSelect { .. } => {
             render_export_node_select_overlay(frame, area, state);
         }
@@ -1466,7 +778,7 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
         return match modal {
             Modal::Help(help) => help.status_parts(),
             Modal::Alert(alert) => alert.status_parts(),
-            Modal::Detail(detail) => detail.status_parts(),
+            Modal::Detail(detail) => detail.status_parts(&state.root),
         };
     }
 
@@ -1499,40 +811,6 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
             texts::MODE_PENDING_ADD,
             ElementStyle::ModePendingAdd,
             texts::HINT_PENDING_ADD,
-        ),
-        InputMode::Form(form) => {
-            let (mode_str, mode_style) = match form.pending {
-                FormPending::Cut => (texts::MODE_PENDING_CUT, ElementStyle::ModePendingCut),
-                FormPending::Paste => (texts::MODE_PASTE, ElementStyle::ModePendingPaste),
-                FormPending::None if form.is_adding() => (texts::MODE_ADD, ElementStyle::ModeAdd),
-                FormPending::None => (texts::MODE_EDIT, ElementStyle::ModeEdit),
-            };
-            (mode_str, mode_style, form_hint(form, &state.root))
-        }
-        InputMode::SelectFieldType { .. } => (
-            texts::MODE_FIELD_TYPE,
-            ElementStyle::ModeFieldType,
-            texts::HINT_SELECT_FIELD_TYPE,
-        ),
-        InputMode::CustomFieldName { .. } => (
-            texts::MODE_CUSTOM_NAME,
-            ElementStyle::ModeCustomName,
-            texts::HINT_CUSTOM_FIELD_NAME,
-        ),
-        InputMode::GeneratePassword(_) => (
-            texts::MODE_GENERATOR,
-            ElementStyle::ModeGenerator,
-            texts::HINT_GENERATOR,
-        ),
-        InputMode::SymbolChecklist(_) => (
-            texts::MODE_SYMBOLS,
-            ElementStyle::ModeSymbols,
-            texts::HINT_SYMBOLS,
-        ),
-        InputMode::ConfirmDeleteField { .. } => (
-            texts::MODE_CONFIRM,
-            ElementStyle::ModeConfirmDelete,
-            texts::HINT_CONFIRM_DELETE,
         ),
         InputMode::ExportNodeSelect { .. } => (
             texts::MODE_EXPORT_SELECT,
@@ -1716,387 +994,20 @@ fn render_discard_confirm_overlay(frame: &mut Frame, area: Rect) {
     );
 }
 
-/// Renders one form row as a list-style line.
-///
-/// - Nav: the focused row gets `▸ ` + `FormRowFocused` (like Detail); other
-///   rows get `  ` + dimmed label/text.
-/// - Input: the focused row shows the inverted cursor; other rows are dimmed.
-fn form_row_line(
-    label: &str,
-    text: &str,
-    cursor: usize,
-    is_focused: bool,
-    is_editing: bool,
-) -> Line<'static> {
-    let prefix = if is_focused {
-        Icon::SelectionArrow.as_str()
-    } else {
-        Icon::SelectionPad.as_str()
-    };
-
-    if is_focused && is_editing {
-        let mut spans = vec![Span::raw(prefix.to_string())];
-        spans.extend(cursor_field_spans(label, text, cursor, true));
-        return Line::from(spans);
-    }
-
-    let style = if is_focused {
-        ElementStyle::FormRowFocused.style()
-    } else {
-        ElementStyle::TreeRow.style()
-    };
-    Line::from(vec![Span::styled(format!("{prefix}{label}{text}"), style)])
-}
-
-/// Renders one extra-field row, masking password values unless the row is
-/// actively being edited (`Input` level).
-fn render_extra_field_line(
-    ef: &ExtraField,
-    text: &str,
-    cursor: usize,
-    is_focused: bool,
-    is_editing: bool,
-) -> Line<'static> {
-    let revealed = is_focused && is_editing;
-    let display_val = if revealed {
-        Cow::Borrowed(text)
-    } else {
-        ef.field_type.display_value(text)
-    };
-    let label = format!("{}: ", ef.field_type.label());
-    form_row_line(&label, &display_val, cursor, is_focused, is_editing)
-}
-
-/// Resolves the text and cursor to render for a field row.
-///
-/// The focused row at the Input level shows the scratch buffer; every other
-/// row shows the node's stored value.
-fn field_display<'a>(form: &'a FormState, value: &'a str, focused: bool) -> (Cow<'a, str>, usize) {
-    match form
-        .scratch
-        .as_ref()
-        .filter(|_| focused && form.focus == FormFocus::Input)
-    {
-        Some(scratch) => (Cow::Borrowed(scratch.text.as_str()), scratch.cursor),
-        None => (Cow::Borrowed(value), form.cursor),
-    }
-}
-
-fn render_edit_overlay(frame: &mut Frame, area: Rect, form: &FormState, root: &Node, title: &str) {
-    let node = form.node(root);
-    let rows = form.rows(root);
-    let current = form.selected_row.min(rows.len() - 1);
-    let is_editing = form.focus == FormFocus::Input;
-
-    let overlay_area = make_overlay_area(area, node.extra_fields.len(), 4);
-
-    let block = Block::default()
-        .title(format!(" {} ", title))
-        .borders(Borders::ALL)
-        .style(ElementStyle::EditBlock.style());
-
-    let inner = block.inner(overlay_area);
-    let mut lines: Vec<Line> = Vec::new();
-
-    for (i, row) in rows.iter().enumerate() {
-        let focused = i == current;
-        match row {
-            FormRow::Name => {
-                let (text, cursor) = field_display(form, &node.name, focused);
-                lines.push(form_row_line(
-                    texts::LABEL_NAME,
-                    &text,
-                    cursor,
-                    focused,
-                    is_editing,
-                ));
-            }
-            FormRow::Extra(idx) => {
-                if let Some(ef) = node.extra_fields.get(*idx) {
-                    let (text, cursor) = field_display(form, &ef.value, focused);
-                    lines.push(render_extra_field_line(
-                        ef, &text, cursor, focused, is_editing,
-                    ));
-                }
-            }
-            FormRow::AddButton => {
-                let style = if focused {
-                    ElementStyle::FormRowFocused.style()
-                } else {
-                    ElementStyle::TreeRow.style()
-                };
-                let prefix = if focused {
-                    Icon::SelectionArrow.as_str()
-                } else {
-                    Icon::SelectionPad.as_str()
-                };
-                lines.push(Line::from(Span::styled(
-                    format!("{prefix}{}", texts::ADD_FIELD_BUTTON),
-                    style,
-                )));
-            }
-        }
-    }
-
-    lines.push(Line::from(""));
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
-/// Selects the help-bar hint for the Add/Edit form.
-fn form_hint(form: &FormState, root: &Node) -> &'static str {
-    match form.pending {
-        FormPending::Cut => return texts::HINT_FIELD_CUT,
-        FormPending::Paste => return texts::HINT_FIELD_PASTE,
-        FormPending::None => {}
-    }
-    if form.focus == FormFocus::Input {
-        return if FieldGenerator::for_field(form.focused_field_type(root)).is_some() {
-            texts::HINT_FORM_GENERATOR_INPUT
-        } else {
-            texts::HINT_FORM_INPUT
-        };
-    }
-    match form.current_row(root) {
-        FormRow::AddButton => texts::HINT_FORM_ADD,
-        FormRow::Extra(_) => {
-            if form.field_cut_buffer.is_some() {
-                texts::HINT_FORM_EXTRA_PASTE
-            } else {
-                texts::HINT_FORM_EXTRA
-            }
-        }
-        FormRow::Name => texts::HINT_FORM,
-    }
-}
-
-fn render_select_field_type_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let (form, selected_type) = match &state.mode {
-        InputMode::SelectFieldType { form, selected } => (form, *selected),
-        _ => return,
-    };
-    let items = picker_items(form);
-
-    let overlay_area = Rect {
-        x: area.width / 4,
-        y: area.height / 2 - 4,
-        width: area.width / 2,
-        height: 8,
-    };
-
-    let block = Block::default()
-        .title(texts::OVERLAY_SELECT_FIELD_TYPE)
-        .borders(Borders::ALL)
-        .style(ElementStyle::FieldTypeBlock.style());
-
-    let inner = block.inner(overlay_area);
-    let mut lines: Vec<Line> = Vec::new();
-
-    for (i, item) in items.iter().enumerate() {
-        let label = format!("{}. {}", i + 1, item.label());
-        lines.push(Line::from(selected_span(&label, i == selected_type)));
-    }
-
-    lines.push(Line::from(""));
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
-fn render_custom_field_name_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let input = match &state.mode {
-        InputMode::CustomFieldName { input, .. } => input.clone(),
-        _ => return,
-    };
-
-    let overlay_area = Rect {
-        x: area.width / 4,
-        y: area.height / 2 - 2,
-        width: area.width / 2,
-        height: 4,
-    };
-
-    let block = Block::default()
-        .title(texts::OVERLAY_CUSTOM_FIELD_NAME)
-        .borders(Borders::ALL)
-        .style(ElementStyle::CustomNameBlock.style());
-
-    let inner = block.inner(overlay_area);
-    let lines = vec![
-        Line::from(cursor_field_spans(
-            texts::LABEL_NAME,
-            &input,
-            input.len(),
-            true,
-        )),
-        Line::from(""),
-    ];
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
-/// Renders the password-generator parameter modal.
-fn render_generate_password_overlay(frame: &mut Frame, area: Rect, modal: &GeneratorModal) {
-    let has_error = modal.error.is_some();
-    let content_height = 3 + u16::from(has_error);
-    let overlay_height = (content_height + 2).min(area.height);
-    let overlay_area = Rect {
-        x: area.width / 4,
-        y: area.height.saturating_sub(overlay_height) / 2,
-        width: area.width / 2,
-        height: overlay_height,
-    };
-
-    let block = Block::default()
-        .title(texts::OVERLAY_GENERATE_PASSWORD)
-        .borders(Borders::ALL)
-        .style(ElementStyle::GeneratorBlock.style());
-    let inner = block.inner(overlay_area);
-
-    let mut lines: Vec<Line> = Vec::new();
-    if modal.selected == GENERATOR_ROW_LENGTH {
-        let mut spans = vec![Span::raw(Icon::SelectionArrow.as_str().to_string())];
-        spans.extend(cursor_field_spans(
-            texts::LABEL_GENERATOR_LENGTH,
-            &modal.length_input,
-            modal.length_cursor,
-            true,
-        ));
-        lines.push(Line::from(spans));
-    } else {
-        let length_label = format!("{}{}", texts::LABEL_GENERATOR_LENGTH, modal.length_input);
-        lines.push(Line::from(selected_span(&length_label, false)));
-    }
-
-    let selected = modal.params.symbols.len();
-    let total = generator::SYMBOLS.len();
-    let symbols_label = format!("{}: {selected}/{total}", texts::LABEL_GENERATOR_SYMBOLS);
-    lines.push(Line::from(selected_span(
-        &symbols_label,
-        modal.selected == GENERATOR_ROW_SYMBOLS,
-    )));
-
-    lines.push(Line::from(selected_span(
-        texts::LABEL_GENERATOR_RUN,
-        modal.selected == GENERATOR_ROW_GENERATE,
-    )));
-
-    if modal.error.is_some() {
-        lines.push(Line::from(Span::styled(
-            texts::ERROR_GENERATOR_LENGTH,
-            ElementStyle::GeneratorError.style(),
-        )));
-    }
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
-/// Renders the per-symbol checklist as a grid of checkbox cells.
-fn render_symbol_checklist_overlay(frame: &mut Frame, area: Rect, modal: &GeneratorModal) {
-    let rows = u16::try_from(generator::SYMBOLS.len().div_ceil(SYMBOL_COLUMNS))
-        .expect("symbol checklist rows fit in a terminal height");
-    let content_height = rows;
-    let overlay_height = (content_height + 2).min(area.height);
-    let width = u16::try_from(SYMBOL_COLUMNS * 9)
-        .expect("symbol checklist width fits in a terminal")
-        .min(area.width);
-    let overlay_area = Rect {
-        x: area.width.saturating_sub(width) / 2,
-        y: area.height.saturating_sub(overlay_height) / 2,
-        width,
-        height: overlay_height,
-    };
-
-    let block = Block::default()
-        .title(texts::OVERLAY_SYMBOLS)
-        .borders(Borders::ALL)
-        .style(ElementStyle::SymbolsBlock.style());
-    let inner = block.inner(overlay_area);
-
-    let mut lines: Vec<Line> = Vec::new();
-    for row in 0..rows {
-        let mut spans: Vec<Span> = Vec::new();
-        for column in 0..SYMBOL_COLUMNS {
-            let index = usize::from(row) * SYMBOL_COLUMNS + column;
-            let Some(&symbol) = generator::SYMBOLS.get(index) else {
-                break;
-            };
-            let marker = if modal.params.symbols.contains(symbol) {
-                Icon::CheckboxOn
-            } else {
-                Icon::CheckboxOff
-            };
-            let style = if index == modal.selected {
-                ElementStyle::ListRowSelected.style()
-            } else {
-                ElementStyle::CursorNormalText.style()
-            };
-            let cell = format!("{} {}", marker.as_str(), symbol);
-            spans.push(Span::styled(format!("{cell:<9}"), style));
-        }
-        lines.push(Line::from(spans));
-    }
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
-fn render_confirm_delete_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let label = match &state.mode {
-        InputMode::ConfirmDeleteField { form, target_index } => form
-            .node(&state.root)
-            .extra_fields
-            .get(*target_index)
-            .map(|ef| ef.field_type.label())
-            .unwrap_or_default(),
-        _ => return,
-    };
-
-    let overlay_area = Rect {
-        x: area.width / 4,
-        y: area.height / 2 - 2,
-        width: area.width / 2,
-        height: 4,
-    };
-
-    let block = Block::default()
-        .title(texts::OVERLAY_CONFIRM_DELETE)
-        .borders(Borders::ALL)
-        .style(ElementStyle::ConfirmDeleteBlock.style());
-
-    let inner = block.inner(overlay_area);
-    let lines = vec![
-        Line::from(Span::styled(
-            format!(
-                "{}{}{}",
-                texts::PROMPT_DELETE_FIELD_START,
-                label,
-                texts::PROMPT_DELETE_FIELD_END
-            ),
-            ElementStyle::ConfirmMessage.style(),
-        )),
-        Line::from(""),
-    ];
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
+
+    use crate::generator;
+    use crate::tree::node::{ExtraField, FieldType};
+    use crate::tree::widget::{
+        FormFocus, FormPending, FormRow, FormState, GENERATOR_ROW_GENERATE, GENERATOR_ROW_LENGTH,
+        GENERATOR_ROW_SYMBOLS, GeneratorModal, PickerItem, form_hint, picker_items,
+        render_extra_field_line,
+    };
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -2109,11 +1020,52 @@ mod tests {
         ))
     }
 
+    /// The Detail modal `state` carries.
+    fn detail(state: &TreeState) -> &Detail {
+        match &state.modal {
+            Some(Modal::Detail(detail)) => detail.as_ref(),
+            other => panic!("expected Detail modal, got {other:?}"),
+        }
+    }
+
+    fn detail_mut(state: &mut TreeState) -> &mut Detail {
+        match &mut state.modal {
+            Some(Modal::Detail(detail)) => detail.as_mut(),
+            other => panic!("expected Detail modal, got {other:?}"),
+        }
+    }
+
+    /// Drives one key through the same routing the event loop uses: the active
+    /// modal first, then the navigation mode.
+    fn dispatch_key(key: KeyEvent, state: &mut TreeState) {
+        if let Some(mut modal) = state.modal.take() {
+            match modal.handle_key(key, state) {
+                None => state.modal = Some(modal),
+                Some(action) => {
+                    let _ = execute(state, action);
+                }
+            }
+        } else {
+            super::dispatch_key(key, state);
+        }
+    }
+
+    fn handle_form(key: KeyEvent, state: &mut TreeState) {
+        dispatch_key(key, state);
+    }
+
+    fn handle_select_field_type(key: KeyEvent, state: &mut TreeState) {
+        dispatch_key(key, state);
+    }
+
+    fn handle_confirm_delete(key: KeyEvent, state: &mut TreeState) {
+        dispatch_key(key, state);
+    }
+
     fn editing_state() -> TreeState {
-        let root = Node::new("Root");
-        let mut state = TreeState::new(root);
+        let mut state = TreeState::new(Node::new("Root"));
         let node = state.root.clone();
-        state.mode = InputMode::Form(FormState::new_edit(&node));
+        state.modal = Some(Modal::Detail(Box::new(Detail::editing(&node))));
         state
     }
 
@@ -2127,15 +1079,12 @@ mod tests {
         }
         let mut state = TreeState::new(node);
         let node = state.root.clone();
-        state.mode = InputMode::Form(FormState::new_edit(&node));
+        state.modal = Some(Modal::Detail(Box::new(Detail::editing(&node))));
         state
     }
 
     fn form_of(state: &TreeState) -> &FormState {
-        match &state.mode {
-            InputMode::Form(form) => form,
-            other => panic!("expected Form mode, got {other:?}"),
-        }
+        detail(state).form().expect("the form is open")
     }
 
     fn form_node(state: &TreeState) -> &Node {
@@ -2151,15 +1100,13 @@ mod tests {
     }
 
     fn select_row(state: &mut TreeState, index: usize) {
-        let InputMode::Form(form) = &mut state.mode else {
-            panic!("expected Form mode");
-        };
-        form.select_row(&state.root, index);
+        let root = state.root.clone();
+        detail_mut(state).form_mut().select_row(&root, index);
     }
 
     fn type_text(state: &mut TreeState, text: &str) {
         for c in text.chars() {
-            handle_form(key(KeyCode::Char(c)), state);
+            dispatch_key(key(KeyCode::Char(c)), state);
         }
     }
 
@@ -2175,7 +1122,7 @@ mod tests {
         });
         let mut state = TreeState::new(node);
         let node = state.root.clone();
-        state.mode = InputMode::Form(FormState::new_edit(&node));
+        state.modal = Some(Modal::Detail(Box::new(Detail::editing(&node))));
         state
     }
 
@@ -2184,10 +1131,9 @@ mod tests {
     }
 
     fn generator_modal(state: &TreeState) -> &GeneratorModal {
-        match &state.mode {
-            InputMode::GeneratePassword(modal) | InputMode::SymbolChecklist(modal) => modal,
-            other => panic!("expected generator mode, got {other:?}"),
-        }
+        detail(state)
+            .generator()
+            .expect("a generator popup is open")
     }
 
     fn open_generator(state: &mut TreeState) {
@@ -2196,7 +1142,7 @@ mod tests {
             handle_form(key(KeyCode::Char('i')), state);
         }
         handle_form(ctrl(KeyCode::Char('g')), state);
-        assert!(matches!(state.mode, InputMode::GeneratePassword(_)));
+        assert!(detail(state).generator().is_some());
     }
 
     fn move_generator_to(state: &mut TreeState, target: usize) {
@@ -2256,8 +1202,9 @@ mod tests {
     #[test]
     fn empty_add_form_esc_cancels_to_normal() {
         let mut state = TreeState::new(Node::new("Root"));
-        state.mode = InputMode::Form(FormState::new_add());
+        state.modal = Some(Modal::Detail(Box::new(Detail::adding())));
         handle_form(key(KeyCode::Esc), &mut state);
+        assert!(state.modal.is_none());
         assert!(matches!(state.mode, InputMode::Normal));
     }
 
@@ -2286,7 +1233,7 @@ mod tests {
 
         state.select_by_id(leaf_id);
         let node = state.current_node_ref().expect("leaf exists").clone();
-        state.mode = InputMode::Form(FormState::new_edit(&node));
+        state.modal = Some(Modal::Detail(Box::new(Detail::editing(&node))));
 
         handle_form(key(KeyCode::Char('i')), &mut state);
         type_text(&mut state, "!");
@@ -2338,7 +1285,7 @@ mod tests {
         let mut state = editing_state();
         handle_form(key(KeyCode::Char('u')), &mut state);
         assert_eq!(form_node(&state).name, "Root");
-        assert!(matches!(state.mode, InputMode::Form(_)));
+        assert!(detail(&state).form().is_some());
     }
 
     #[test]
@@ -2387,7 +1334,7 @@ mod tests {
     fn add_form_first_commit_creates_the_node() {
         let mut state = TreeState::new(Node::new("Root"));
         state.add_position = AddPosition::Child;
-        state.mode = InputMode::Form(FormState::new_add());
+        state.modal = Some(Modal::Detail(Box::new(Detail::adding())));
         assert!(form_of(&state).is_adding());
 
         handle_form(key(KeyCode::Char('i')), &mut state);
@@ -2407,29 +1354,21 @@ mod tests {
     fn adding_field_via_picker_creates_node_and_enters_input() {
         let mut state = TreeState::new(Node::new("Root"));
         state.add_position = AddPosition::Child;
-        state.mode = InputMode::Form(FormState::new_add());
+        state.modal = Some(Modal::Detail(Box::new(Detail::adding())));
         select_row(&mut state, 1); // the + Add Field row
 
         handle_form(key(KeyCode::Enter), &mut state);
-        assert!(matches!(state.mode, InputMode::SelectFieldType { .. }));
+        assert!(detail(&state).is_select_field_type());
 
         // Custom is offered last; Description sits before it.
-        let items = match &state.mode {
-            InputMode::SelectFieldType { form, .. } => picker_items(form),
-            _ => unreachable!(),
-        };
+        let items = picker_items(form_of(&state));
         assert_eq!(items.last(), Some(&PickerItem::Custom));
 
         let desc_index = items
             .iter()
             .position(|item| *item == PickerItem::Desc)
             .expect("Desc offered");
-        if let InputMode::SelectFieldType {
-            ref mut selected, ..
-        } = state.mode
-        {
-            *selected = desc_index;
-        }
+        detail_mut(&mut state).set_picker_selected(desc_index);
         handle_select_field_type(key(KeyCode::Enter), &mut state);
 
         let form = form_of(&state);
@@ -2487,7 +1426,7 @@ mod tests {
         let form = form_of(&state);
         assert_eq!(form.pending, FormPending::None);
         assert_eq!(values(&state).len(), 3);
-        assert!(matches!(state.mode, InputMode::Form(_)));
+        assert!(detail(&state).form().is_some());
     }
 
     #[test]
@@ -2566,13 +1505,7 @@ mod tests {
     fn confirm_delete_removes_the_field_and_clamps_selection() {
         let mut state = editing_state_with_fields();
         select_row(&mut state, 2); // second extra field
-        state.mode = match std::mem::replace(&mut state.mode, InputMode::Normal) {
-            InputMode::Form(form) => InputMode::ConfirmDeleteField {
-                form,
-                target_index: 1,
-            },
-            _ => unreachable!(),
-        };
+        detail_mut(&mut state).set_confirm_delete(1);
         handle_confirm_delete(key(KeyCode::Char('y')), &mut state);
         assert_eq!(values(&state), vec!["a", "c"]);
         assert!(form_of(&state).selected_row < form_of(&state).rows(&state.root).len());
@@ -2733,7 +1666,7 @@ mod tests {
         let mut nav = editing_state_with_password("old");
         select_row(&mut nav, 1);
         handle_form(ctrl(KeyCode::Char('g')), &mut nav);
-        assert!(matches!(nav.mode, InputMode::Form(_)));
+        assert!(detail(&nav).form().is_some());
 
         // At the Input level it opens only when the focused field carries a
         // generator: Login and Name rows are no-ops.
@@ -2741,13 +1674,13 @@ mod tests {
         select_row(&mut login, 1);
         handle_form(key(KeyCode::Char('i')), &mut login);
         handle_form(ctrl(KeyCode::Char('g')), &mut login);
-        assert!(matches!(login.mode, InputMode::Form(_)));
+        assert!(detail(&login).form().is_some());
 
         let mut name = editing_state();
         select_row(&mut name, 0);
         handle_form(key(KeyCode::Char('i')), &mut name);
         handle_form(ctrl(KeyCode::Char('g')), &mut name);
-        assert!(matches!(name.mode, InputMode::Form(_)));
+        assert!(detail(&name).form().is_some());
 
         let mut password = editing_state_with_password("old");
         open_generator(&mut password);
@@ -2760,7 +1693,7 @@ mod tests {
         set_generator_length(&mut state, "12");
         press_generate(&mut state);
 
-        assert!(matches!(state.mode, InputMode::Form(_)));
+        assert!(detail(&state).form().is_some());
         assert_eq!(form_of(&state).focus, FormFocus::Input);
         let value = password_value(&state);
         assert_eq!(value.chars().count(), 12);
@@ -2801,7 +1734,7 @@ mod tests {
         open_generator(&mut state);
         dispatch_key(key(KeyCode::Esc), &mut state);
 
-        assert!(matches!(state.mode, InputMode::Form(_)));
+        assert!(detail(&state).form().is_some());
         assert_eq!(password_value(&state), "old");
         assert!(!state.modified);
         assert_eq!(form_of(&state).history.len(), 1);
@@ -2814,7 +1747,8 @@ mod tests {
         set_generator_length(&mut state, "999");
         press_generate(&mut state);
 
-        assert!(matches!(state.mode, InputMode::GeneratePassword(_)));
+        assert!(detail(&state).generator().is_some());
+        assert!(!detail(&state).is_symbol_checklist());
         assert!(generator_modal(&state).error.is_some());
         let value = &generator_modal(&state).form.node(&state.root).extra_fields[0].value;
         assert_eq!(value, "old");
@@ -2916,7 +1850,7 @@ mod tests {
         open_generator(&mut state);
         move_generator_to(&mut state, GENERATOR_ROW_SYMBOLS);
         dispatch_key(key(KeyCode::Enter), &mut state);
-        assert!(matches!(state.mode, InputMode::SymbolChecklist(_)));
+        assert!(detail(&state).is_symbol_checklist());
 
         dispatch_key(key(KeyCode::Char(' ')), &mut state);
         assert!(!generator_modal(&state).params.symbols.contains('!'));
@@ -2928,7 +1862,8 @@ mod tests {
         assert!(!generator_modal(&state).params.symbols.contains('%'));
 
         dispatch_key(key(KeyCode::Esc), &mut state);
-        assert!(matches!(state.mode, InputMode::GeneratePassword(_)));
+        assert!(detail(&state).generator().is_some());
+        assert!(!detail(&state).is_symbol_checklist());
         assert_eq!(generator_modal(&state).selected, GENERATOR_ROW_SYMBOLS);
     }
 
@@ -2940,7 +1875,7 @@ mod tests {
         dispatch_key(key(KeyCode::Char(' ')), &mut state);
         press_generate(&mut state);
 
-        assert!(matches!(state.mode, InputMode::Form(_)));
+        assert!(detail(&state).form().is_some());
         let value = password_value(&state);
         assert!(value.chars().all(|c| c.is_ascii_alphanumeric()));
         assert!(value.chars().any(|c| c.is_ascii_digit()));
@@ -2991,7 +1926,7 @@ mod tests {
             value: String::new(),
         });
         let node = custom.root.clone();
-        custom.mode = InputMode::Form(FormState::new_edit(&node));
+        custom.modal = Some(Modal::Detail(Box::new(Detail::editing(&node))));
         select_row(&mut custom, 1);
         handle_form(key(KeyCode::Char('i')), &mut custom);
         assert_eq!(
@@ -3039,8 +1974,8 @@ mod tests {
         open_login_row(&mut state);
         generate_login_word(&mut state);
 
-        // No modal: the form is still active at the Input level.
-        assert!(matches!(state.mode, InputMode::Form(_)));
+        // No generator popup: the form is still active at the Input level.
+        assert!(detail(&state).form().is_some());
         assert_eq!(form_of(&state).focus, FormFocus::Input);
 
         let value = values(&state)[0];

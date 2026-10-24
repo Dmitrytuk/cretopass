@@ -7,22 +7,16 @@
 
 use std::io::{self, Write};
 
+use super::TreeState;
 use super::modal::TreeAction;
-use super::{FormState, InputMode, TreeState};
 
 /// Performs `action`. The modal that produced it has already been taken out of
 /// [`TreeState`], so dismissing it is the act of not putting it back.
-pub fn execute(state: &mut TreeState, action: TreeAction) -> io::Result<()> {
+pub fn execute(_state: &mut TreeState, action: TreeAction) -> io::Result<()> {
     match action {
         TreeAction::Close => Ok(()),
         TreeAction::CopyToClipboard { text } => {
             copy_to_clipboard(&text);
-            Ok(())
-        }
-        TreeAction::OpenEdit => {
-            if let Some(node) = state.current_node_ref() {
-                state.mode = InputMode::Form(FormState::new_edit(node));
-            }
             Ok(())
         }
     }

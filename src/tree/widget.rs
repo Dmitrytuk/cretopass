@@ -16,8 +16,14 @@ use crate::theming::{ElementStyle, Icon, Spinner, Status, texts};
 mod modal;
 mod orchestrator;
 
-pub use modal::{Alert, Detail, Help, Modal, TreeAction, make_overlay_area};
+pub use modal::{Alert, Detail, Help, Modal, TreeAction};
 pub use orchestrator::execute;
+
+#[cfg(test)]
+pub(crate) use modal::{
+    GENERATOR_ROW_GENERATE, GENERATOR_ROW_LENGTH, GENERATOR_ROW_SYMBOLS, PickerItem, form_hint,
+    picker_items, render_extra_field_line,
+};
 
 /// A single visible row in the flattened tree display.
 #[derive(Debug, Clone)]
@@ -42,27 +48,6 @@ pub enum InputMode {
     PendingPaste,
     /// Waiting for the direction key after the first `a` (`PendingAdd`).
     PendingAdd,
-    /// Add/Edit form. `node_id` distinguishes Edit (`Some`) from Add (`None`).
-    Form(FormState),
-    /// Popup for selecting a field type to add (login, password, custom,
-    /// or description).
-    SelectFieldType {
-        form: FormState,
-        /// Index into the currently available picker items.
-        selected: usize,
-    },
-    /// Popup for entering a custom field name.
-    CustomFieldName { form: FormState, input: String },
-    /// Password-generator parameter modal opened with `Ctrl+G` from the form's
-    /// input level.
-    GeneratePassword(GeneratorModal),
-    /// Per-symbol checklist overlay opened from the generator modal.
-    SymbolChecklist(GeneratorModal),
-    /// Confirmation popup for deleting an extra field.
-    ConfirmDeleteField {
-        form: FormState,
-        target_index: usize,
-    },
     /// Popup for selecting export scope (node only or with children).
     ExportNodeSelect {
         /// The node being exported.
@@ -127,8 +112,8 @@ pub enum FormRow {
 /// A transient prefix state inside the form (field cut/paste).
 ///
 /// Mirrors the tree's prefix modes (`PendingCut` / `PendingPaste`) without
-/// introducing new `InputMode` variants: the form stays in `InputMode::Form`
-/// and only its `pending` field changes.
+/// changing the open screen: the Form Popup stays put and only its `pending`
+/// field changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormPending {
     /// No prefix pending.
@@ -584,9 +569,10 @@ impl FormState {
 
 /// Transient state of the password-generator modal and its symbol checklist.
 ///
-/// Shared by [`InputMode::GeneratePassword`] and [`InputMode::SymbolChecklist`]
-/// so the raw length buffer survives the round trip into the checklist. The
-/// carried [`FormState`] is the same form the modal was opened from.
+/// Shared by the Detail modal's generator popups (the parameter screen and the
+/// symbol checklist) so the raw length buffer survives the round trip into the
+/// checklist. The carried [`FormState`] is the same form the generator was
+/// opened from.
 #[derive(Debug, Clone)]
 pub struct GeneratorModal {
     /// The Add/Edit form the generator writes into.

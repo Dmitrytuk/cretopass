@@ -14,9 +14,16 @@ mod detail;
 mod help;
 
 pub use alert::Alert;
-pub use chrome::make_overlay_area;
 pub use detail::Detail;
 pub use help::Help;
+
+/// Items the tree's tests reach for; the production build uses them only inside
+/// this module tree.
+#[cfg(test)]
+pub(crate) use detail::{
+    GENERATOR_ROW_GENERATE, GENERATOR_ROW_LENGTH, GENERATOR_ROW_SYMBOLS, PickerItem, form_hint,
+    picker_items, render_extra_field_line,
+};
 
 use crossterm::event::KeyEvent;
 
@@ -32,8 +39,6 @@ pub enum TreeAction {
     Close,
     /// Write `text` to the system clipboard.
     CopyToClipboard { text: String },
-    /// Open the Form Popup for the selected Node.
-    OpenEdit,
 }
 
 /// The Tree's modal slot: at most one at a time, over Normal navigation.
@@ -43,8 +48,9 @@ pub enum Modal {
     Help(Help),
     /// A passive message the user acknowledges with any key.
     Alert(Alert),
-    /// A selected Node's extra fields, with copy and edit.
-    Detail(Detail),
+    /// A selected Node's extra fields, with copy and edit. Boxed because it is
+    /// far larger than the passive modals.
+    Detail(Box<Detail>),
 }
 
 impl Modal {
