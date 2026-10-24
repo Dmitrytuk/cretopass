@@ -1,13 +1,12 @@
 use std::io;
 
-use crate::cursor::selected_span;
 use crate::file_handling::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree};
 use crate::theming::Action;
 use crate::theming::{ElementStyle, SPINNER_TICK, paint_background, render_status_bar, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::{
-    AddPosition, Alert, Detail, Help, InputMode, Modal, SaveExit, SaveState, TreeState, TreeWidget,
-    execute,
+    AddPosition, Detail, ExportWizard, Help, InputMode, Modal, SaveExit, SaveState, TreeState,
+    TreeWidget, execute,
 };
 use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
@@ -390,8 +389,6 @@ fn dispatch_key(key: event::KeyEvent, state: &mut TreeState) {
         InputMode::PendingCut => handle_pending_cut(key, state),
         InputMode::PendingPaste => handle_pending_paste(key, state),
         InputMode::PendingAdd => handle_pending_add(key, state),
-        InputMode::ExportNodeSelect { .. } => handle_export_node_select(key, state),
-        InputMode::ExportNodeFormat { .. } => handle_export_node_format(key, state),
     }
 }
 
@@ -477,10 +474,7 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
         }
         Action::ExportNode => {
             if let Some(node) = state.current_node_ref() {
-                state.mode = InputMode::ExportNodeSelect {
-                    node: node.clone(),
-                    selected: 0,
-                };
+                state.modal = Some(Modal::Export(ExportWizard::new(node.clone())));
             }
         }
         Action::Cancel => {
@@ -559,159 +553,6 @@ fn handle_search(key: event::KeyEvent, state: &mut TreeState) {
     }
 }
 
-fn handle_export_node_select(key: event::KeyEvent, state: &mut TreeState) {
-    let mode = std::mem::replace(&mut state.mode, InputMode::Normal);
-    let (node, selected) = match mode {
-        InputMode::ExportNodeSelect { node, selected } => (node, selected),
-        other => {
-            state.mode = other;
-            return;
-        }
-    };
-
-    match Action::from_select_field_type(&key) {
-        Action::Cancel => {
-            state.mode = InputMode::Normal;
-        }
-        Action::NavDown => {
-            state.mode = InputMode::ExportNodeSelect {
-                node,
-                selected: (selected + 1) % 2,
-            };
-        }
-        Action::NavUp => {
-            state.mode = InputMode::ExportNodeSelect {
-                node,
-                selected: (selected + 1) % 2,
-            };
-        }
-        Action::Confirm => {
-            let include_children = selected == 1;
-            state.mode = InputMode::ExportNodeFormat {
-                node,
-                include_children,
-                selected_format: 0,
-            };
-        }
-        Action::SelectIndex(i) if i < 2 => {
-            state.mode = InputMode::ExportNodeSelect { node, selected: i };
-        }
-        _ => {
-            state.mode = InputMode::ExportNodeSelect { node, selected };
-        }
-    }
-}
-
-fn handle_export_node_format(key: event::KeyEvent, state: &mut TreeState) {
-    let mode = std::mem::replace(&mut state.mode, InputMode::Normal);
-    let (node, include_children, selected_format) = match mode {
-        InputMode::ExportNodeFormat {
-            node,
-            include_children,
-            selected_format,
-        } => (node, include_children, selected_format),
-        other => {
-            state.mode = other;
-            return;
-        }
-    };
-
-    match Action::from_select_field_type(&key) {
-        Action::Cancel => {
-            state.mode = InputMode::Normal;
-        }
-        Action::NavDown => {
-            state.mode = InputMode::ExportNodeFormat {
-                node,
-                include_children,
-                selected_format: (selected_format + 1) % 3,
-            };
-        }
-        Action::NavUp => {
-            state.mode = InputMode::ExportNodeFormat {
-                node,
-                include_children,
-                selected_format: (selected_format + 2) % 3,
-            };
-        }
-        Action::SelectIndex(i) if i < 3 => {
-            state.mode = InputMode::ExportNodeFormat {
-                node,
-                include_children,
-                selected_format: i,
-            };
-        }
-        Action::Confirm => {
-            use crate::file_handling::export::{ExportFormat, export_tree};
-
-            let format = match selected_format {
-                0 => ExportFormat::Json,
-                1 => ExportFormat::Xml,
-                _ => ExportFormat::Csv,
-            };
-
-            let node_name = node.name.clone();
-            let export_node = if include_children {
-                node
-            } else {
-                let mut n = node;
-                n.children = Vec::new();
-                n
-            };
-
-            let base_path = match &state.active_vault_path {
-                Some(p) => p.clone(),
-                None => {
-                    state.modal = Some(Modal::Alert(Alert {
-                        message: texts::MSG_NO_ACTIVE_FILE.to_string(),
-                    }));
-                    return;
-                }
-            };
-
-            let path = std::path::Path::new(&base_path);
-            let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("export");
-            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("age");
-            let node_name_clean: String = node_name
-                .chars()
-                .map(|c| {
-                    if c.is_alphanumeric() || c == '-' || c == '_' {
-                        c
-                    } else {
-                        '_'
-                    }
-                })
-                .collect();
-            let export_path = parent.join(format!("{}_{}.{}", stem, node_name_clean, ext));
-            let export_path_str = export_path.to_string_lossy().to_string();
-
-            match export_tree(&export_node, &export_path_str, format) {
-                Ok(out_path) => {
-                    state.modal = Some(Modal::Alert(Alert {
-                        message: format!("{}{}", texts::MSG_EXPORT_NODE_SUCCESS, out_path),
-                    }));
-                }
-                Err(e) => {
-                    state.modal = Some(Modal::Alert(Alert {
-                        message: format!("{e}"),
-                    }));
-                }
-            }
-        }
-        _ => {
-            state.mode = InputMode::ExportNodeFormat {
-                node,
-                include_children,
-                selected_format,
-            };
-        }
-    }
-}
-
 fn ui(frame: &mut Frame, state: &mut TreeState) {
     let area = frame.area();
 
@@ -726,15 +567,8 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
     let (mode_str, mode_style, hint) = status_bar_parts(state);
     render_status_bar(frame, layout[1], mode_str, mode_style.style(), hint);
 
-    match &state.mode {
-        InputMode::Search => render_search_overlay(frame, area, state),
-        InputMode::ExportNodeSelect { .. } => {
-            render_export_node_select_overlay(frame, area, state);
-        }
-        InputMode::ExportNodeFormat { .. } => {
-            render_export_node_format_overlay(frame, area, state);
-        }
-        _ => {}
+    if let InputMode::Search = &state.mode {
+        render_search_overlay(frame, area, state);
     }
 
     if let Some(modal) = &state.modal {
@@ -742,6 +576,7 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
             Modal::Help(help) => help.render(frame, area),
             Modal::Alert(alert) => alert.render(frame, area),
             Modal::Detail(detail) => detail.render(frame, area, state),
+            Modal::Export(wizard) => wizard.render(frame, area),
         }
     }
 
@@ -779,6 +614,7 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
             Modal::Help(help) => help.status_parts(),
             Modal::Alert(alert) => alert.status_parts(),
             Modal::Detail(detail) => detail.status_parts(&state.root),
+            Modal::Export(wizard) => wizard.status_parts(),
         };
     }
 
@@ -812,16 +648,6 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
             ElementStyle::ModePendingAdd,
             texts::HINT_PENDING_ADD,
         ),
-        InputMode::ExportNodeSelect { .. } => (
-            texts::MODE_EXPORT_SELECT,
-            ElementStyle::ModeFieldType,
-            texts::HINT_EXPORT_NODE_SELECT,
-        ),
-        InputMode::ExportNodeFormat { .. } => (
-            texts::MODE_EXPORT_FORMAT,
-            ElementStyle::ModeFieldType,
-            texts::HINT_EXPORT_NODE_FORMAT,
-        ),
     }
 }
 
@@ -847,72 +673,6 @@ fn render_search_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
     frame.render_widget(Paragraph::new(text), inner);
-}
-
-fn render_export_node_select_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let selected = match &state.mode {
-        InputMode::ExportNodeSelect { selected, .. } => *selected,
-        _ => return,
-    };
-
-    let overlay_area = Rect {
-        x: area.width / 4,
-        y: area.height / 2 - 3,
-        width: area.width / 2,
-        height: 6,
-    };
-
-    let block = Block::default()
-        .title(texts::OVERLAY_EXPORT_NODE)
-        .borders(Borders::ALL)
-        .style(ElementStyle::FieldTypeBlock.style());
-
-    let inner = block.inner(overlay_area);
-    let mut lines: Vec<Line> = Vec::new();
-
-    for (i, item) in texts::EXPORT_NODE_OPTIONS.iter().enumerate() {
-        lines.push(Line::from(selected_span(item, i == selected)));
-    }
-
-    lines.push(Line::from(""));
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
-fn render_export_node_format_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let selected_format = match &state.mode {
-        InputMode::ExportNodeFormat {
-            selected_format, ..
-        } => *selected_format,
-        _ => return,
-    };
-
-    let overlay_area = Rect {
-        x: area.width / 4,
-        y: area.height / 2 - 3,
-        width: area.width / 2,
-        height: 7,
-    };
-
-    let block = Block::default()
-        .title(texts::EXPORT_SELECT_TITLE)
-        .borders(Borders::ALL)
-        .style(ElementStyle::FieldTypeBlock.style());
-
-    let inner = block.inner(overlay_area);
-    let mut lines: Vec<Line> = Vec::new();
-
-    for (i, item) in texts::EXPORT_TYPE_ITEMS.iter().enumerate() {
-        lines.push(Line::from(selected_span(item, i == selected_format)));
-    }
-
-    lines.push(Line::from(""));
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
 /// Renders the save-error overlay.

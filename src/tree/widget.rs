@@ -16,7 +16,7 @@ use crate::theming::{ElementStyle, Icon, Spinner, Status, texts};
 mod modal;
 mod orchestrator;
 
-pub use modal::{Alert, Detail, Help, Modal, TreeAction};
+pub use modal::{Alert, Detail, ExportWizard, Help, Modal, TreeAction};
 pub use orchestrator::execute;
 
 #[cfg(test)]
@@ -48,22 +48,6 @@ pub enum InputMode {
     PendingPaste,
     /// Waiting for the direction key after the first `a` (`PendingAdd`).
     PendingAdd,
-    /// Popup for selecting export scope (node only or with children).
-    ExportNodeSelect {
-        /// The node being exported.
-        node: Node,
-        /// 0 = this node only, 1 = with children.
-        selected: usize,
-    },
-    /// Popup for selecting export format (JSON/XML/CSV).
-    ExportNodeFormat {
-        /// The node being exported.
-        node: Node,
-        /// Whether children should be included.
-        include_children: bool,
-        /// 0 = JSON, 1 = XML, 2 = CSV.
-        selected_format: usize,
-    },
 }
 
 /// Where a pending "Add" form should place the newly created node.
