@@ -13,6 +13,12 @@ use crate::file_handling::SaveError;
 use crate::generator::{PasswordLengthError, PasswordParams};
 use crate::theming::{ElementStyle, Icon, Spinner, Status, texts};
 
+mod modal;
+mod orchestrator;
+
+pub use modal::{Help, Modal, TreeAction};
+pub use orchestrator::execute;
+
 /// A single visible row in the flattened tree display.
 #[derive(Debug, Clone)]
 pub struct VisibleNode {
@@ -82,8 +88,6 @@ pub enum InputMode {
     },
     /// Simple alert message popup (any key dismisses).
     Alert { message: String },
-    /// Overlay showing the list of key bindings (any key dismisses).
-    Help,
 }
 
 /// Where a pending "Add" form should place the newly created node.
@@ -721,6 +725,9 @@ pub struct TreeState {
     /// Password-generator settings remembered for this app run. Seeded from the
     /// home state and written back when the tree exits.
     pub generator: PasswordParams,
+    /// The modal currently over the Tree, if any: at most one at a time. A key
+    /// goes here while it is set, and to the [`InputMode`] navigation otherwise.
+    pub modal: Option<Modal>,
 }
 
 impl TreeState {
@@ -746,6 +753,7 @@ impl TreeState {
             save_exit: SaveExit::None,
             display_full_path: true,
             generator: PasswordParams::default(),
+            modal: None,
         };
         state.update_visible();
         state

@@ -13,8 +13,8 @@ use crate::theming::{
 };
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{
-    AddPosition, FormFocus, FormPending, FormRow, FormState, GeneratorModal, InputMode, SaveExit,
-    SaveState, TreeState, TreeWidget,
+    AddPosition, FormFocus, FormPending, FormRow, FormState, GeneratorModal, Help, InputMode,
+    Modal, SaveExit, SaveState, TreeState, TreeWidget, execute,
 };
 use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
@@ -115,7 +115,11 @@ pub fn run_app<B: Backend>(
                                     }
                                 }
                             } else {
-                                dispatch_key(key, state);
+                                if state.modal.is_some() {
+                                    handle_modal_key(key, state)?;
+                                } else {
+                                    dispatch_key(key, state);
+                                }
 
                                 if state.modified {
                                     state.modified = false;
@@ -403,7 +407,26 @@ fn dispatch_key(key: event::KeyEvent, state: &mut TreeState) {
         InputMode::ExportNodeSelect { .. } => handle_export_node_select(key, state),
         InputMode::ExportNodeFormat { .. } => handle_export_node_format(key, state),
         InputMode::Alert { .. } => handle_alert(key, state),
-        InputMode::Help => handle_help(key, state),
+    }
+}
+
+/// Dispatches a key to the active modal.
+///
+/// The modal reads the key itself and reports a [`TreeAction`], which [`execute`]
+/// then performs. The modal is taken out of [`TreeState`] for the duration, so an
+/// action that dismisses it simply does not put it back.
+fn handle_modal_key(key: event::KeyEvent, state: &mut TreeState) -> io::Result<()> {
+    let Some(mut modal) = state.modal.take() else {
+        return Ok(());
+    };
+
+    match modal.handle_key(key) {
+        // The modal consumed the key and stays open.
+        None => {
+            state.modal = Some(modal);
+            Ok(())
+        }
+        Some(action) => execute(state, action),
     }
 }
 
@@ -488,7 +511,7 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
             state.clear_search();
         }
         Action::OpenHelp => {
-            state.mode = InputMode::Help;
+            state.modal = Some(Modal::Help(Help));
         }
         _ => {}
     }
@@ -1496,11 +1519,6 @@ fn handle_alert(key: event::KeyEvent, state: &mut TreeState) {
     state.mode = InputMode::Normal;
 }
 
-fn handle_help(key: event::KeyEvent, state: &mut TreeState) {
-    let _ = key;
-    state.mode = InputMode::Normal;
-}
-
 fn ui(frame: &mut Frame, state: &mut TreeState) {
     let area = frame.area();
 
@@ -1545,10 +1563,11 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
         InputMode::Alert { message } => {
             render_alert_overlay(frame, area, message);
         }
-        InputMode::Help => {
-            render_help_overlay(frame, area);
-        }
         _ => {}
+    }
+
+    if let Some(Modal::Help(help)) = &state.modal {
+        help.render(frame, area);
     }
 
     match state.save_exit {
@@ -1578,6 +1597,10 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
     }
     if state.save_state.overlay_message().is_some() {
         return ("", ElementStyle::ModeNormal, texts::HINT_DETAIL_ALERT);
+    }
+
+    if let Some(Modal::Help(help)) = &state.modal {
+        return help.status_parts();
     }
 
     match &state.mode {
@@ -1668,7 +1691,6 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
             ElementStyle::ModeNormal,
             texts::HINT_DETAIL_ALERT,
         ),
-        InputMode::Help => (texts::MODE_HELP, ElementStyle::ModeHelp, texts::HINT_HELP),
     }
 }
 
@@ -1694,36 +1716,6 @@ fn render_search_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
     frame.render_widget(Paragraph::new(text), inner);
-}
-
-fn render_help_overlay(frame: &mut Frame, area: Rect) {
-    let n_bindings = texts::TREE_HELP_KEY_BINDINGS.len() as u16;
-    let overlay_height = (n_bindings + 3).min(area.height.saturating_sub(2));
-    let overlay_area = Rect {
-        x: area.width / 6,
-        y: area.height.saturating_sub(overlay_height) / 2,
-        width: area.width * 2 / 3,
-        height: overlay_height,
-    };
-
-    let block = Block::default()
-        .title(texts::OVERLAY_HELP)
-        .borders(Borders::ALL)
-        .style(ElementStyle::HelpBlock.style());
-
-    let inner = block.inner(overlay_area);
-    let mut lines: Vec<Line> = Vec::new();
-    for binding in texts::TREE_HELP_KEY_BINDINGS {
-        lines.push(Line::from(Span::styled(
-            *binding,
-            ElementStyle::HelpText.style(),
-        )));
-    }
-    lines.push(Line::from(""));
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
 fn render_export_node_select_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
