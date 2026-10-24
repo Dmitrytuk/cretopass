@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::TreeAction;
 use crate::theming::{ElementStyle, texts};
+use crate::tree::widget::TreeState;
 
 /// The Tree's key-binding list, opened with `?`.
 #[derive(Debug)]
@@ -18,7 +19,7 @@ pub struct Help;
 
 impl Help {
     /// Any key dismisses the modal: there is nothing to type into it.
-    pub fn handle_key(&mut self, _key: KeyEvent) -> Option<TreeAction> {
+    pub fn handle_key(&mut self, _key: KeyEvent, _state: &mut TreeState) -> Option<TreeAction> {
         Some(TreeAction::Close)
     }
 
@@ -67,12 +68,13 @@ mod tests {
     #[test]
     fn any_key_dismisses_the_list() {
         let mut help = Help;
+        let mut state = TreeState::new(crate::tree::node::Node::new("Root"));
         assert!(matches!(
-            help.handle_key(KeyEvent::from(KeyCode::Esc)),
+            help.handle_key(KeyEvent::from(KeyCode::Esc), &mut state),
             Some(TreeAction::Close)
         ));
         assert!(matches!(
-            help.handle_key(KeyEvent::from(KeyCode::Char('x'))),
+            help.handle_key(KeyEvent::from(KeyCode::Char('x')), &mut state),
             Some(TreeAction::Close)
         ));
     }

@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::TreeAction;
 use crate::theming::{ElementStyle, texts};
+use crate::tree::widget::TreeState;
 
 /// A one-line message shown over the Tree until the user acknowledges it.
 #[derive(Debug)]
@@ -21,7 +22,7 @@ pub struct Alert {
 
 impl Alert {
     /// Any key dismisses the alert: there is nothing to type into it.
-    pub fn handle_key(&mut self, _key: KeyEvent) -> Option<TreeAction> {
+    pub fn handle_key(&mut self, _key: KeyEvent, _state: &mut TreeState) -> Option<TreeAction> {
         Some(TreeAction::Close)
     }
 
@@ -73,8 +74,9 @@ mod tests {
         let mut alert = Alert {
             message: "Exported.".to_string(),
         };
+        let mut state = TreeState::new(crate::tree::node::Node::new("Root"));
         assert!(matches!(
-            alert.handle_key(KeyEvent::from(KeyCode::Char('x'))),
+            alert.handle_key(KeyEvent::from(KeyCode::Char('x')), &mut state),
             Some(TreeAction::Close)
         ));
     }

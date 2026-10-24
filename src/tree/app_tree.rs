@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::io::{self, Write};
+use std::io;
 
 use crate::cursor::{
     backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
@@ -13,8 +13,8 @@ use crate::theming::{
 };
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{
-    AddPosition, Alert, FormFocus, FormPending, FormRow, FormState, GeneratorModal, Help,
-    InputMode, Modal, SaveExit, SaveState, TreeState, TreeWidget, execute,
+    AddPosition, Alert, Detail, FormFocus, FormPending, FormRow, FormState, GeneratorModal, Help,
+    InputMode, Modal, SaveExit, SaveState, TreeState, TreeWidget, execute, make_overlay_area,
 };
 use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
@@ -403,7 +403,6 @@ fn dispatch_key(key: event::KeyEvent, state: &mut TreeState) {
         InputMode::GeneratePassword(_) => handle_generate_password(key, state),
         InputMode::SymbolChecklist(_) => handle_symbol_checklist(key, state),
         InputMode::ConfirmDeleteField { .. } => handle_confirm_delete(key, state),
-        InputMode::Detail { .. } => handle_detail(key, state),
         InputMode::ExportNodeSelect { .. } => handle_export_node_select(key, state),
         InputMode::ExportNodeFormat { .. } => handle_export_node_format(key, state),
     }
@@ -419,7 +418,7 @@ fn handle_modal_key(key: event::KeyEvent, state: &mut TreeState) -> io::Result<(
         return Ok(());
     };
 
-    match modal.handle_key(key) {
+    match modal.handle_key(key, state) {
         // The modal consumed the key and stays open.
         None => {
             state.modal = Some(modal);
@@ -454,10 +453,7 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
         }
         Action::NavRight => {
             if is_leaf_selected(state) {
-                state.mode = InputMode::Detail {
-                    selected: 0,
-                    alert: None,
-                };
+                state.modal = Some(Modal::Detail(Detail::default()));
             } else {
                 state.expand_collapse(true);
             }
@@ -467,10 +463,7 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
         }
         Action::Confirm => {
             if is_leaf_selected(state) {
-                state.mode = InputMode::Detail {
-                    selected: 0,
-                    alert: None,
-                };
+                state.modal = Some(Modal::Detail(Detail::default()));
             } else {
                 state.toggle_expand();
             }
@@ -490,10 +483,7 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
             state.mode = InputMode::PendingAdd;
         }
         Action::OpenDetail => {
-            state.mode = InputMode::Detail {
-                selected: 0,
-                alert: None,
-            };
+            state.modal = Some(Modal::Detail(Detail::default()));
         }
         Action::ToggleSearch => {
             state.mode = InputMode::Search;
@@ -686,19 +676,16 @@ fn write_generated_value(state: &mut TreeState, form: &mut FormState, value: Str
     true
 }
 
-/// Returns the mode to enter when the Edit/Add form is closed.
+/// Where the Edit/Add form returns to when closed.
 ///
 /// An Edit session (including an Add session whose first commit created its
-/// node) returns to the node's Detail overlay; an empty Add session cancels
-/// back to Normal.
-fn close_form(form: &FormState) -> InputMode {
+/// node) reopens the node's Detail modal; an empty Add session cancels back to
+/// the Normal tree.
+fn close_form(form: &FormState) -> Option<Modal> {
     if form.is_adding() {
-        InputMode::Normal
+        None
     } else {
-        InputMode::Detail {
-            selected: 0,
-            alert: None,
-        }
+        Some(Modal::Detail(Detail::default()))
     }
 }
 
@@ -863,7 +850,8 @@ fn handle_form(key: event::KeyEvent, state: &mut TreeState) {
             scratch_edit(&mut form, |text, cursor| delete_at(text, *cursor));
         }
         Action::Cancel => {
-            state.mode = close_form(&form);
+            state.mode = InputMode::Normal;
+            state.modal = close_form(&form);
             return;
         }
         Action::NextField => {
@@ -1246,120 +1234,6 @@ fn handle_confirm_delete(key: event::KeyEvent, state: &mut TreeState) {
     state.mode = InputMode::Form(form);
 }
 
-fn copy_to_clipboard(text: &str) {
-    let cmds: &[&[&str]] = if cfg!(target_os = "macos") {
-        &[&["pbcopy"]]
-    } else if cfg!(target_os = "linux") {
-        &[
-            &["wl-copy"],
-            &["xclip", "-selection", "clipboard"],
-            &["xsel", "-b"],
-        ]
-    } else {
-        return;
-    };
-    for args in cmds {
-        if let Ok(mut child) = std::process::Command::new(args[0])
-            .args(&args[1..])
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-        {
-            if let Some(ref mut stdin) = child.stdin {
-                let _ = stdin.write_all(text.as_bytes());
-            }
-            let _ = child.wait();
-            break;
-        }
-    }
-}
-
-fn handle_detail(key: event::KeyEvent, state: &mut TreeState) {
-    let mode = std::mem::replace(&mut state.mode, InputMode::Normal);
-    let (selected, alert) = match mode {
-        InputMode::Detail { selected, alert } => (selected, alert),
-        other => {
-            state.mode = other;
-            return;
-        }
-    };
-
-    if alert.is_some() {
-        state.mode = InputMode::Detail {
-            selected,
-            alert: None,
-        };
-        return;
-    }
-
-    let field_count = state.current_node_ref().map_or(0, |n| n.extra_fields.len());
-
-    match Action::from_detail(&key) {
-        Action::Cancel => {
-            state.mode = InputMode::Normal;
-        }
-        Action::NavDown => {
-            let last = field_count.saturating_sub(1);
-            let new_sel = (selected + 1).min(last);
-            state.mode = InputMode::Detail {
-                selected: new_sel,
-                alert: None,
-            };
-        }
-        Action::NavUp => {
-            let new_sel = selected.saturating_sub(1);
-            state.mode = InputMode::Detail {
-                selected: new_sel,
-                alert: None,
-            };
-        }
-        Action::NextField if field_count > 0 => {
-            let new_sel = (selected + 1) % field_count;
-            state.mode = InputMode::Detail {
-                selected: new_sel,
-                alert: None,
-            };
-        }
-        Action::PrevField if field_count > 0 => {
-            let new_sel = (selected + field_count - 1) % field_count;
-            state.mode = InputMode::Detail {
-                selected: new_sel,
-                alert: None,
-            };
-        }
-        Action::CopyField => {
-            let text = state
-                .current_node_ref()
-                .and_then(|node| node.extra_fields.get(selected).map(|ef| ef.value.clone()));
-            if let Some(ref t) = text
-                && !t.is_empty()
-            {
-                copy_to_clipboard(t);
-            }
-            state.mode = InputMode::Detail {
-                selected,
-                alert: Some(texts::COPY_CHECK.to_string()),
-            };
-        }
-        Action::EditNode => {
-            if let Some(node) = state.current_node_ref() {
-                let form = FormState::new_edit(node);
-                state.mode = InputMode::Form(form);
-            } else {
-                state.mode = InputMode::Detail {
-                    selected,
-                    alert: None,
-                };
-            }
-        }
-        _ => {
-            state.mode = InputMode::Detail {
-                selected,
-                alert: None,
-            };
-        }
-    }
-}
-
 fn handle_export_node_select(key: event::KeyEvent, state: &mut TreeState) {
     let mode = std::mem::replace(&mut state.mode, InputMode::Normal);
     let (node, selected) = match mode {
@@ -1542,12 +1416,6 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
         InputMode::GeneratePassword(modal) => render_generate_password_overlay(frame, area, modal),
         InputMode::SymbolChecklist(modal) => render_symbol_checklist_overlay(frame, area, modal),
         InputMode::ConfirmDeleteField { .. } => render_confirm_delete_overlay(frame, area, state),
-        InputMode::Detail { .. } => {
-            render_detail_overlay(frame, area, state);
-            if matches!(state.mode, InputMode::Detail { ref alert, .. } if alert.is_some()) {
-                render_copy_alert_overlay(frame, area);
-            }
-        }
         InputMode::ExportNodeSelect { .. } => {
             render_export_node_select_overlay(frame, area, state);
         }
@@ -1561,6 +1429,7 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
         match modal {
             Modal::Help(help) => help.render(frame, area),
             Modal::Alert(alert) => alert.render(frame, area),
+            Modal::Detail(detail) => detail.render(frame, area, state),
         }
     }
 
@@ -1597,6 +1466,7 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
         return match modal {
             Modal::Help(help) => help.status_parts(),
             Modal::Alert(alert) => alert.status_parts(),
+            Modal::Detail(detail) => detail.status_parts(),
         };
     }
 
@@ -1629,15 +1499,6 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
             texts::MODE_PENDING_ADD,
             ElementStyle::ModePendingAdd,
             texts::HINT_PENDING_ADD,
-        ),
-        InputMode::Detail { alert, .. } => (
-            texts::MODE_DETAIL,
-            ElementStyle::ModeDetail,
-            if alert.is_some() {
-                texts::HINT_DETAIL_ALERT
-            } else {
-                texts::HINT_DETAIL
-            },
         ),
         InputMode::Form(form) => {
             let (mode_str, mode_style) = match form.pending {
@@ -1853,18 +1714,6 @@ fn render_discard_confirm_overlay(frame: &mut Frame, area: Rect) {
         Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
         inner,
     );
-}
-
-fn make_overlay_area(area: Rect, extra_fields_len: usize, base_content: u16) -> Rect {
-    let n = extra_fields_len as u16;
-    let content_height = base_content.saturating_add(n);
-    let overlay_height = (content_height + 2).min(area.height.saturating_sub(2));
-    Rect {
-        x: area.width / 5,
-        y: area.height.saturating_sub(overlay_height) / 2,
-        width: area.width * 3 / 5,
-        height: overlay_height,
-    }
 }
 
 /// Renders one form row as a list-style line.
@@ -2242,70 +2091,6 @@ fn render_confirm_delete_overlay(frame: &mut Frame, area: Rect, state: &TreeStat
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-fn render_copy_alert_overlay(frame: &mut Frame, area: Rect) {
-    let overlay_area = Rect {
-        x: area.width / 3,
-        y: area.height / 2 - 2,
-        width: area.width / 3,
-        height: 4,
-    };
-
-    let block = Block::default()
-        .title(texts::OVERLAY_COPIED)
-        .borders(Borders::ALL)
-        .style(ElementStyle::CopiedBlock.style());
-
-    let inner = block.inner(overlay_area);
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            texts::COPY_CHECK,
-            ElementStyle::CopiedText.style(),
-        )),
-    ];
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
-fn render_detail_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let node = match state.current_node_ref() {
-        Some(n) => n,
-        None => return,
-    };
-
-    let selected = match &state.mode {
-        InputMode::Detail { selected, .. } => *selected,
-        _ => 0,
-    };
-
-    let overlay_area = make_overlay_area(area, node.extra_fields.len(), 3);
-
-    let block = Block::default()
-        .title(format!(" {} ", node.name))
-        .borders(Borders::ALL)
-        .style(ElementStyle::DetailBlock.style());
-
-    let inner = block.inner(overlay_area);
-    let mut lines: Vec<Line> = Vec::new();
-
-    lines.push(Line::from(""));
-
-    for (i, ef) in node.extra_fields.iter().enumerate() {
-        let display_val = ef.field_type.display_value(&ef.value);
-        let is_sel = selected == i;
-        let text = format!("{}: {}", ef.field_type.label(), display_val);
-        lines.push(Line::from(selected_span(&text, is_sel)));
-    }
-
-    lines.push(Line::from(""));
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2465,7 +2250,7 @@ mod tests {
     fn form_nav_esc_closes_to_detail() {
         let mut state = editing_state();
         handle_form(key(KeyCode::Esc), &mut state);
-        assert!(matches!(state.mode, InputMode::Detail { .. }));
+        assert!(matches!(state.modal, Some(Modal::Detail(_))));
     }
 
     #[test]
@@ -2791,93 +2576,6 @@ mod tests {
         handle_confirm_delete(key(KeyCode::Char('y')), &mut state);
         assert_eq!(values(&state), vec!["a", "c"]);
         assert!(form_of(&state).selected_row < form_of(&state).rows(&state.root).len());
-    }
-
-    /// A tree whose root has three extra fields, opened in the Detail overlay.
-    fn detail_state() -> TreeState {
-        let mut node = Node::new("Root");
-        for value in ["a", "b", "c"] {
-            node.extra_fields.push(ExtraField {
-                field_type: FieldType::Login,
-                value: value.to_string(),
-            });
-        }
-        let mut state = TreeState::new(node);
-        state.mode = InputMode::Detail {
-            selected: 0,
-            alert: None,
-        };
-        state
-    }
-
-    fn detail_selected(state: &TreeState) -> usize {
-        match &state.mode {
-            InputMode::Detail { selected, .. } => *selected,
-            other => panic!("expected Detail mode, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn detail_tab_wraps_forward_and_backtab_wraps_backward() {
-        let mut state = detail_state();
-        handle_detail(key(KeyCode::Tab), &mut state);
-        assert_eq!(detail_selected(&state), 1);
-        handle_detail(key(KeyCode::Tab), &mut state);
-        handle_detail(key(KeyCode::Tab), &mut state);
-        assert_eq!(detail_selected(&state), 0); // wrapped past the last field
-
-        handle_detail(key(KeyCode::BackTab), &mut state);
-        assert_eq!(detail_selected(&state), 2); // wrapped past the first field
-    }
-
-    #[test]
-    fn detail_nav_down_clamps_at_last_field() {
-        let mut state = detail_state();
-        for _ in 0..5 {
-            handle_detail(key(KeyCode::Char('j')), &mut state);
-        }
-        assert_eq!(detail_selected(&state), 2); // last field, no phantom row
-    }
-
-    #[test]
-    fn detail_nav_up_clamps_at_first_field() {
-        let mut state = detail_state();
-        handle_detail(key(KeyCode::Char('k')), &mut state);
-        assert_eq!(detail_selected(&state), 0);
-    }
-
-    #[test]
-    fn detail_tab_is_safe_without_fields() {
-        let mut state = TreeState::new(Node::new("Root"));
-        state.mode = InputMode::Detail {
-            selected: 0,
-            alert: None,
-        };
-        handle_detail(key(KeyCode::Tab), &mut state);
-        handle_detail(key(KeyCode::BackTab), &mut state);
-        assert_eq!(detail_selected(&state), 0);
-    }
-
-    #[test]
-    fn detail_y_sets_copy_alert() {
-        // An empty value skips the clipboard subprocess but still alerts.
-        let mut node = Node::new("Root");
-        node.extra_fields.push(ExtraField {
-            field_type: FieldType::Login,
-            value: String::new(),
-        });
-        let mut state = TreeState::new(node);
-        state.mode = InputMode::Detail {
-            selected: 0,
-            alert: None,
-        };
-        handle_detail(key(KeyCode::Char('y')), &mut state);
-        match &state.mode {
-            InputMode::Detail { alert, .. } => {
-                assert_eq!(alert.as_deref(), Some(texts::COPY_CHECK));
-            }
-            other => panic!("expected Detail mode, got {other:?}"),
-        }
     }
 
     #[test]

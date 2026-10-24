@@ -16,7 +16,7 @@ use crate::theming::{ElementStyle, Icon, Spinner, Status, texts};
 mod modal;
 mod orchestrator;
 
-pub use modal::{Alert, Help, Modal, TreeAction};
+pub use modal::{Alert, Detail, Help, Modal, TreeAction, make_overlay_area};
 pub use orchestrator::execute;
 
 /// A single visible row in the flattened tree display.
@@ -42,13 +42,6 @@ pub enum InputMode {
     PendingPaste,
     /// Waiting for the direction key after the first `a` (`PendingAdd`).
     PendingAdd,
-    /// Detail overlay shown for the selected node.
-    Detail {
-        /// Currently highlighted extra-field row index.
-        selected: usize,
-        /// Copy confirmation alert text, if any.
-        alert: Option<String>,
-    },
     /// Add/Edit form. `node_id` distinguishes Edit (`Some`) from Add (`None`).
     Form(FormState),
     /// Popup for selecting a field type to add (login, password, custom,
