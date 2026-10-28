@@ -16,7 +16,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::TreeAction;
-use super::chrome::make_overlay_area;
+use super::chrome::{centered_rect, make_overlay_area};
 use crate::cursor::{
     backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
     selected_span,
@@ -793,12 +793,7 @@ impl Detail {
         };
         let items = picker_items(form);
 
-        let overlay_area = Rect {
-            x: area.width / 4,
-            y: area.height / 2 - 4,
-            width: area.width / 2,
-            height: 8,
-        };
+        let overlay_area = centered_rect(area, area.width / 2, 8);
 
         let block = Block::default()
             .title(texts::OVERLAY_SELECT_FIELD_TYPE)
@@ -826,12 +821,7 @@ impl Detail {
             return;
         };
 
-        let overlay_area = Rect {
-            x: area.width / 4,
-            y: area.height / 2 - 2,
-            width: area.width / 2,
-            height: 4,
-        };
+        let overlay_area = centered_rect(area, area.width / 2, 4);
 
         let block = Block::default()
             .title(texts::OVERLAY_CUSTOM_FIELD_NAME)
@@ -869,12 +859,7 @@ impl Detail {
             .map(|ef| ef.field_type.label())
             .unwrap_or_default();
 
-        let overlay_area = Rect {
-            x: area.width / 4,
-            y: area.height / 2 - 2,
-            width: area.width / 2,
-            height: 4,
-        };
+        let overlay_area = centered_rect(area, area.width / 2, 4);
 
         let block = Block::default()
             .title(texts::OVERLAY_CONFIRM_DELETE)
@@ -1418,12 +1403,7 @@ fn render_symbol_checklist_overlay(frame: &mut Frame, area: Rect, modal: &Genera
 
 /// Draws the transient "copied" confirmation over `area`.
 fn render_copy_alert(frame: &mut Frame, area: Rect) {
-    let overlay_area = Rect {
-        x: area.width / 3,
-        y: area.height / 2 - 2,
-        width: area.width / 3,
-        height: 4,
-    };
+    let overlay_area = centered_rect(area, area.width / 3, 4);
 
     let block = Block::default()
         .title(texts::OVERLAY_COPIED)

@@ -6,7 +6,7 @@ use crate::theming::{ElementStyle, SPINNER_TICK, paint_background, render_status
 use crate::tree::node::Node;
 use crate::tree::widget::{
     AddPosition, Detail, ExportWizard, Help, InputMode, Modal, SaveExit, SaveState, TreeAction,
-    TreeState, TreeWidget, execute,
+    TreeState, TreeWidget, centered_rect, execute,
 };
 use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
@@ -676,12 +676,7 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
 }
 
 fn render_search_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
-    let overlay_area = Rect {
-        x: area.width / 4,
-        y: area.height / 2 - 1,
-        width: area.width / 2,
-        height: 3,
-    };
+    let overlay_area = centered_rect(area, area.width / 2, 3);
 
     let block = Block::default()
         .title(texts::OVERLAY_SEARCH)
@@ -749,12 +744,7 @@ fn render_save_error_overlay(frame: &mut Frame, area: Rect, message: &str) {
 ///
 /// The confirm/dismiss hint lives in the status bar (see [`status_bar_parts`]).
 fn render_discard_confirm_overlay(frame: &mut Frame, area: Rect) {
-    let overlay_area = Rect {
-        x: area.width / 6,
-        y: area.height / 2 - 2,
-        width: area.width * 2 / 3,
-        height: 4,
-    };
+    let overlay_area = centered_rect(area, area.width * 2 / 3, 4);
 
     let block = Block::default()
         .title(texts::OVERLAY_SAVE_ERROR)
@@ -985,6 +975,26 @@ mod tests {
         handle_form(key(KeyCode::Esc), &mut state);
         assert!(state.modal.is_none());
         assert!(matches!(state.mode, InputMode::Normal));
+    }
+
+    #[test]
+    fn overlays_render_on_a_terminal_smaller_than_the_overlay() {
+        // A short terminal used to underflow `area.height / 2 - n` and panic
+        // while drawing an overlay; every overlay now centres with saturating
+        // arithmetic.
+        let mut terminal = ratatui::Terminal::new(TestBackend::new(4, 2)).unwrap();
+
+        let mut alert = TreeState::new(Node::new("Root"));
+        alert.modal = Some(Modal::alert("boom"));
+        terminal.draw(|f| ui(f, &mut alert)).unwrap();
+
+        let mut search = TreeState::new(Node::new("Root"));
+        search.mode = InputMode::Search;
+        terminal.draw(|f| ui(f, &mut search)).unwrap();
+
+        let mut discard = TreeState::new(Node::new("Root"));
+        discard.save_exit = SaveExit::ConfirmDiscard;
+        terminal.draw(|f| ui(f, &mut discard)).unwrap();
     }
 
     #[test]

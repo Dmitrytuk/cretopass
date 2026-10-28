@@ -10,6 +10,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::TreeAction;
+use super::chrome::centered_rect;
 use crate::theming::{ElementStyle, texts};
 use crate::tree::widget::TreeState;
 
@@ -28,12 +29,7 @@ impl Alert {
 
     /// Draws the message centred over `area`.
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let overlay_area = Rect {
-            x: area.width / 6,
-            y: area.height / 2 - 2,
-            width: area.width * 2 / 3,
-            height: 4,
-        };
+        let overlay_area = centered_rect(area, area.width * 2 / 3, 4);
 
         let block = Block::default()
             .title(texts::ALERT_TITLE)

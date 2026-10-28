@@ -19,6 +19,8 @@ pub use detail::Detail;
 pub use export::ExportWizard;
 pub use help::Help;
 
+pub(crate) use chrome::centered_rect;
+
 /// Items the tree's tests reach for; the production build uses them only inside
 /// this module tree.
 #[cfg(test)]

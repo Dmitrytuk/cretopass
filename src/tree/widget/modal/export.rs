@@ -12,6 +12,7 @@ use ratatui::text::{Line, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::TreeAction;
+use super::chrome::centered_rect;
 use crate::cursor::selected_span;
 use crate::file_handling::export::ExportFormat;
 use crate::theming::{Action, ElementStyle, texts};
@@ -132,12 +133,7 @@ impl ExportWizard {
 
     /// Draws the scope step.
     fn render_scope(&self, frame: &mut Frame, area: Rect) {
-        let overlay_area = Rect {
-            x: area.width / 4,
-            y: area.height / 2 - 3,
-            width: area.width / 2,
-            height: 6,
-        };
+        let overlay_area = centered_rect(area, area.width / 2, 6);
 
         let block = Block::default()
             .title(texts::OVERLAY_EXPORT_NODE)
@@ -160,12 +156,7 @@ impl ExportWizard {
 
     /// Draws the format step.
     fn render_format(&self, frame: &mut Frame, area: Rect) {
-        let overlay_area = Rect {
-            x: area.width / 4,
-            y: area.height / 2 - 3,
-            width: area.width / 2,
-            height: 7,
-        };
+        let overlay_area = centered_rect(area, area.width / 2, 7);
 
         let block = Block::default()
             .title(texts::EXPORT_SELECT_TITLE)
