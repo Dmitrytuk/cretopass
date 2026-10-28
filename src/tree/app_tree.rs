@@ -1180,7 +1180,7 @@ mod tests {
         assert!(detail(&state).is_select_field_type());
 
         // Custom is offered last; Description sits before it.
-        let items = picker_items(form_of(&state));
+        let items = picker_items();
         assert_eq!(items.last(), Some(&PickerItem::Custom));
 
         let desc_index = items

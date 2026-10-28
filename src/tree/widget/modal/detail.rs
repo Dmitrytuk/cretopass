@@ -164,15 +164,18 @@ impl Detail {
                 None
             }
             Action::CopyField => {
+                // With nothing selected (a node that has no extra fields) `y` is
+                // a no-op: never claim success without a value to copy.
                 let text = state.current_node_ref().and_then(|node| {
                     node.extra_fields
                         .get(self.selected)
                         .map(|ef| ef.value.clone())
-                });
+                })?;
                 self.alert = Some(texts::COPY_CHECK.to_string());
-                match text {
-                    Some(text) if !text.is_empty() => Some(TreeAction::CopyToClipboard { text }),
-                    _ => None,
+                if text.is_empty() {
+                    None
+                } else {
+                    Some(TreeAction::CopyToClipboard { text })
                 }
             }
             Action::EditNode => {
@@ -369,7 +372,7 @@ impl Detail {
             }
         };
         let mut form = self.form.take().expect("the form is open");
-        let items = picker_items(&form);
+        let items = picker_items();
         let selected = selected.min(items.len().saturating_sub(1));
 
         match Action::from_select_field_type(&key) {
@@ -457,7 +460,11 @@ impl Detail {
 
         match Action::from_custom_field_name(&key) {
             Action::Cancel => {
-                self.popup = DetailPopup::SelectFieldType { selected: 3 };
+                let custom = picker_items()
+                    .iter()
+                    .position(|item| *item == PickerItem::Custom)
+                    .unwrap_or(0);
+                self.popup = DetailPopup::SelectFieldType { selected: custom };
                 self.form = Some(form);
             }
             Action::Confirm => {
@@ -785,13 +792,13 @@ impl Detail {
 
     /// Draws the field-type picker.
     fn render_select_field_type(&self, frame: &mut Frame, area: Rect) {
-        let Some(form) = self.form.as_ref() else {
+        if self.form.is_none() {
             return;
-        };
+        }
         let DetailPopup::SelectFieldType { selected } = self.popup else {
             return;
         };
-        let items = picker_items(form);
+        let items = picker_items();
 
         let overlay_area = centered_rect(area, area.width / 2, 8);
 
@@ -1010,8 +1017,8 @@ impl PickerItem {
     }
 }
 
-/// Items offered by the field-type picker for the given form.
-pub(crate) fn picker_items(_form: &FormState) -> Vec<PickerItem> {
+/// Items offered by the field-type picker, in display order.
+pub(crate) fn picker_items() -> Vec<PickerItem> {
     vec![
         PickerItem::Login,
         PickerItem::Password,
@@ -1525,6 +1532,18 @@ mod tests {
         let mut state = TreeState::new(node);
         let _ = detail.handle_key(key(KeyCode::Char('y')), &mut state);
         assert_eq!(detail.alert.as_deref(), Some(texts::COPY_CHECK));
+    }
+
+    #[test]
+    fn no_field_skips_both_the_clipboard_and_the_alert() {
+        let mut detail = Detail::browse();
+        let mut state = TreeState::new(Node::new("Root"));
+        assert!(
+            detail
+                .handle_key(key(KeyCode::Char('y')), &mut state)
+                .is_none()
+        );
+        assert!(detail.alert.is_none());
     }
 
     #[test]
