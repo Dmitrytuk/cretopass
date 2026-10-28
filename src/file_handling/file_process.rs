@@ -73,8 +73,7 @@ pub fn validate_encrypted_file(path: &str) -> Result<Vec<u8>, FileHandlingError>
 
 /// Decrypts age-encrypted bytes with a passphrase and deserialises into a Node.
 pub fn decrypt_to_node(data: &[u8], passphrase: &str) -> Result<Node, FileHandlingError> {
-    let json = crypt::decrypt(data, passphrase)
-        .map_err(|e| FileHandlingError::Crypt(format!("decryption failed: {e}")))?;
+    let json = crypt::decrypt(data, passphrase).map_err(FileHandlingError::Crypt)?;
     json_to_node(&json).map_err(FileHandlingError::Serde)
 }
 
@@ -91,8 +90,7 @@ pub fn save_tree(root: &Node, path: &str, passphrase: &[u8]) -> Result<(), FileH
         .map_err(|_| FileHandlingError::InvalidPassphraseEncoding)?;
 
     let json = node_to_json(root)?;
-    let encrypted = crypt::encrypt(&json, passphrase_str)
-        .map_err(|e| FileHandlingError::Crypt(format!("encryption failed: {e}")))?;
+    let encrypted = crypt::encrypt(&json, passphrase_str).map_err(FileHandlingError::Crypt)?;
 
     let target = Path::new(path);
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
@@ -142,8 +140,7 @@ pub fn create_secret_file(path: &str, passphrase: &str) -> Result<Node, FileHand
 
     let node = Node::new(texts::DEFAULT_ROOT_NAME);
     let json = node_to_json(&node)?;
-    let encrypted = crypt::encrypt(&json, passphrase)
-        .map_err(|e| FileHandlingError::Crypt(format!("encryption failed: {e}")))?;
+    let encrypted = crypt::encrypt(&json, passphrase).map_err(FileHandlingError::Crypt)?;
     fs::write(path, &encrypted)?;
     Ok(node)
 }
@@ -253,6 +250,7 @@ pub fn probe_path_writable(path: &str) -> Result<(), FileHandlingError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypt::CryptError;
     use crate::file_handling::FileHandlingError;
     use crate::tree::node::{ExtraField, FieldType};
 
@@ -445,7 +443,24 @@ mod tests {
 
         let data = fs::read(&path).unwrap();
         let result = decrypt_to_node(&data, "wrong-pass");
-        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(FileHandlingError::Crypt(CryptError::WrongPassphrase))
+        ));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_decrypt_to_node_with_invalid_json_payload() {
+        let path = format!("/tmp/test_bad_json_{}.age", uuid::Uuid::new_v4());
+        // Encrypt bytes that decrypt fine but do not parse as a Node.
+        let encrypted = crypt::encrypt("not a node", "my-pass").unwrap();
+        fs::write(&path, &encrypted).unwrap();
+
+        let data = fs::read(&path).unwrap();
+        let result = decrypt_to_node(&data, "my-pass");
+        assert!(matches!(result, Err(FileHandlingError::Serde(_))));
 
         let _ = fs::remove_file(&path);
     }

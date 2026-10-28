@@ -16,7 +16,7 @@ audit I/O patterns.
 | `file_process.rs` | JSON serde, raw read/write, encrypted file ops, directory listing (visible or including hidden), save with atomic temp-file+rename, `.bak` backup, path probes, age-header detection |
 | `autosave.rs` | `Autosave`: one background writer thread with a latest-wins snapshot slot, generation numbers, `SaveEvent` notifications, panic containment, and flush-on-drop ([ADR 0010](../../../../docs/adr/0010-async-tree-autosave.md)) |
 | `disks.rs` | `DiskInfo` + `list_disks()`: cross-platform mounted-volume enumeration via `sysinfo`, with loop/squashfs filtering |
-| `error.rs` | `FileHandlingError` enum wrapping Io / Serde / Crypt errors + domain errors |
+| `error.rs` | `FileHandlingError` enum (+ `crypt::CryptError` for typed encryption/decryption failures) wrapping Io / Serde / typed crypt errors + domain errors |
 | `export.rs` | `ExportFormat` (JSON/XML/CSV), recursive XML serialization, flattened CSV export |
 | `import.rs` | `ImportFormat` detection, JSON/XML/CSV import with custom parsers, `build_tree_from_paths()` |
 

@@ -17,6 +17,7 @@ use crate::theming::texts;
 use crate::theming::{Palette, set_palette};
 use crate::vault::utils;
 
+mod errors;
 mod export;
 mod import;
 mod recent;

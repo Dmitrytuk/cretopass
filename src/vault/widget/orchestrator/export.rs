@@ -5,6 +5,7 @@ use crate::file_handling::export::ExportFormat;
 use crate::theming::texts;
 
 use super::super::{HomeState, Modal};
+use super::errors;
 /// Writes the open tree to a plain-text file beside the secret file, reporting
 /// the result in an alert.
 pub(super) fn export(state: &mut HomeState, format: ExportFormat) {
@@ -20,7 +21,7 @@ pub(super) fn export(state: &mut HomeState, format: ExportFormat) {
     state.modal = Some(
         match file_handling::export::export_tree(&node, &path, format) {
             Ok(out_path) => Modal::alert(format!("{}{}", texts::MSG_EXPORT_SUCCESS, out_path)),
-            Err(e) => Modal::alert(format!("{e}")),
+            Err(e) => Modal::alert(errors::message(&e)),
         },
     );
 }

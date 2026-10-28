@@ -1,0 +1,103 @@
+//! One place that turns a file error into the message a Home modal shows.
+//!
+//! The wording lives in [`texts`], but the *decision* of what a failure means to
+//! a user belongs here, at the orchestrator layer — `file_handling` stays
+//! presentation-free and `theming` stays a dependency-free leaf.
+
+use crate::crypt::CryptError;
+use crate::file_handling::FileHandlingError;
+use crate::theming::texts;
+
+/// The text a Home modal shows for `error`.
+///
+/// Only the outcomes a user can act on are named: a wrong master password, or a
+/// secret file that will not open. Everything else keeps its raw detail behind a
+/// generic prefix, so an unexpected failure is never shown blank.
+pub(super) fn message(error: &FileHandlingError) -> String {
+    match error {
+        FileHandlingError::Crypt(CryptError::WrongPassphrase) => {
+            texts::MSG_WRONG_MASTER_PW.to_string()
+        }
+        // A file that decrypts but does not hold a Node is as unreadable to the
+        // user as one whose header is damaged.
+        FileHandlingError::Crypt(CryptError::CorruptFile(_)) | FileHandlingError::Serde(_) => {
+            texts::MSG_DAMAGED_SECRET.to_string()
+        }
+        FileHandlingError::NotAnAgeFile | FileHandlingError::FileTooSmall => {
+            texts::MSG_NOT_SECRET_FILE.to_string()
+        }
+        FileHandlingError::Crypt(CryptError::EncryptionFailed(_)) => {
+            format!("{}{error}", texts::MSG_SAVE_FAILED)
+        }
+        FileHandlingError::PathNotWritable(_) => texts::MSG_CANNOT_WRITE.to_string(),
+        other => format!("{}{other}", texts::MSG_FILE_ERROR),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message_for(error: FileHandlingError) -> String {
+        message(&error)
+    }
+
+    #[test]
+    fn a_wrong_master_password_is_named_plainly() {
+        assert_eq!(
+            message_for(FileHandlingError::Crypt(CryptError::WrongPassphrase)),
+            texts::MSG_WRONG_MASTER_PW
+        );
+    }
+
+    #[test]
+    fn a_damaged_ciphertext_is_reported_as_damaged() {
+        assert_eq!(
+            message_for(FileHandlingError::Crypt(CryptError::CorruptFile(
+                "header is invalid".to_string()
+            ))),
+            texts::MSG_DAMAGED_SECRET
+        );
+    }
+
+    #[test]
+    fn a_decrypted_payload_that_is_not_a_node_is_reported_as_damaged() {
+        let error =
+            FileHandlingError::Serde(serde_json::from_str::<serde_json::Value>("{").unwrap_err());
+        assert_eq!(message_for(error), texts::MSG_DAMAGED_SECRET);
+    }
+
+    #[test]
+    fn a_file_that_is_not_an_age_file_is_reported_as_such() {
+        assert_eq!(
+            message_for(FileHandlingError::NotAnAgeFile),
+            texts::MSG_NOT_SECRET_FILE
+        );
+        assert_eq!(
+            message_for(FileHandlingError::FileTooSmall),
+            texts::MSG_NOT_SECRET_FILE
+        );
+    }
+
+    #[test]
+    fn a_failed_encryption_reads_as_a_failed_save() {
+        let error =
+            FileHandlingError::Crypt(CryptError::EncryptionFailed("device full".to_string()));
+        let expected = format!("{}{}", texts::MSG_SAVE_FAILED, error);
+        assert_eq!(message_for(error), expected);
+    }
+
+    #[test]
+    fn a_path_that_cannot_be_written_is_reported_as_such() {
+        let error = FileHandlingError::PathNotWritable("/root/vault.age".to_string());
+        assert_eq!(message_for(error), texts::MSG_CANNOT_WRITE);
+    }
+
+    #[test]
+    fn an_unexpected_failure_keeps_its_detail_behind_a_prefix() {
+        let error = FileHandlingError::Io(std::io::Error::other("disk on fire"));
+        let shown = message_for(error);
+        assert!(shown.starts_with(texts::MSG_FILE_ERROR));
+        assert!(shown.contains("disk on fire"));
+    }
+}

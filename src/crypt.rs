@@ -1,3 +1,3 @@
 mod core;
 
-pub use self::core::{decrypt, encrypt};
+pub use self::core::{CryptError, decrypt, encrypt};

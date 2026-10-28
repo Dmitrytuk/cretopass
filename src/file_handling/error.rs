@@ -1,10 +1,12 @@
 use std::fmt;
 
+use crate::crypt::CryptError;
+
 #[derive(Debug)]
 pub enum FileHandlingError {
     Io(std::io::Error),
     Serde(serde_json::Error),
-    Crypt(String),
+    Crypt(CryptError),
     FileTooLarge { size: u64, max: u64 },
     FileTooSmall,
     NotAnAgeFile,
@@ -19,7 +21,7 @@ impl fmt::Display for FileHandlingError {
         match self {
             Self::Io(e) => write!(f, "io: {e}"),
             Self::Serde(e) => write!(f, "json: {e}"),
-            Self::Crypt(e) => write!(f, "crypt: {e}"),
+            Self::Crypt(e) => write!(f, "{e}"),
             Self::FileTooLarge { size, max } => {
                 write!(f, "file too large: {size} bytes (max {max} bytes)")
             }
