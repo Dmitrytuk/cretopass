@@ -4,7 +4,7 @@ use ratatui::layout::Rect;
 
 /// A centred overlay tall enough for `base_content` lines plus one row per extra
 /// field, clamped to the terminal.
-pub fn make_overlay_area(area: Rect, extra_fields_len: usize, base_content: u16) -> Rect {
+pub(crate) fn make_overlay_area(area: Rect, extra_fields_len: usize, base_content: u16) -> Rect {
     let n = extra_fields_len as u16;
     let content_height = base_content.saturating_add(n);
     let overlay_height = (content_height + 2).min(area.height.saturating_sub(2));
@@ -20,7 +20,7 @@ pub fn make_overlay_area(area: Rect, extra_fields_len: usize, base_content: u16)
 ///
 /// Both dimensions are clamped to `area` and centred with saturating arithmetic,
 /// so a terminal smaller than the overlay can never underflow or overflow.
-pub fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
+pub(crate) fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
     let width = width.min(area.width);
     let height = height.min(area.height);
     Rect {

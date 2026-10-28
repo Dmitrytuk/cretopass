@@ -30,7 +30,7 @@ enum Step {
 
 /// The Export modal: pick the scope, then the format.
 #[derive(Debug)]
-pub struct ExportWizard {
+pub(crate) struct ExportWizard {
     /// The Node being exported, captured when the wizard opened.
     node: Node,
     /// The current step.
@@ -43,7 +43,7 @@ pub struct ExportWizard {
 
 impl ExportWizard {
     /// A wizard for exporting `node`, starting on the scope step.
-    pub fn new(node: Node) -> Self {
+    pub(crate) fn new(node: Node) -> Self {
         Self {
             node,
             step: Step::Scope,
@@ -54,7 +54,11 @@ impl ExportWizard {
 
     /// Reads a key: [`TreeAction::Close`] on `Esc`, [`TreeAction::Export`] when
     /// the format is confirmed.
-    pub fn handle_key(&mut self, key: KeyEvent, _state: &mut TreeState) -> Option<TreeAction> {
+    pub(crate) fn handle_key(
+        &mut self,
+        key: KeyEvent,
+        _state: &mut TreeState,
+    ) -> Option<TreeAction> {
         match self.step {
             Step::Scope => match Action::from_select_field_type(&key) {
                 Action::Cancel => Some(TreeAction::Close),
@@ -108,7 +112,7 @@ impl ExportWizard {
     }
 
     /// Draws the active step over `area`.
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
+    pub(crate) fn render(&self, frame: &mut Frame, area: Rect) {
         match self.step {
             Step::Scope => self.render_scope(frame, area),
             Step::Format => self.render_format(frame, area),
@@ -116,7 +120,7 @@ impl ExportWizard {
     }
 
     /// Badge and hint for the tree status bar while the wizard is open.
-    pub fn status_parts(&self) -> (&'static str, ElementStyle, &'static str) {
+    pub(crate) fn status_parts(&self) -> (&'static str, ElementStyle, &'static str) {
         match self.step {
             Step::Scope => (
                 texts::MODE_EXPORT_SELECT,

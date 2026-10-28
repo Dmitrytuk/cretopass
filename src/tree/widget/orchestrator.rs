@@ -15,7 +15,7 @@ use crate::tree::node::Node;
 
 /// Performs `action`. The modal that produced it has already been taken out of
 /// [`TreeState`], so dismissing it is the act of not putting it back.
-pub fn execute(state: &mut TreeState, action: TreeAction) -> io::Result<()> {
+pub(crate) fn execute(state: &mut TreeState, action: TreeAction) -> io::Result<()> {
     match action {
         TreeAction::Close => Ok(()),
         TreeAction::CopyToClipboard { text } => {

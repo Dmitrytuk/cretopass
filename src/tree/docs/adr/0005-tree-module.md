@@ -226,7 +226,7 @@ for the worker contract and the latest-wins rationale.
 
 - `find_parent_mut()` uses `any()` on children ids — does not check root itself.
 - `insert_after()` finds parent, inserts at `pos+1`.
-- `paste_child()` inserts as first child.
+- `paste_child()` inserts as last child.
 - Export formats: JSON (serde), XML (hand-rolled recursive with escaping), CSV (flattened with `path > child` hierarchy).
 
 ## Dependencies

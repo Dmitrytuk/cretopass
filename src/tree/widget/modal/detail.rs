@@ -37,7 +37,7 @@ const SYMBOL_COLUMNS: usize = 3;
 
 /// The Detail modal: browse a selected Node's ExtraFields, copy a value, or edit.
 #[derive(Debug, Default)]
-pub struct Detail {
+pub(crate) struct Detail {
     /// Highlighted extra-field row while browsing.
     selected: usize,
     /// Copy-confirmation alert text, if any. The next key dismisses it.
@@ -81,7 +81,7 @@ enum Screen {
 
 impl Detail {
     /// A modal browsing the selected Node, with no Form open.
-    pub fn browse() -> Self {
+    pub(crate) fn browse() -> Self {
         Self::default()
     }
 
@@ -97,7 +97,7 @@ impl Detail {
     }
 
     /// A modal creating a new Node in its Form Popup.
-    pub fn adding() -> Self {
+    pub(crate) fn adding() -> Self {
         Self {
             selected: 0,
             alert: None,
@@ -110,7 +110,11 @@ impl Detail {
     ///
     /// Only effects outside the process become actions: [`TreeAction::Close`] to
     /// dismiss the modal, [`TreeAction::CopyToClipboard`] on a copy.
-    pub fn handle_key(&mut self, key: KeyEvent, state: &mut TreeState) -> Option<TreeAction> {
+    pub(crate) fn handle_key(
+        &mut self,
+        key: KeyEvent,
+        state: &mut TreeState,
+    ) -> Option<TreeAction> {
         match self.screen() {
             Screen::Browse => self.handle_browse(key, state),
             Screen::Form => self.handle_form(key, state),
@@ -722,7 +726,7 @@ impl Detail {
     }
 
     /// Draws the active screen over `area`.
-    pub fn render(&self, frame: &mut Frame, area: Rect, state: &TreeState) {
+    pub(crate) fn render(&self, frame: &mut Frame, area: Rect, state: &TreeState) {
         match self.screen() {
             Screen::Browse => self.render_browse(frame, area, state),
             Screen::Form => self.render_form(frame, area, state),
@@ -893,7 +897,7 @@ impl Detail {
     }
 
     /// Badge and hint for the tree status bar while the modal is open.
-    pub fn status_parts(&self, root: &Node) -> (&'static str, ElementStyle, &'static str) {
+    pub(crate) fn status_parts(&self, root: &Node) -> (&'static str, ElementStyle, &'static str) {
         match self.screen() {
             Screen::Browse => (
                 texts::MODE_DETAIL,
@@ -1361,8 +1365,7 @@ fn render_generate_password_overlay(frame: &mut Frame, area: Rect, modal: &Gener
 fn render_symbol_checklist_overlay(frame: &mut Frame, area: Rect, modal: &GeneratorModal) {
     let rows = u16::try_from(generator::SYMBOLS.len().div_ceil(SYMBOL_COLUMNS))
         .expect("symbol checklist rows fit in a terminal height");
-    let content_height = rows;
-    let overlay_height = (content_height + 2).min(area.height);
+    let overlay_height = (rows + 2).min(area.height);
     let width = u16::try_from(SYMBOL_COLUMNS * 9)
         .expect("symbol checklist width fits in a terminal")
         .min(area.width);
