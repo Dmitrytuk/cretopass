@@ -86,7 +86,8 @@ impl Detail {
     }
 
     /// A modal editing `node` in its Form Popup.
-    pub fn editing(node: &Node) -> Self {
+    #[cfg(test)]
+    pub(crate) fn editing(node: &Node) -> Self {
         Self {
             selected: 0,
             alert: None,
