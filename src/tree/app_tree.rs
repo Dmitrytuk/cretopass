@@ -1543,7 +1543,7 @@ mod tests {
         // front of the hint, so the hints must not grow past the widest one the
         // Tree already ships (`HINT_TREE_PASTE`). This is a ceiling, not a
         // terminal-width guarantee.
-        const BUDGET: usize = 90;
+        const BUDGET: usize = 82;
         let hints = [
             texts::HINT_TREE,
             texts::HINT_TREE_PASTE,
@@ -1573,6 +1573,12 @@ mod tests {
             texts::HINT_SAVE_EXIT_BLOCKED,
             texts::HINT_DISCARD_CONFIRM,
             texts::HINT_HELP,
+            texts::HINT_EXPORT_NODE_SELECT,
+            texts::HINT_EXPORT_NODE_FORMAT,
+            texts::HINT_PENDING_EXPORT,
+            texts::HINT_SHARE_SCOPE,
+            texts::HINT_SHARE_PASSPHRASE,
+            texts::HINT_SHARE_NO_PASSPHRASE,
         ];
         for hint in hints {
             assert!(
