@@ -144,18 +144,18 @@ pub const STATUS_SAVING: &str = "Saving";
 pub const STATUS_SAVE_FAILED: &str = "Save failed";
 
 pub const HINT_TREE: &str =
-    "j/↓ k/↑:nav  h/← l/→:fold  d:cut  a:add  ^E:e/s  /:search  H:home  ?:help  q:quit";
+    "j/↓ k/↑:nav  h/← l/→:fold  d:cut  a:add  /:search  H:home  ?:help  q:quit";
 /// Tree hint shown while the cut buffer holds a node ready to paste.
 pub const HINT_TREE_PASTE: &str =
-    "j/↓ k/↑:nav  h/← l/→:fold  d:cut  p:paste  a:add  ^E:e/s  /:search  H:home  ?:help  q:quit";
+    "j/↓ k/↑:nav  h/← l/→:fold  d:cut  p:paste  a:add  /:search  H:home  ?:help  q:quit";
 /// Tree hint shown when the Root is selected: it has no sibling slot, so
 /// `d:cut` is not offered.
 pub const HINT_TREE_ROOT: &str =
-    "j/↓ k/↑:nav  h/← l/→:fold  a:add  ^E:e/s  /:search  H:home  ?:help  q:quit";
+    "j/↓ k/↑:nav  h/← l/→:fold  a:add  /:search  H:home  ?:help  q:quit";
 /// Root variant of [`HINT_TREE_PASTE`]: pasting a child into the Root still
 /// applies, pasting a sibling does not.
 pub const HINT_TREE_ROOT_PASTE: &str =
-    "j/↓ k/↑:nav  h/← l/→:fold  p:paste  a:add  ^E:e/s  /:search  H:home  ?:help  q:quit";
+    "j/↓ k/↑:nav  h/← l/→:fold  p:paste  a:add  /:search  H:home  ?:help  q:quit";
 pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
 pub const HINT_PENDING_CUT: &str = "d:cut  Esc:cancel";
 pub const HINT_PASTE: &str = "p:after  P:before  l/→:child  Esc:cancel";

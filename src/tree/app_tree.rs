@@ -1541,9 +1541,8 @@ mod tests {
     fn tree_hints_stay_within_the_shipped_width() {
         // The status bar is one unwrapped line and the mode badge is drawn in
         // front of the hint, so the hints must not grow past the widest one the
-        // Tree already ships (`HINT_TREE_PASTE`, which now also advertises the
-        // `^E` export/share prefix). This is a ceiling, not a terminal-width
-        // guarantee.
+        // Tree already ships (`HINT_TREE_PASTE`). This is a ceiling, not a
+        // terminal-width guarantee.
         const BUDGET: usize = 90;
         let hints = [
             texts::HINT_TREE,
