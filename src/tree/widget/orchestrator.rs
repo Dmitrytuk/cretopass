@@ -9,8 +9,10 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use super::modal::TreeAction;
-use super::{ExportDestination, Modal, TreeState};
+use super::{ExportDestination, Modal, ShareDestination, SharePassphrase, TreeState};
 use crate::file_handling::export::{ExportFormat, export_tree};
+use crate::file_handling::share::share_tree;
+use crate::share::ShareScope;
 use crate::theming::texts;
 use crate::tree::node::Node;
 
@@ -40,6 +42,25 @@ pub(crate) fn execute(state: &mut TreeState, action: TreeAction) -> io::Result<(
             export(state, node, include_children, format, &path);
             Ok(())
         }
+        TreeAction::BeginShareDestination { node, scope } => {
+            open_share_destination(state, node, scope);
+            Ok(())
+        }
+        TreeAction::BeginSharePassphrase { node, scope, dest } => {
+            state.modal = Some(Modal::SharePassphrase(Box::new(SharePassphrase::new(
+                node, scope, dest,
+            ))));
+            Ok(())
+        }
+        TreeAction::Share {
+            node,
+            scope,
+            dest,
+            passphrase,
+        } => {
+            share(state, node, scope, &dest, &passphrase);
+            Ok(())
+        }
     }
 }
 
@@ -67,6 +88,20 @@ fn open_export_destination(
     state.modal = Some(Modal::ExportDestination(Box::new(destination)));
 }
 
+/// Opens the File Browser to name the folder a share bundle of `node` is written
+/// into.
+///
+/// The open secret file seeds the suggested folder name and the starting
+/// directory; the browser falls back to its session memory when there is none.
+fn open_share_destination(state: &mut TreeState, node: Node, scope: ShareScope) {
+    let destination = {
+        let base_path = state.active_vault_path.as_deref().map(Path::new);
+        ShareDestination::new(node, scope, base_path, &state.browser_session)
+    };
+
+    state.modal = Some(Modal::ShareDestination(Box::new(destination)));
+}
+
 /// Writes `node` to `path` as `format` and reports the outcome as an alert.
 fn export(
     state: &mut TreeState,
@@ -85,6 +120,32 @@ fn export(
 
     state.modal = Some(match export_tree(&export_node, path, format) {
         Ok(out_path) => Modal::success(format!("{}{}", texts::MSG_EXPORT_NODE_SUCCESS, out_path)),
+        Err(error) => Modal::error(format!("{error}")),
+    });
+}
+
+/// Writes a share bundle of `node` into `path` and reports the outcome as an
+/// alert.
+///
+/// `WholeFile` shares the open Root rather than the Node selected when the wizard
+/// opened, and names the bundle after the file's stem alone.
+fn share(state: &mut TreeState, node: Node, scope: ShareScope, path: &str, passphrase: &str) {
+    let (bundle_root, node_name) = match scope {
+        ShareScope::Branch => (node.clone(), Some(node.name.clone())),
+        ShareScope::WholeFile => (state.root.clone(), None),
+    };
+    let base_path = state.active_vault_path.as_deref().map(Path::new);
+
+    let result = share_tree(
+        &bundle_root,
+        Path::new(path),
+        base_path,
+        node_name.as_deref(),
+        passphrase,
+    );
+
+    state.modal = Some(match result {
+        Ok(bundle) => Modal::success(format!("{}{}", texts::MSG_SHARE_SUCCESS, bundle.display())),
         Err(error) => Modal::error(format!("{error}")),
     });
 }

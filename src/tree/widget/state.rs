@@ -35,6 +35,8 @@ pub enum InputMode {
     PendingPaste,
     /// Waiting for the direction key after the first `a` (`PendingAdd`).
     PendingAdd,
+    /// Waiting for the export/share key after `Ctrl+E` (`PendingExport`).
+    PendingExport,
 }
 
 /// Where a pending "Add" form should place the newly created node.

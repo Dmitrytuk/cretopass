@@ -26,7 +26,8 @@ pub use state::{InputMode, TreeState};
 // Internal API: the tree event loop and the modals.
 pub(crate) use form::{FormFocus, FormPending, FormRow, FormState, GeneratorModal};
 pub(crate) use modal::{
-    Detail, ExportDestination, ExportWizard, Help, Modal, TreeAction, centered_rect,
+    Detail, ExportDestination, ExportWizard, Help, Modal, ShareDestination, SharePassphrase,
+    ShareWizard, TreeAction, centered_rect,
 };
 pub(crate) use orchestrator::execute;
 pub(crate) use save::SaveExit;

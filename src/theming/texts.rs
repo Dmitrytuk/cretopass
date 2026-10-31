@@ -260,6 +260,7 @@ pub const HINT_SHARE_PASSPHRASE: &str = "Tab/↑/↓:switch  Ctrl+S:show  Enter:
 pub const PROMPT_SHARE_NO_PASSPHRASE: &str = "Create the share bundle without a password?";
 pub const HINT_SHARE_NO_PASSPHRASE: &str = "y/Enter:yes  any key:no";
 pub const MODE_SHARE_CONFIRM: &str = "CONFIRM";
+pub const OVERLAY_SHARE_CONFIRM: &str = " Confirm Share ";
 
 pub const MSG_SHARE_SUCCESS: &str = "Share bundle written at ";
 pub const MSG_CANNOT_SHARE_INTO_FILE: &str = "Cannot share into an existing file";

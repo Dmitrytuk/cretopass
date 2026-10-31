@@ -6,8 +6,8 @@ use crate::theming::Action;
 use crate::theming::{ElementStyle, SPINNER_TICK, paint_background, render_status_bar, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::{
-    AddPosition, Detail, ExportWizard, Help, InputMode, Modal, SaveExit, SaveState, TreeAction,
-    TreeState, TreeWidget, centered_rect, execute,
+    AddPosition, Detail, ExportWizard, Help, InputMode, Modal, SaveExit, SaveState, ShareWizard,
+    TreeAction, TreeState, TreeWidget, centered_rect, execute,
 };
 use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
@@ -390,6 +390,7 @@ fn dispatch_key(key: event::KeyEvent, state: &mut TreeState) {
         InputMode::PendingCut => handle_pending_cut(key, state),
         InputMode::PendingPaste => handle_pending_paste(key, state),
         InputMode::PendingAdd => handle_pending_add(key, state),
+        InputMode::PendingExport => handle_pending_export(key, state),
     }
 }
 
@@ -412,8 +413,14 @@ fn handle_modal_key(key: event::KeyEvent, state: &mut TreeState) -> io::Result<(
         Some(action) => {
             // The File Browser remembers where it was for its next opening, the
             // same way Home captures it when the browser reports an action.
-            if let Modal::ExportDestination(destination) = &modal {
-                state.browser_session = destination.session();
+            match &modal {
+                Modal::ExportDestination(destination) => {
+                    state.browser_session = destination.session();
+                }
+                Modal::ShareDestination(destination) => {
+                    state.browser_session = destination.session();
+                }
+                _ => {}
             }
             let keeps_produced = !matches!(action, TreeAction::Close);
             let result = execute(state, action);
@@ -507,11 +514,7 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
             state.mode = InputMode::Search;
         }
         Action::ExportStart => {
-            // Temporary: until the `PendingExport` prefix lands, `Ctrl+E` still
-            // opens the export wizard directly.
-            if let Some(node) = state.current_node_ref() {
-                state.modal = Some(Modal::Export(ExportWizard::new(node.clone())));
-            }
+            state.mode = InputMode::PendingExport;
         }
         Action::Cancel => {
             state.clear_search();
@@ -570,6 +573,26 @@ fn handle_pending_add(key: event::KeyEvent, state: &mut TreeState) {
     state.modal = Some(Modal::Detail(Box::new(Detail::adding())));
 }
 
+/// Handles the `Ctrl+E` prefix: `e` opens the export wizard, `s` the share
+/// wizard, anything else cancels. Like the `d`/`a`/`p` prefixes, the mode ends
+/// whichever key arrives.
+fn handle_pending_export(key: event::KeyEvent, state: &mut TreeState) {
+    match Action::from_pending_export(&key) {
+        Action::ExportNode => {
+            if let Some(node) = state.current_node_ref() {
+                state.modal = Some(Modal::Export(ExportWizard::new(node.clone())));
+            }
+        }
+        Action::ShareNode => {
+            if let Some(node) = state.current_node_ref() {
+                state.modal = Some(Modal::Share(ShareWizard::new(node.clone())));
+            }
+        }
+        _ => {}
+    }
+    state.mode = InputMode::Normal;
+}
+
 fn handle_search(key: event::KeyEvent, state: &mut TreeState) {
     match Action::from_search(&key) {
         Action::ConfirmSearch => {
@@ -626,6 +649,9 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
             Modal::Detail(detail) => detail.render(frame, area, state),
             Modal::Export(wizard) => wizard.render(frame, area),
             Modal::ExportDestination(destination) => destination.render(frame, area),
+            Modal::Share(wizard) => wizard.render(frame, area),
+            Modal::ShareDestination(destination) => destination.render(frame, area),
+            Modal::SharePassphrase(prompt) => prompt.render(frame, area),
         }
         state.modal = Some(modal);
     }
@@ -695,6 +721,18 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, Cow<'_, s
                 let (mode, style, hint) = destination.status_parts();
                 (mode, style, Cow::Owned(hint))
             }
+            Modal::Share(wizard) => {
+                let (mode, style, hint) = wizard.status_parts();
+                (mode, style, Cow::Borrowed(hint))
+            }
+            Modal::ShareDestination(destination) => {
+                let (mode, style, hint) = destination.status_parts();
+                (mode, style, Cow::Owned(hint))
+            }
+            Modal::SharePassphrase(prompt) => {
+                let (mode, style, hint) = prompt.status_parts();
+                (mode, style, Cow::Borrowed(hint))
+            }
         };
     }
 
@@ -737,6 +775,11 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, Cow<'_, s
             } else {
                 texts::HINT_PENDING_ADD
             },
+        ),
+        InputMode::PendingExport => (
+            texts::MODE_PENDING_EXPORT,
+            ElementStyle::ModePendingExport,
+            texts::HINT_PENDING_EXPORT,
         ),
     };
     (mode, style, Cow::Borrowed(hint))
@@ -1579,7 +1622,12 @@ mod tests {
         let mut state = TreeState::new(Node::new("Root"));
         state.active_vault_path = Some(dir.path().join("vault.age").to_string_lossy().to_string());
 
-        dispatch_key(ctrl(KeyCode::Char('e')), &mut state); // open the export wizard
+        dispatch_key(ctrl(KeyCode::Char('e')), &mut state); // arm the prefix
+        assert!(
+            matches!(state.mode, InputMode::PendingExport),
+            "Ctrl+E must arm the export/share prefix"
+        );
+        dispatch_key(key(KeyCode::Char('e')), &mut state); // `e` -> export wizard
         dispatch_key(key(KeyCode::Enter), &mut state); // "this node" -> format
         dispatch_key(key(KeyCode::Enter), &mut state); // JSON -> destination
         assert!(
@@ -1595,6 +1643,79 @@ mod tests {
             "the export must be written where it was named"
         );
         assert!(matches!(state.modal, Some(Modal::Alert(_))));
+    }
+
+    #[test]
+    fn ctrl_e_s_opens_the_share_wizard() {
+        let mut state = TreeState::new(Node::new("Root"));
+
+        dispatch_key(ctrl(KeyCode::Char('e')), &mut state);
+        dispatch_key(key(KeyCode::Char('s')), &mut state);
+
+        assert!(matches!(state.modal, Some(Modal::Share(_))));
+        assert!(matches!(state.mode, InputMode::Normal));
+    }
+
+    #[test]
+    fn the_export_prefix_cancels_on_any_other_key() {
+        let mut state = TreeState::new(Node::new("Root"));
+        dispatch_key(ctrl(KeyCode::Char('e')), &mut state);
+
+        dispatch_key(key(KeyCode::Char('x')), &mut state);
+
+        assert!(matches!(state.mode, InputMode::Normal));
+        assert!(state.modal.is_none());
+    }
+
+    #[test]
+    fn the_pending_export_mode_advertises_its_hint() {
+        let mut state = TreeState::new(Node::new("Root"));
+        state.mode = InputMode::PendingExport;
+
+        let (mode, _, hint) = status_bar_parts(&state);
+
+        assert_eq!(mode, texts::MODE_PENDING_EXPORT);
+        assert_eq!(hint.as_ref(), texts::HINT_PENDING_EXPORT);
+    }
+
+    #[test]
+    fn sharing_a_branch_writes_a_bundle_where_it_was_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = TreeState::new(Node::new("Root"));
+        state.active_vault_path = Some(dir.path().join("vault.age").to_string_lossy().to_string());
+
+        dispatch_key(ctrl(KeyCode::Char('e')), &mut state); // arm the prefix
+        dispatch_key(key(KeyCode::Char('s')), &mut state); // `s` -> share wizard
+        dispatch_key(key(KeyCode::Enter), &mut state); // "this branch" -> destination
+        assert!(matches!(state.modal, Some(Modal::ShareDestination(_))));
+
+        dispatch_key(key(KeyCode::Char('n')), &mut state); // open the folder input
+        dispatch_key(key(KeyCode::Enter), &mut state); // commit the suggested folder
+        assert!(matches!(state.modal, Some(Modal::SharePassphrase(_))));
+
+        for c in "pw".chars() {
+            dispatch_key(key(KeyCode::Char(c)), &mut state);
+        }
+        dispatch_key(key(KeyCode::Tab), &mut state);
+        for c in "pw".chars() {
+            dispatch_key(key(KeyCode::Char(c)), &mut state);
+        }
+        dispatch_key(key(KeyCode::Enter), &mut state);
+
+        assert!(
+            matches!(state.modal, Some(Modal::Alert(_))),
+            "a successful share must be reported in an alert"
+        );
+
+        let bundle = dir.path().join("vault_Root");
+        let file = bundle.join("vault_Root.cretopass");
+        assert!(
+            crate::file_handling::is_age_file(&file),
+            "the bundle file must be encrypted"
+        );
+        assert!(bundle.join("HOW-TO-OPEN.txt").is_file());
+        let data = std::fs::read(&file).unwrap();
+        assert!(crate::file_handling::decrypt_to_node(&data, "pw").is_ok());
     }
 
     #[test]
