@@ -7,6 +7,7 @@ use ratatui::Terminal;
 use ratatui::backend::Backend;
 
 use crate::file_handling::share::share_tree;
+use crate::share::SharePassword;
 use crate::theming::Status;
 use crate::theming::texts;
 
@@ -30,7 +31,7 @@ pub(super) fn share<B: Backend>(
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
     dest: &str,
-    passphrase: &str,
+    passphrase: SharePassword,
 ) -> io::Result<()> {
     let Some(node) = state
         .active_vault
@@ -47,7 +48,6 @@ pub(super) fn share<B: Backend>(
         .as_ref()
         .and_then(|active| active.path.clone());
     let dest = dest.to_string();
-    let passphrase = passphrase.to_string();
 
     let outcome = run_with_spinner(terminal, state, Status::Saving, move || {
         share_tree(
@@ -55,7 +55,7 @@ pub(super) fn share<B: Backend>(
             Path::new(&dest),
             base_path.as_deref().map(Path::new),
             None,
-            &passphrase,
+            passphrase.as_bytes(),
         )
     })?;
 

@@ -149,7 +149,7 @@ mod tests {
         assert!(matches!(
             prompt.handle_key(key(KeyCode::Enter)),
             Some(HomeAction::Share { dest, passphrase })
-                if dest == "/tmp/bundle" && passphrase == "pw"
+                if dest == "/tmp/bundle" && passphrase.as_bytes() == b"pw"
         ));
     }
 

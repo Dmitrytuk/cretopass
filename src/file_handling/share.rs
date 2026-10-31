@@ -73,7 +73,7 @@ pub fn share_tree(
     dest_dir: &Path,
     base_path: Option<&Path>,
     node_name: Option<&str>,
-    passphrase: &str,
+    passphrase: &[u8],
 ) -> Result<PathBuf, FileHandlingError> {
     if dest_dir.exists() && !dest_dir.is_dir() {
         return Err(FileHandlingError::ShareError(format!(
@@ -86,7 +86,7 @@ pub fn share_tree(
 
     let file_name = format!("{}.{SHARE_FILE_EXT}", suggest_name(base_path, node_name));
     let file_path = dest_dir.join(&file_name);
-    save_tree(node, &file_path.to_string_lossy(), passphrase.as_bytes())?;
+    save_tree(node, &file_path.to_string_lossy(), passphrase)?;
 
     let instruction = instruction(&file_name, passphrase.is_empty());
     std::fs::write(dest_dir.join(SHARE_README_NAME), instruction).map_err(FileHandlingError::Io)?;
@@ -188,7 +188,7 @@ mod tests {
         let bundle = dir.path().join("bundle");
         let base = dir.path().join("vault.age");
 
-        let written = share_tree(&sample_node(), &bundle, Some(&base), None, "pw").unwrap();
+        let written = share_tree(&sample_node(), &bundle, Some(&base), None, b"pw").unwrap();
 
         assert_eq!(written, bundle);
         let file = bundle.join("vault.cretopass");
@@ -208,7 +208,7 @@ mod tests {
         let bundle = dir.path().join("vault_Work");
         let base = dir.path().join("vault.age");
 
-        share_tree(&sample_node(), &bundle, Some(&base), Some("Work"), "pw").unwrap();
+        share_tree(&sample_node(), &bundle, Some(&base), Some("Work"), b"pw").unwrap();
 
         assert!(bundle.join("vault_Work.cretopass").is_file());
     }
@@ -218,7 +218,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bundle = dir.path().join("bundle");
 
-        share_tree(&sample_node(), &bundle, None, None, "").unwrap();
+        share_tree(&sample_node(), &bundle, None, None, b"").unwrap();
 
         let file = bundle.join("secrets.cretopass");
         let data = std::fs::read(&file).unwrap();
@@ -231,8 +231,8 @@ mod tests {
         let bundle = dir.path().join("bundle");
         let base = dir.path().join("vault.age");
 
-        share_tree(&sample_node(), &bundle, Some(&base), None, "old").unwrap();
-        share_tree(&sample_node(), &bundle, Some(&base), None, "new").unwrap();
+        share_tree(&sample_node(), &bundle, Some(&base), None, b"old").unwrap();
+        share_tree(&sample_node(), &bundle, Some(&base), None, b"new").unwrap();
 
         let data = std::fs::read(bundle.join("vault.cretopass")).unwrap();
         assert!(
@@ -249,7 +249,7 @@ mod tests {
         let target = dir.path().join("vault.age");
         create_secret_file(&target.to_string_lossy(), "pw").unwrap();
 
-        let result = share_tree(&sample_node(), &target, None, None, "pw");
+        let result = share_tree(&sample_node(), &target, None, None, b"pw");
 
         assert!(matches!(result, Err(FileHandlingError::ShareError(_))));
         // The vault it refused to clobber is untouched.
@@ -263,7 +263,7 @@ mod tests {
         let target = dir.path().join("notes.txt");
         std::fs::write(&target, b"hello").unwrap();
 
-        let result = share_tree(&sample_node(), &target, None, None, "pw");
+        let result = share_tree(&sample_node(), &target, None, None, b"pw");
 
         assert!(matches!(result, Err(FileHandlingError::ShareError(_))));
         assert_eq!(std::fs::read(&target).unwrap(), b"hello");
@@ -274,7 +274,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bundle = dir.path().join("bundle");
 
-        share_tree(&sample_node(), &bundle, None, None, "hunter2").unwrap();
+        share_tree(&sample_node(), &bundle, None, None, b"hunter2").unwrap();
 
         let readme = std::fs::read_to_string(bundle.join(SHARE_README_NAME)).unwrap();
         assert!(!readme.contains("hunter2"));
@@ -285,7 +285,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bundle = dir.path().join("bundle");
 
-        share_tree(&sample_node(), &bundle, None, None, "pw").unwrap();
+        share_tree(&sample_node(), &bundle, None, None, b"pw").unwrap();
 
         let readme = std::fs::read_to_string(bundle.join(SHARE_README_NAME)).unwrap();
         assert!(
@@ -305,7 +305,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bundle = dir.path().join("bundle");
 
-        share_tree(&sample_node(), &bundle, None, None, "").unwrap();
+        share_tree(&sample_node(), &bundle, None, None, b"").unwrap();
 
         let readme = std::fs::read_to_string(bundle.join(SHARE_README_NAME)).unwrap();
         assert!(readme.contains(texts::SHARE_README_STEP_NO_PASSWORD));

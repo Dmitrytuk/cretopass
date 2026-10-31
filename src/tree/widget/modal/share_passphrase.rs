@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use super::TreeAction;
 use super::chrome::centered_rect;
 use crate::cursor::password_field_spans;
-use crate::share::{Passphrase, PassphraseSubmit};
+use crate::share::{Passphrase, PassphraseSubmit, SharePassword};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::TreeState;
@@ -57,7 +57,7 @@ impl SharePassphrase {
         if self.confirming_empty {
             return match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                    Some(self.action(String::new()))
+                    Some(self.action(SharePassword::empty()))
                 }
                 _ => {
                     self.confirming_empty = false;
@@ -85,7 +85,7 @@ impl SharePassphrase {
     }
 
     /// The share request for the typed `passphrase`.
-    fn action(&self, passphrase: String) -> TreeAction {
+    fn action(&self, passphrase: SharePassword) -> TreeAction {
         TreeAction::Share {
             node: self.node.clone(),
             include_children: self.include_children,
@@ -232,7 +232,7 @@ mod tests {
                 assert_eq!(node.name, "Work");
                 assert!(include_children);
                 assert_eq!(dest, "/tmp/vault_Work");
-                assert_eq!(passphrase, "pw");
+                assert_eq!(passphrase.as_bytes(), b"pw");
             }
             _ => panic!("expected a share action"),
         }

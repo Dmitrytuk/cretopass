@@ -34,6 +34,7 @@ pub use unlock::UnlockPrompt;
 use crossterm::event::KeyEvent;
 
 use crate::file_handling::export::ExportFormat;
+use crate::share::SharePassword;
 
 /// What the active modal asks the Home screen to do.
 ///
@@ -106,7 +107,10 @@ pub enum HomeAction {
     ReopenSharePassphrase { dest: String },
     /// Write the open vault as a share bundle into `dest`, encrypted with
     /// `passphrase`.
-    Share { dest: String, passphrase: String },
+    Share {
+        dest: String,
+        passphrase: SharePassword,
+    },
     /// Unlock and open `path` from the recent list.
     OpenRecent { path: String },
     /// Confirm dropping `path` from the recent list.

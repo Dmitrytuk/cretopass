@@ -41,6 +41,7 @@ use crossterm::event::KeyEvent;
 
 use super::TreeState;
 use crate::file_handling::export::ExportFormat;
+use crate::share::SharePassword;
 use crate::tree::node::Node;
 
 /// What the active modal asks the Tree screen to do.
@@ -82,7 +83,7 @@ pub(crate) enum TreeAction {
         node: Node,
         include_children: bool,
         dest: String,
-        passphrase: String,
+        passphrase: SharePassword,
     },
 }
 

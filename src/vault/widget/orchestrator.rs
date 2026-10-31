@@ -191,7 +191,7 @@ pub fn execute<B: Backend>(
             export(state, &path, format);
             Ok(())
         }
-        HomeAction::Share { dest, passphrase } => share(state, terminal, &dest, &passphrase),
+        HomeAction::Share { dest, passphrase } => share(state, terminal, &dest, passphrase),
         HomeAction::ToggleSetting(setting) => {
             apply_setting(state, setting);
             // The dialog stays open so the user sees the setting take effect.

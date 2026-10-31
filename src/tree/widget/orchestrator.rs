@@ -17,6 +17,7 @@ use super::modal::TreeAction;
 use super::{ExportDestination, Modal, ShareDestination, SharePassphrase, TreeState};
 use crate::file_handling::export::{ExportFormat, export_tree};
 use crate::file_handling::share::share_tree;
+use crate::share::SharePassword;
 use crate::theming::{Status, texts};
 use crate::tree::node::Node;
 
@@ -86,7 +87,7 @@ pub(crate) fn execute<B: Backend>(
             node,
             include_children,
             &dest,
-            &passphrase,
+            passphrase,
         ),
     }
 }
@@ -164,7 +165,7 @@ fn share<B: Backend>(
     node: Node,
     include_children: bool,
     path: &str,
-    passphrase: &str,
+    passphrase: SharePassword,
 ) -> io::Result<()> {
     // Mirror the export wizard: a node shared without its children drops them
     // before it is written.
@@ -178,15 +179,16 @@ fn share<B: Backend>(
     let node_name = Some(bundle_root.name.clone());
     let base_path = state.active_vault_path.clone();
     let path = path.to_string();
-    let passphrase = passphrase.to_string();
 
+    // The password is moved into the worker as a `SharePassword`, so the bytes
+    // are zeroized when the closure drops rather than lingering in a `String`.
     let result = run_with_busy(terminal, state, Status::Saving, draw, move || {
         share_tree(
             &bundle_root,
             Path::new(&path),
             base_path.as_deref().map(Path::new),
             node_name.as_deref(),
-            &passphrase,
+            passphrase.as_bytes(),
         )
     })?;
 

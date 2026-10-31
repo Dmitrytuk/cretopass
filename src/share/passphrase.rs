@@ -5,6 +5,12 @@
 //! bundle (which the screen must confirm), a mismatched pair is rejected, and
 //! anything else is usable. The screen drives the keys and renders the fields;
 //! this type only edits and validates what was typed.
+//!
+//! The typed password is handed out as a [`SharePassword`] — a zeroizing,
+//! self-redacting buffer — so it never travels through the screens as a bare
+//! `String` that outlives the prompt.
+
+use zeroize::Zeroizing;
 
 use crate::cursor::{SecretField, SecretFieldGroup};
 use crate::theming::{Action, texts};
@@ -22,11 +28,51 @@ pub enum PassphraseSubmit {
     Mismatch,
 }
 
+/// The password a share bundle is encrypted with.
+///
+/// The bytes live in a [`Zeroizing`] buffer, so they are wiped when the request
+/// carrying them is consumed, and they are redacted from [`Debug`] so a stray
+/// `{:?}` cannot print the recipient's password.
+#[derive(Default)]
+pub struct SharePassword(Zeroizing<Vec<u8>>);
+
+impl SharePassword {
+    /// An empty password, for the passwordless bundle a screen has confirmed.
+    pub fn empty() -> Self {
+        Self(Zeroizing::new(Vec::new()))
+    }
+
+    /// The password bytes, for the encryptor.
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+
+    /// Whether no password was set (a passwordless bundle).
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl std::fmt::Debug for SharePassword {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SharePassword").field(&"<redacted>").finish()
+    }
+}
+
 /// The password and its confirmation for a share bundle.
-#[derive(Debug, Clone)]
 pub struct Passphrase {
     fields: SecretFieldGroup,
     error: Option<String>,
+}
+
+impl std::fmt::Debug for Passphrase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The fields redact their own text.
+        f.debug_struct("Passphrase")
+            .field("fields", &self.fields)
+            .field("error", &self.error)
+            .finish()
+    }
 }
 
 impl Passphrase {
@@ -38,9 +84,11 @@ impl Passphrase {
         }
     }
 
-    /// The typed password (the first field).
-    pub fn password(&self) -> String {
-        self.fields.field(0).text().to_string()
+    /// The typed password (the first field), wrapped for zeroization.
+    pub fn password(&self) -> SharePassword {
+        SharePassword(Zeroizing::new(
+            self.fields.field(0).text().as_bytes().to_vec(),
+        ))
     }
 
     /// The rejection message, if the last confirmation failed.
@@ -129,7 +177,7 @@ mod tests {
         typed(&mut passphrase, "pw", "pw");
 
         assert_eq!(passphrase.submit(), PassphraseSubmit::Password);
-        assert_eq!(passphrase.password(), "pw");
+        assert_eq!(passphrase.password().as_bytes(), b"pw");
         assert!(passphrase.error().is_none());
     }
 
@@ -176,7 +224,7 @@ mod tests {
         passphrase.apply(Action::Cancel);
         passphrase.apply(Action::Confirm);
 
-        assert_eq!(passphrase.password(), "pw");
+        assert_eq!(passphrase.password().as_bytes(), b"pw");
     }
 
     #[test]
@@ -193,12 +241,27 @@ mod tests {
     }
 
     #[test]
+    fn debug_redacts_the_password() {
+        let mut passphrase = Passphrase::new();
+        typed(&mut passphrase, "hunter2", "hunter2");
+
+        assert!(
+            !format!("{passphrase:?}").contains("hunter2"),
+            "the pair must not print the password"
+        );
+        assert!(
+            !format!("{:?}", passphrase.password()).contains("hunter2"),
+            "the password must redact itself"
+        );
+    }
+
+    #[test]
     fn unknown_actions_are_ignored() {
         let mut passphrase = Passphrase::new();
         passphrase.apply(Action::InsertChar('x'));
         passphrase.apply(Action::None);
         passphrase.apply(Action::Quit);
 
-        assert_eq!(passphrase.password(), "x");
+        assert_eq!(passphrase.password().as_bytes(), b"x");
     }
 }

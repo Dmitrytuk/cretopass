@@ -8,4 +8,4 @@
 
 mod passphrase;
 
-pub use passphrase::{Passphrase, PassphraseSubmit};
+pub use passphrase::{Passphrase, PassphraseSubmit, SharePassword};

@@ -7,16 +7,35 @@
 //! code.
 
 use ratatui::text::Span;
+use zeroize::Zeroize;
 
 use super::core::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
 use crate::theming::ElementStyle;
 
 /// A single masked text field: its text and a byte-offset cursor
 /// ([ADR 0003](docs/adr/0003-cursor.md)).
-#[derive(Debug, Default, Clone)]
+///
+/// The text is a plaintext secret: it is wiped from the heap when the field is
+/// dropped ([`Zeroize`]) and redacted from [`Debug`], mirroring `SaveTarget`.
+#[derive(Default, Clone)]
 pub struct SecretField {
     text: String,
     cursor: usize,
+}
+
+impl std::fmt::Debug for SecretField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecretField")
+            .field("text", &"<redacted>")
+            .field("cursor", &self.cursor)
+            .finish()
+    }
+}
+
+impl Drop for SecretField {
+    fn drop(&mut self) {
+        self.text.zeroize();
+    }
 }
 
 impl SecretField {
@@ -69,11 +88,22 @@ impl SecretField {
 /// The prompts differ only in how many fields they hold: one for unlocking, two
 /// for creating a secret file or a share bundle, three for changing the master
 /// password.
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct SecretFieldGroup {
     fields: Vec<SecretField>,
     focused: usize,
     show: bool,
+}
+
+impl std::fmt::Debug for SecretFieldGroup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Each field redacts its own text; print the shape, not the contents.
+        f.debug_struct("SecretFieldGroup")
+            .field("fields", &self.fields.len())
+            .field("focused", &self.focused)
+            .field("show", &self.show)
+            .finish()
+    }
 }
 
 impl SecretFieldGroup {

@@ -18,6 +18,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
+use crate::share::SharePassword;
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
 
@@ -83,7 +84,7 @@ impl Confirmation {
             },
             ConfirmKind::ShareNoPassphrase { dest } => HomeAction::Share {
                 dest: dest.clone(),
-                passphrase: String::new(),
+                passphrase: SharePassword::empty(),
             },
         }
     }
