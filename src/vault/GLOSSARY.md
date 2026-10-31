@@ -19,7 +19,7 @@ _Avoid_: Prompt, Warning
 **About modal**: The Home Modal opened with `?`. Shows the app name, version, tagline, the Feedback channel link, the private security-reporting form, and the license. Dismissed by any key, like the Tree's help overlay.
 _Avoid_: Help screen, Info dialog, About overlay
 
-**File Browser**: Modal for navigating the filesystem to pick a secret file (Open), name a new one (Create), or select a file for import.
+**File Browser**: Modal for navigating the filesystem to pick a secret file (Open), name a new one (Create), select a file for import, or name the destination of an export.
 _Avoid_: File Picker, Directory Browser
 
 **File Browser session**: In-memory state shared by successive File Browser openings during one program run: the Last directory and whether Hidden entries are shown. Never written to config or disk.
@@ -61,6 +61,7 @@ _Avoid_: AppSettings, Preferences, App configuration
 **Recent secret files**: A deduplicated, most-recent-first list of previously opened secret file paths. Displayed in Home below the main actions. Selecting one skips the File Browser and opens the master password prompt directly.
 _Avoid_: Recent files, History
 
-**Export**: Writing a Node (with or without children) to a plain-text file in JSON, XML, or CSV format alongside the active secret file.
+**Export**: Writing a Node (with or without children) to a plain-text file in JSON, XML, or CSV format, at a destination the user names in the File Browser. An export never overwrites a secret file.
+_Avoid_: Dump, Backup
 
 **Import**: Reading a JSON, XML, or CSV file and merging the parsed Node tree as a child of the current Root. A timestamped wrapper node is created for multi-root imports.

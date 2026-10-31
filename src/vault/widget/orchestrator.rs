@@ -7,12 +7,13 @@
 //! sub-module per flow.
 
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 
 use crate::file_browser::FileBrowserMode;
+use crate::file_handling::export::ExportFormat;
 use crate::theming::texts;
 use crate::theming::{Palette, set_palette};
 use crate::vault::utils;
@@ -149,6 +150,10 @@ pub fn execute<B: Backend>(
             });
             Ok(())
         }
+        HomeAction::BeginExportDestination { format } => {
+            open_export_destination(state, format);
+            Ok(())
+        }
         HomeAction::OpenRecent { path } => open_recent(state, terminal, path),
         HomeAction::RequestDeleteRecent { path } => {
             let is_open = state
@@ -164,8 +169,8 @@ pub fn execute<B: Backend>(
             });
             Ok(())
         }
-        HomeAction::Export { format } => {
-            export(state, format);
+        HomeAction::Export { path, format } => {
+            export(state, &path, format);
             Ok(())
         }
         HomeAction::ToggleSetting(setting) => {
@@ -188,6 +193,29 @@ pub fn execute<B: Backend>(
         }
     }
 }
+
+/// Opens the File Browser to name the destination of an export of the open vault.
+///
+/// Without an open tree there is no directory, stem, or content to export, so the
+/// user gets the "no open file" alert instead of a browser that cannot finish.
+fn open_export_destination(state: &mut HomeState, format: ExportFormat) {
+    let browser = state.active_vault.as_ref().and_then(|active| {
+        let path = active.path.as_deref()?;
+        active.node.as_ref()?;
+        Some(BrowserModal::for_export(
+            format,
+            Some(Path::new(path)),
+            None,
+            &state.browser_session,
+        ))
+    });
+
+    state.modal = Some(match browser {
+        Some(browser) => Modal::FileBrowser(Box::new(browser)),
+        None => Modal::alert(texts::MSG_NO_OPEN_FILE.to_string()),
+    });
+}
+
 /// Opens the File Browser, seeded with the session memory and protecting the open
 /// vault from being overwritten or deleted.
 fn open_browser(state: &mut HomeState, mode: FileBrowserMode) {
@@ -198,5 +226,5 @@ fn open_browser(state: &mut HomeState, mode: FileBrowserMode) {
             .as_ref()
             .and_then(|active| active.path.as_ref().map(PathBuf::from)),
     );
-    state.modal = Some(Modal::FileBrowser(browser));
+    state.modal = Some(Modal::FileBrowser(Box::new(browser)));
 }

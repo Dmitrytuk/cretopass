@@ -1,14 +1,37 @@
 use std::path::{Path, PathBuf};
 
+use crate::file_handling::export::{self, ExportFormat};
 use crate::file_handling::{self, FileEntry, FileHandlingError};
 use crate::theming::texts;
 
-/// Whether the file browser is used to open an existing file or create a new one.
+/// Why the file browser was opened, which decides what a selection means.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FileBrowserMode {
     OpenFile,
     CreateFile,
     ImportFile,
+    /// Naming the plain-text file an export is written to, in `format`.
+    ExportFile {
+        format: ExportFormat,
+    },
+}
+
+impl FileBrowserMode {
+    /// The export format this mode is naming a file for, if any.
+    pub fn export_format(self) -> Option<ExportFormat> {
+        match self {
+            Self::ExportFile { format } => Some(format),
+            _ => None,
+        }
+    }
+
+    /// Whether the browser may rename or delete the secret files it lists.
+    ///
+    /// Import and export only read the filesystem through the browser: editing a
+    /// vault is not what the user opened it for.
+    pub(crate) fn allows_entry_actions(self) -> bool {
+        !matches!(self, Self::ImportFile | Self::ExportFile { .. })
+    }
 }
 
 /// Filter controlling which entries are shown in the file list.
@@ -100,6 +123,9 @@ pub struct FileBrowserState {
     pub rename_cursor: usize,
     pub rename_target: String,
     pub confirm_delete: Option<String>,
+    /// If set, the export destination awaiting an overwrite confirmation. It is
+    /// the file the export will write — its extension already resolved.
+    pub confirm_overwrite: Option<String>,
     /// If set, the file browser will protect this path from deletion
     /// and report renames so the caller can update its state.
     pub active_vault_path: Option<PathBuf>,
@@ -142,6 +168,7 @@ impl FileBrowserState {
             rename_cursor: 0,
             rename_target: String::new(),
             confirm_delete: None,
+            confirm_overwrite: None,
             active_vault_path: None,
             pending: AddPrefix::default(),
             show_hidden: session.show_hidden,
@@ -150,6 +177,37 @@ impl FileBrowserState {
             scroll: 0,
             location_scroll: 0,
         }
+    }
+
+    /// A browser opened to name the destination of an export.
+    ///
+    /// It starts in the name input, in the secret file's own directory rather
+    /// than wherever the browser was last, with [`export::suggest_name`]
+    /// prefilled. Cancelling it cancels the export: there is nothing else the
+    /// browser is for here.
+    pub fn for_export(
+        format: ExportFormat,
+        base_path: Option<&Path>,
+        node_name: Option<&str>,
+        session: &FileBrowserSession,
+    ) -> Self {
+        let mut state = Self::new(FileBrowserMode::ExportFile { format }, session);
+
+        if let Some(dir) = base_path
+            .and_then(Path::parent)
+            .filter(|dir| !dir.as_os_str().is_empty())
+            && let Ok(entries) = list_entries(dir, state.show_hidden)
+        {
+            state.current_dir = dir.to_path_buf();
+            state.entries = entries;
+            state.selected = 0;
+        }
+
+        let suggested = export::suggest_name(base_path, node_name, format);
+        state.creating_cursor = suggested.len();
+        state.creating_name = suggested;
+        state.focus = FocusTarget::Input;
+        state
     }
 
     /// Sets the active file path that the browser should protect.

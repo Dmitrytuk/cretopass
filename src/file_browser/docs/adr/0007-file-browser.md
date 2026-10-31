@@ -18,16 +18,17 @@ file listing UX to vault-specific modal logic, preventing reuse.
 
 | File | Responsibility |
 |------|---------------|
-| `state.rs` | `FileBrowserState`, `FileBrowserMode` (OpenFile/CreateFile/ImportFile), `FileBrowserSession` (last directory + hidden setting), `Location` (Home or mounted disk row), `FocusTarget` (List/Input/Rename/Locations), `AddPrefix` (None/Pending), `FileFilter` (All/PwdKeeperOnly), `FileBrowserAction` (Selected/Cancelled/Renamed), viewport offsets (`scroll`, `location_scroll`) |
-| `handler.rs` | `handle_key()` dispatches to list/input/rename/locations handlers. Supports j/k navigation, Enter, search, filter toggle, hidden-entry toggle (`Ctrl+h`), directory traversal, rename, delete, the `a` prefix (add file/directory), text editing |
-| `render.rs` | `render_file_browser()` renders the overlay with the path bar and file list (icons, selection, scrolling). It draws no status bar of its own — the owning Home window renders the browser's badge and hints from `status_parts()`, the mode→`(badge, style, hint)` mapping. Centered popups for the name input / rename input / delete confirmation / error, plus the Locations overlay |
+| `state.rs` | `FileBrowserState`, `FileBrowserMode` (OpenFile/CreateFile/ImportFile/ExportFile{format}), `FileBrowserSession` (last directory + hidden setting), `Location` (Home or mounted disk row), `FocusTarget` (List/Input/Rename/Locations), `AddPrefix` (None/Pending), `FileFilter` (All/PwdKeeperOnly), `FileBrowserAction` (Selected/Cancelled/Renamed), viewport offsets (`scroll`, `location_scroll`) |
+| `handler.rs` | `handle_key()` dispatches to list/input/rename/locations handlers. Supports j/k navigation, Enter, search, filter toggle, hidden-entry toggle (`Ctrl+h`), directory traversal, rename, delete, the `a` prefix (add file/directory), text editing. Rename and delete are offered only in the modes that may edit the filesystem (`OpenFile`, `CreateFile`) |
+| `render.rs` | `render_file_browser()` renders the overlay with the path bar and file list (icons, selection, scrolling). It draws no status bar of its own — the owning Home window renders the browser's badge and hints from `status_parts()`, the mode→`(badge, style, hint)` mapping. Centered popups for the name input / rename input / overwrite confirmation / delete confirmation / error, plus the Locations overlay |
 
 ## Contracts
 
 - `FileBrowserState::new(mode, &FileBrowserSession)` starts at the session's last directory when it is still listable and falls back to the user's home directory otherwise. The session's hidden-entry setting is restored.
+- `FileBrowserState::for_export(format, base_path, node_name, &FileBrowserSession)` starts in the name input instead, in the secret file's directory, with `file_handling::export::suggest_name` prefilled. See [ADR 0022](../../../../docs/adr/0022-user-chosen-export-destination.md).
 - `FileBrowserState::session()` captures `current_dir` and `show_hidden`; `vault::widget` stores the returned `FileBrowserSession` in `HomeState` and passes it to every subsequent opening. The session is in memory only — it is never written to config or disk.
 - `handle_key(key, state) → Option<FileBrowserAction>` — returns `None` while browsing, `Some(Selected(path))` or `Some(Cancelled)` to exit.
-- Enter in the name input returns `Selected` only when no file with that name exists at the target path; otherwise it shows a dismissable error popup and stays open.
+- Enter in the name input returns `Selected` only when no file with that name exists at the target path; otherwise it shows a dismissable error popup and stays open. In `ExportFile` mode the typed name is first resolved through `file_handling::export::output_path`: a secret-file target is refused, an existing plain-text target asks for an overwrite confirmation (`confirm_overwrite`, dismissed by any other key), and only then is `Selected` reported.
 - The name input, rename input, delete confirmation, and errors render as centered popups stacked over the browser; an error popup sits on top of any active dialog and is dismissed by the next key.
 - The Locations overlay pins `Home` first, then lists mounted disks returned by `file_handling::list_disks()`. It preselects the location with the longest path that is an ancestor of `current_dir`, falling back to the first row. Enter on an unreadable location keeps the overlay open and shows the error popup on top.
 - Hidden entries are names starting with `.`; nothing else is treated as hidden. `list_dir` excludes them and `list_dir_including_hidden` includes them.
@@ -41,7 +42,7 @@ file listing UX to vault-specific modal logic, preventing reuse.
 | Keys | Action |
 |------|--------|
 | `j`/`k` | Navigate files |
-| `Enter` | Enter directory or select file |
+| `Enter` | Enter directory or select file (in `ExportFile` mode, a file row returns to the name input) |
 | `/` | Search filter |
 | `D` | Open the Locations overlay (list focus only, not while searching) |
 | `Ctrl+h` / `Ctrl+Backspace` | Toggle hidden (dot-prefixed) entries (list focus; ignored in search and text inputs) |

@@ -57,3 +57,4 @@ map and cross-module data flow.
 - [0019 — Runtime colour-scheme switching](./docs/adr/0019-runtime-colour-scheme-switching.md) — a process-wide `Palette` cell swapped from the Home Configuration modal, replacing ADR 0015's compile-time-only scheme choice
 - [0020 — Feedback and issue reporting](./docs/adr/0020-feedback-and-issue-reporting.md) — GitHub Issues as the single feedback channel, Private Vulnerability Reporting for security, and one set of link constants shared by the About overlay (`?`) and `--help`
 - [0021 — Home modals report intents](./src/vault/docs/adr/0021-home-intent-contract.md) — Home modals are pure input returning a `HomeAction`; a single orchestrator performs the I/O and screen transitions
+- [0022 — User-chosen export destination](./docs/adr/0022-user-chosen-export-destination.md) — the File Browser names where an export is written, in both the Home and Tree flows; the export never overwrites a secret file

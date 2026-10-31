@@ -210,6 +210,7 @@ pub fn open_tree<B: Backend>(
     let mut tree_state = crate::tree::widget::TreeState::new(node);
     tree_state.display_full_path = state.config.display_full_path;
     tree_state.generator = state.generator;
+    tree_state.browser_session = state.browser_session.clone();
     run_tree(state, terminal, tree_state, target)
 }
 
@@ -236,6 +237,9 @@ pub(super) fn run_tree<B: Backend>(
     // Generator settings are per app run: copy them back even when the tree
     // exits with an error or the user discards changes.
     state.generator = tree_state.generator;
+    // Same for the File Browser's memory: an export named from inside the tree
+    // leaves Home starting where the user last browsed.
+    state.browser_session = tree_state.browser_session;
     let return_to_menu = tree_state.return_to_menu;
     match result {
         Ok(ExitStatus::Saved) => {

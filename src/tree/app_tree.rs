@@ -409,6 +409,11 @@ fn handle_modal_key(key: event::KeyEvent, state: &mut TreeState) -> io::Result<(
             Ok(())
         }
         Some(action) => {
+            // The File Browser remembers where it was for its next opening, the
+            // same way Home captures it when the browser reports an action.
+            if let Modal::ExportDestination(destination) = &modal {
+                state.browser_session = destination.session();
+            }
             let keeps_produced = !matches!(action, TreeAction::Close);
             let result = execute(state, action);
             state.modal = retained_modal(keeps_produced, modal, state.modal.take());
@@ -597,19 +602,23 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
     TreeWidget::render(frame, layout[0], state);
 
     let (mode_str, mode_style, hint) = status_bar_parts(state);
-    render_status_bar(frame, layout[1], mode_str, mode_style.style(), hint);
+    render_status_bar(frame, layout[1], mode_str, mode_style.style(), &hint);
 
     if let InputMode::Search = &state.mode {
         render_search_overlay(frame, area, state);
     }
 
-    if let Some(modal) = &state.modal {
-        match modal {
+    // The modal is taken out for drawing: the browser's renderer needs `&mut` for
+    // its viewport offsets, while the Detail modal reads the tree behind it.
+    if let Some(mut modal) = state.modal.take() {
+        match &mut modal {
             Modal::Help(help) => help.render(frame, area),
             Modal::Alert(alert) => alert.render(frame, area),
             Modal::Detail(detail) => detail.render(frame, area, state),
             Modal::Export(wizard) => wizard.render(frame, area),
+            Modal::ExportDestination(destination) => destination.render(frame, area),
         }
+        state.modal = Some(modal);
     }
 
     match state.save_exit {
@@ -627,30 +636,49 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
 ///
 /// A parked save overlay takes priority over the mode because it is drawn on
 /// top of it. It carries no badge: it is a transient prompt, not a mode.
-fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static str) {
+fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, String) {
     match state.save_exit {
         SaveExit::ConfirmDiscard => {
-            return ("", ElementStyle::ModeNormal, texts::HINT_DISCARD_CONFIRM);
+            return (
+                "",
+                ElementStyle::ModeNormal,
+                texts::HINT_DISCARD_CONFIRM.to_string(),
+            );
         }
         SaveExit::Blocked => {
-            return ("", ElementStyle::ModeNormal, texts::HINT_SAVE_EXIT_BLOCKED);
+            return (
+                "",
+                ElementStyle::ModeNormal,
+                texts::HINT_SAVE_EXIT_BLOCKED.to_string(),
+            );
         }
         SaveExit::None => {}
     }
     if state.save_state.overlay_message().is_some() {
-        return ("", ElementStyle::ModeNormal, texts::HINT_DETAIL_ALERT);
+        return (
+            "",
+            ElementStyle::ModeNormal,
+            texts::HINT_DETAIL_ALERT.to_string(),
+        );
     }
 
     if let Some(modal) = &state.modal {
-        return match modal {
+        let (mode, style, hint) = match modal {
             Modal::Help(help) => help.status_parts(),
             Modal::Alert(alert) => alert.status_parts(),
             Modal::Detail(detail) => detail.status_parts(&state.root),
             Modal::Export(wizard) => wizard.status_parts(),
+            // The File Browser owns its badge and hint — they follow its mode and
+            // the overlay it is showing — so its parts pass through unchanged.
+            Modal::ExportDestination(destination) => {
+                let (mode, style, hint) = destination.status_parts();
+                return (mode, style, hint);
+            }
         };
+        return (mode, style, hint.to_string());
     }
 
-    match &state.mode {
+    let (mode, style, hint) = match &state.mode {
         InputMode::Normal => (
             texts::MODE_NAV,
             ElementStyle::ModeNormal,
@@ -690,7 +718,8 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
                 texts::HINT_PENDING_ADD
             },
         ),
-    }
+    };
+    (mode, style, hint.to_string())
 }
 
 fn render_search_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
@@ -1521,6 +1550,30 @@ mod tests {
             retained_modal(true, produced, Some(installed)),
             Some(Modal::Alert(_))
         ));
+    }
+
+    #[test]
+    fn exporting_a_node_asks_for_a_path_and_writes_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = TreeState::new(Node::new("Root"));
+        state.active_vault_path = Some(dir.path().join("vault.age").to_string_lossy().to_string());
+
+        dispatch_key(ctrl(KeyCode::Char('e')), &mut state); // open the export wizard
+        dispatch_key(key(KeyCode::Enter), &mut state); // "this node" -> format
+        dispatch_key(key(KeyCode::Enter), &mut state); // JSON -> destination
+        assert!(
+            matches!(state.modal, Some(Modal::ExportDestination(_))),
+            "the format step must open the File Browser"
+        );
+
+        dispatch_key(key(KeyCode::Enter), &mut state); // accept the suggested name
+
+        let written = dir.path().join("vault_Root.json");
+        assert!(
+            written.exists(),
+            "the export must be written where it was named"
+        );
+        assert!(matches!(state.modal, Some(Modal::Alert(_))));
     }
 
     #[test]

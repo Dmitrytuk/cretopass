@@ -141,7 +141,7 @@ mod tests {
     use crate::file_handling;
     use crate::theming::{Palette, texts};
     use crate::vault::active_file::ActiveVaultState;
-    use crate::vault::widget::modal::{About, BrowserModal, ConfigurationModal};
+    use crate::vault::widget::modal::{About, BrowserModal, ConfigurationModal, ExportWizard};
     use crate::vault::widget::render::home_status_parts;
     use crossterm::event::KeyCode;
     use ratatui::backend::TestBackend;
@@ -187,7 +187,7 @@ mod tests {
         let inner = browser.state_mut();
         inner.current_dir = PathBuf::from("/tmp");
         inner.entries = file_handling::list_dir(std::path::Path::new("/tmp")).unwrap();
-        state.modal = Some(Modal::FileBrowser(browser));
+        state.modal = Some(Modal::FileBrowser(Box::new(browser)));
 
         assert_no_terminal_background(&mut state);
     }
@@ -306,7 +306,7 @@ mod tests {
                 .position(|e| e.name == "note.xml")
                 .expect("the fixture must be listed");
         }
-        state.modal = Some(Modal::FileBrowser(browser));
+        state.modal = Some(Modal::FileBrowser(Box::new(browser)));
 
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         handle_modal_key(
@@ -333,6 +333,68 @@ mod tests {
             .expect("the imported tree must be wrapped under the open root");
         assert_eq!(wrapper.children.len(), 1);
         assert_eq!(wrapper.children[0].name, "Secrets");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The Home export flow: pick a format, name the destination in the File
+    /// Browser, and the plain text lands exactly where it was named.
+    #[test]
+    fn export_writes_the_plain_text_where_the_browser_named_it() {
+        let dir = std::env::temp_dir().join(format!("cretopass-export-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let vault_path = dir.join("vault.age").to_string_lossy().to_string();
+        let node = file_handling::create_secret_file(&vault_path, "pw").unwrap();
+
+        let mut state = HomeState::new();
+        state.active_vault = Some(ActiveVaultState {
+            path: Some(vault_path.clone()),
+            passphrase: zeroize::Zeroizing::new(b"pw".to_vec()),
+            node: Some(node),
+        });
+        state.modal = Some(Modal::Export(ExportWizard::new()));
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        // Confirming the format asks for the destination.
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Enter),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        let Some(Modal::FileBrowser(browser)) = &mut state.modal else {
+            panic!("the format step must open the File Browser");
+        };
+        assert_eq!(
+            browser.state_mut().creating_name,
+            "vault.json",
+            "the suggestion comes from the open vault"
+        );
+
+        // The suggested name is accepted as it stands.
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Enter),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+
+        assert!(
+            dir.join("vault.json").exists(),
+            "the export must be written where it was named"
+        );
+        match &state.modal {
+            Some(Modal::Alert(alert)) => assert!(
+                alert.message.starts_with(texts::MSG_EXPORT_SUCCESS),
+                "unexpected alert: {}",
+                alert.message
+            ),
+            _ => panic!("a successful export must be reported in an alert"),
+        }
+        // The vault itself is untouched.
+        assert!(file_handling::is_age_file(std::path::Path::new(
+            &vault_path
+        )));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

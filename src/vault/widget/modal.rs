@@ -48,8 +48,8 @@ pub enum HomeAction {
     ReopenCreateSecret { file_path: String },
     /// Create `file_path` without a master password, then open it.
     CreateWithoutPassword { file_path: String },
-    /// Write the open tree to a plain-text file next to the secret file.
-    Export { format: ExportFormat },
+    /// Write the open tree to `path` as plain text, in `format`.
+    Export { path: String, format: ExportFormat },
     /// Flip `setting` and apply it, keeping the dialog open.
     ToggleSetting(Setting),
     /// Persist the configuration as it stands.
@@ -90,8 +90,10 @@ pub enum HomeAction {
     OpenConfiguration,
     /// Confirm, then ask for a new master password for the open file.
     BeginChangePassword,
-    /// Choose a format, then confirm exporting the open vault.
+    /// Choose a format, then name the destination of the export.
     BeginExport,
+    /// Open the file browser to name the destination of an export in `format`.
+    BeginExportDestination { format: ExportFormat },
     /// Unlock and open `path` from the recent list.
     OpenRecent { path: String },
     /// Confirm dropping `path` from the recent list.
@@ -101,7 +103,8 @@ pub enum HomeAction {
 /// The Home screen's modal slot: at most one at a time, over the menu.
 pub enum Modal {
     /// The directory browser, which picks a file to unlock, name, or import.
-    FileBrowser(BrowserModal),
+    /// Boxed because its state is far larger than the other modals'.
+    FileBrowser(Box<BrowserModal>),
     /// Unlock prompt: one masked field for the master password.
     Unlock(UnlockPrompt),
     /// Create a new secret file: the master password and its confirmation.
@@ -115,7 +118,7 @@ pub enum Modal {
     Confirmation(Confirmation),
     /// Change master password: current, new, and confirmation.
     ChangePassword(ChangePasswordPrompt),
-    /// The two-step export flow: pick a format, then confirm it.
+    /// The export flow's first step: pick a format.
     Export(ExportWizard),
     /// App identity, version, and feedback links, opened with `?` from the menu.
     About(About),

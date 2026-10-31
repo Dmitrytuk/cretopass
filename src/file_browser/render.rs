@@ -5,6 +5,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::state::{AddPrefix, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget};
 use crate::cursor::cursor_field_spans;
+use crate::file_handling::export::ExportFormat;
 use crate::theming::{ElementStyle, Icon, texts};
 
 const DEFAULT_HEIGHT: u16 = 18;
@@ -24,9 +25,14 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
     frame.render_widget(Clear, overlay_area);
 
     let title = match state.mode {
-        FileBrowserMode::OpenFile => texts::BROWSER_OPEN,
-        FileBrowserMode::CreateFile => texts::BROWSER_CREATE,
-        FileBrowserMode::ImportFile => texts::BROWSER_IMPORT,
+        FileBrowserMode::OpenFile => texts::BROWSER_OPEN.to_string(),
+        FileBrowserMode::CreateFile => texts::BROWSER_CREATE.to_string(),
+        FileBrowserMode::ImportFile => texts::BROWSER_IMPORT.to_string(),
+        // The title names the format: the chosen extension replaces the typed
+        // one, and the user should see that before confirming.
+        FileBrowserMode::ExportFile { format } => {
+            format!("{}{} ", texts::BROWSER_EXPORT, format_label(format))
+        }
     };
 
     let block = Block::default()
@@ -47,8 +53,9 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
     render_file_list(frame, layout[1], state);
 
     // Transient prompts are centered popups stacked over the browser:
-    // the active input / delete confirmation first, the error on top.
-    if state.mode == FileBrowserMode::CreateFile && state.focus == FocusTarget::Input {
+    // the active input / overwrite confirmation / delete confirmation first,
+    // the error on top.
+    if state.focus == FocusTarget::Input && state.mode == FileBrowserMode::CreateFile {
         // `af` creates a file, `ad` creates a directory — match the title to it.
         let input_title = if state.creating_is_dir {
             texts::OVERLAY_NEW_DIR
@@ -63,6 +70,15 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
             &state.creating_name,
             state.creating_cursor,
         );
+    } else if state.focus == FocusTarget::Input && state.mode.export_format().is_some() {
+        render_input_popup(
+            frame,
+            overlay_area,
+            texts::OVERLAY_EXPORT_FILE,
+            texts::LABEL_NAME_INLINE,
+            &state.creating_name,
+            state.creating_cursor,
+        );
     } else if state.focus == FocusTarget::Rename {
         render_input_popup(
             frame,
@@ -72,6 +88,8 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
             &state.rename_name,
             state.rename_cursor,
         );
+    } else if state.confirm_overwrite.is_some() {
+        render_overwrite_popup(frame, overlay_area, state);
     } else if state.confirm_delete.is_some() {
         render_delete_popup(frame, overlay_area, state);
     } else if state.focus == FocusTarget::Locations {
@@ -184,9 +202,7 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBrowserState)
                 name_style
             };
 
-            let marker = if entry.is_age_file
-                && !entry.is_dir
-                && state.mode != FileBrowserMode::ImportFile
+            let marker = if entry.is_age_file && !entry.is_dir && state.mode.allows_entry_actions()
             {
                 Icon::PwdMarker.as_str()
             } else {
@@ -249,6 +265,13 @@ pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementSt
             texts::FB_HINT_DELETE_CONFIRM.to_string(),
         );
     }
+    if state.confirm_overwrite.is_some() {
+        return (
+            texts::MODE_CONFIRM,
+            ElementStyle::ModeConfirmDelete,
+            texts::FB_HINT_OVERWRITE_CONFIRM.to_string(),
+        );
+    }
     if state.focus == FocusTarget::Locations {
         return (
             texts::MODE_MENU,
@@ -273,6 +296,10 @@ pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementSt
             FileFilter::PwdKeeperOnly => (texts::MODE_PWD, ElementStyle::ModeNormal),
             FileFilter::All => (texts::MODE_IMPORT, ElementStyle::ModeSearch),
         },
+        FileBrowserMode::ExportFile { .. } => match state.filter {
+            FileFilter::PwdKeeperOnly => (texts::MODE_PWD, ElementStyle::ModeNormal),
+            FileFilter::All => (texts::MODE_EXPORT, ElementStyle::ModeEdit),
+        },
     };
 
     let hint = if state.search_active {
@@ -286,6 +313,15 @@ pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementSt
     };
 
     (mode_str, mode_style, hint)
+}
+
+/// The human-readable name of `format`, for the browser's title.
+fn format_label(format: ExportFormat) -> &'static str {
+    match format {
+        ExportFormat::Json => texts::FORMAT_JSON,
+        ExportFormat::Xml => texts::FORMAT_XML,
+        ExportFormat::Csv => texts::FORMAT_CSV,
+    }
 }
 
 /// The confirm/dismiss hint for the rename and new-file name inputs.
@@ -303,6 +339,11 @@ fn fb_hint(state: &FileBrowserState) -> String {
         parts.push(texts::FB_HINT_IMPORT_TYPES);
     }
 
+    // Export names the destination in the name input, which the list hides.
+    if state.mode.export_format().is_some() {
+        parts.push(texts::FB_HINT_EXPORT_NAME);
+    }
+
     parts.extend([
         texts::FB_HINT_FILTER,
         texts::FB_HINT_SEARCH,
@@ -318,7 +359,7 @@ fn fb_hint(state: &FileBrowserState) -> String {
     if let Some(entry) = state.entries.get(state.selected)
         && entry.is_age_file
         && !entry.is_dir
-        && state.mode != FileBrowserMode::ImportFile
+        && state.mode.allows_entry_actions()
     {
         parts.push(texts::FB_HINT_RENAME);
         parts.push(texts::FB_HINT_DELETE);
@@ -449,6 +490,36 @@ fn render_delete_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) 
         Line::from(""),
         Line::from(Span::styled(
             format!(" Delete {filename}? "),
+            ElementStyle::ConfirmMessage.style(),
+        )),
+    ];
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(block, popup_area);
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+}
+
+fn render_overwrite_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
+    let Some(ref path_str) = state.confirm_overwrite else {
+        return;
+    };
+
+    let filename = std::path::Path::new(path_str)
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or(std::borrow::Cow::Borrowed(path_str));
+
+    let popup_area = centered_popup(area, 4);
+    let block = Block::default()
+        .title(texts::OVERLAY_CONFIRM_OVERWRITE)
+        .borders(Borders::ALL)
+        .style(ElementStyle::ConfirmDeleteBlock.style());
+
+    let inner = block.inner(popup_area);
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!(" Overwrite {filename}? "),
             ElementStyle::ConfirmMessage.style(),
         )),
     ];

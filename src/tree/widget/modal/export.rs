@@ -1,9 +1,9 @@
-//! The Export modal: a two-step wizard that writes a Node to a plain-text file
-//! beside the secret file.
+//! The Export modal: a wizard that picks what to export and how.
 //!
 //! Step one picks the scope (this Node only, or with its children); step two
-//! picks the format. Confirming the format reports a [`TreeAction::Export`] — the
-//! file write and the result alert are the orchestrator's job.
+//! picks the format. Confirming the format reports a
+//! [`TreeAction::BeginExportDestination`] — naming the destination file and
+//! writing it are the orchestrator's job.
 
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
@@ -52,8 +52,8 @@ impl ExportWizard {
         }
     }
 
-    /// Reads a key: [`TreeAction::Close`] on `Esc`, [`TreeAction::Export`] when
-    /// the format is confirmed.
+    /// Reads a key: [`TreeAction::Close`] on `Esc`,
+    /// [`TreeAction::BeginExportDestination`] when the format is confirmed.
     pub(crate) fn handle_key(
         &mut self,
         key: KeyEvent,
@@ -92,7 +92,7 @@ impl ExportWizard {
                     self.selected = i;
                     None
                 }
-                Action::Confirm => Some(TreeAction::Export {
+                Action::Confirm => Some(TreeAction::BeginExportDestination {
                     node: self.node.clone(),
                     include_children: self.include_children,
                     format: self.format(),
@@ -209,12 +209,12 @@ mod tests {
     }
 
     #[test]
-    fn format_confirm_reports_the_export() {
+    fn format_confirm_asks_for_the_destination() {
         let (mut wizard, mut state) = wizard();
         let _ = wizard.handle_key(key(KeyCode::Enter), &mut state); // scope -> format
         let _ = wizard.handle_key(key(KeyCode::Char('j')), &mut state); // XML
         match wizard.handle_key(key(KeyCode::Enter), &mut state) {
-            Some(TreeAction::Export {
+            Some(TreeAction::BeginExportDestination {
                 include_children,
                 format,
                 ..
@@ -222,7 +222,7 @@ mod tests {
                 assert!(!include_children);
                 assert_eq!(format, ExportFormat::Xml);
             }
-            _ => panic!("expected an export action"),
+            _ => panic!("expected a destination request"),
         }
     }
 

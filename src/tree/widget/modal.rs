@@ -12,11 +12,13 @@ mod alert;
 mod chrome;
 mod detail;
 mod export;
+mod export_destination;
 mod help;
 
 pub(crate) use alert::Alert;
 pub(crate) use detail::Detail;
 pub(crate) use export::ExportWizard;
+pub(crate) use export_destination::ExportDestination;
 pub(crate) use help::Help;
 
 pub(crate) use chrome::centered_rect;
@@ -45,12 +47,19 @@ pub(crate) enum TreeAction {
     Close,
     /// Write `text` to the system clipboard.
     CopyToClipboard { text: String },
-    /// Write `node` (with or without its children) to a plain-text file beside
-    /// the secret file, in `format`.
+    /// Open the file browser to name the destination of an export of `node`,
+    /// with or without its children, in `format`.
+    BeginExportDestination {
+        node: Node,
+        include_children: bool,
+        format: ExportFormat,
+    },
+    /// Write `node` (with or without its children) to `path` as plain text.
     Export {
         node: Node,
         include_children: bool,
         format: ExportFormat,
+        path: String,
     },
 }
 
@@ -66,6 +75,9 @@ pub(crate) enum Modal {
     Detail(Box<Detail>),
     /// The two-step export flow: pick a scope, then a format.
     Export(ExportWizard),
+    /// Naming the destination of an export in the File Browser. Boxed because the
+    /// browser's state is far larger than the passive modals.
+    ExportDestination(Box<ExportDestination>),
 }
 
 impl Modal {
@@ -91,6 +103,7 @@ impl Modal {
             Self::Alert(alert) => alert.handle_key(key, state),
             Self::Detail(detail) => detail.handle_key(key, state),
             Self::Export(wizard) => wizard.handle_key(key, state),
+            Self::ExportDestination(destination) => destination.handle_key(key, state),
         }
     }
 }
