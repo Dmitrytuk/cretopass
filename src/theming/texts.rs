@@ -135,14 +135,26 @@ pub const STATUS_SAVING: &str = "Saving";
 pub const STATUS_SAVE_FAILED: &str = "Save failed";
 
 pub const HINT_TREE: &str =
-    "j/↓ k/↑:up-down  h/← l/→:collaps-expand  H:home  /:search  ?:help  q:quit";
+    "j/↓ k/↑:nav  h/← l/→:fold  d:cut  a:add  /:search  H:home  ?:help  q:quit";
 /// Tree hint shown while the cut buffer holds a node ready to paste.
 pub const HINT_TREE_PASTE: &str =
-    "j/↓ k/↑:up-down  h/← l/→:collaps-expand  p:paste  H:home  /:search  ?:help  q:quit";
+    "j/↓ k/↑:nav  h/← l/→:fold  d:cut  p:paste  a:add  /:search  H:home  ?:help  q:quit";
+/// Tree hint shown when the Root is selected: it has no sibling slot, so
+/// `d:cut` is not offered.
+pub const HINT_TREE_ROOT: &str =
+    "j/↓ k/↑:nav  h/← l/→:fold  a:add  /:search  H:home  ?:help  q:quit";
+/// Root variant of [`HINT_TREE_PASTE`]: pasting a child into the Root still
+/// applies, pasting a sibling does not.
+pub const HINT_TREE_ROOT_PASTE: &str =
+    "j/↓ k/↑:nav  h/← l/→:fold  p:paste  a:add  /:search  H:home  ?:help  q:quit";
 pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
 pub const HINT_PENDING_CUT: &str = "d:cut  Esc:cancel";
 pub const HINT_PASTE: &str = "p:after  P:before  l/→:child  Esc:cancel";
+/// Paste hint when the Root is selected: only a child can be pasted into it.
+pub const HINT_PASTE_ROOT: &str = "l/→:child  Esc:cancel";
 pub const HINT_PENDING_ADD: &str = "a:after  A:before  l/→:child  Esc:cancel";
+/// Add hint when the Root is selected: only a child can be added to it.
+pub const HINT_PENDING_ADD_ROOT: &str = "l/→:child  Esc:cancel";
 pub const HINT_DETAIL: &str = "j/k/Tab:navigate  c/y:copy  i/Enter:edit  Esc:close";
 pub const HINT_DETAIL_ALERT: &str = "Press any key to continue";
 pub const HINT_FORM: &str = "j/k:field  i/Enter:edit  u/r:undo/redo  Esc:close";
@@ -186,6 +198,7 @@ pub const TREE_HELP_KEY_BINDINGS: &[&str] = &[
     " d d      Cut selected node",
     " p        Paste: p after, P before, l/→ child",
     " a        Add: a after, A before, l/→ child",
+    " Root     No cut, no sibling add/paste",
     " Ctrl+e   Export selected node",
     " /        Search",
     " ?        Show this help",

@@ -7,7 +7,7 @@ The data model and workspace for organizing secrets in a hierarchical tree.
 **Node**: The fundamental data unit. A named item that can carry ExtraFields and optionally contain child Nodes. Nodes with children are branch nodes; nodes without are leaf nodes.
 _Avoid_: Entry, Item, Record
 
-**Root**: The top-level Node of the tree. Cannot be cut or deleted. Every secret file has exactly one Root.
+**Root**: The top-level Node of the tree. It has no parent and therefore no siblings; it cannot be cut or deleted. It can still gain children. Every secret file has exactly one Root.
 
 **Branch**: A Node that has one or more children. Displays expand/collapse toggles.
 _Avoid_: Folder, Category
@@ -58,6 +58,9 @@ _Avoid_: Editing mode
 
 **Add**: Form Popup for creating a new Node. Starts with the Name row alone; Description and ExtraFields are added via `+ Add Field`. The first committed change creates the Node at the pending position, after which the session behaves as Edit. An empty name defaults to "Untitled".
 _Avoid_: Adding mode
+
+**Insertion position**: Where a newly added or pasted Node lands relative to the selected Node: after it, before it, or as its last child. After and before require the selected Node to have a parent; child works on any Node, including the Root.
+_Avoid_: Paste target, slot
 
 **Form**: The Add/Edit Popup inside Detail. Two levels: Nav moves between fields and triggers actions; Input edits the focused field's text.
 

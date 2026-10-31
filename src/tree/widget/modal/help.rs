@@ -89,4 +89,16 @@ mod tests {
         assert_eq!(mode, texts::MODE_HELP);
         assert_eq!(hint, texts::HINT_HELP);
     }
+
+    #[test]
+    fn the_binding_list_documents_the_root_exception() {
+        let root_line = texts::TREE_HELP_KEY_BINDINGS
+            .iter()
+            .find(|binding| binding.trim_start().starts_with("Root"))
+            .expect("the Root's restricted action set must be documented");
+        assert!(
+            root_line.contains("cut") && root_line.contains("sibling"),
+            "the Root line must name the withheld actions: {root_line:?}"
+        );
+    }
 }

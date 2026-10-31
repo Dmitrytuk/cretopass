@@ -37,9 +37,9 @@ impossible without touching every module.
 | `l` | Expand (leaf: opens detail) |
 | `Enter` | Toggle expand (parent) or detail (leaf) |
 | `Ctrl+Enter` / `i` / `Tab` | Detail overlay for any node |
-| `d d` | Cut selected node |
-| `p` then `p`/`P`/`l` | Paste as sibling after / before / child (mode `PASTE`) |
-| `a` then `a`/`A`/`l` | Add sibling after / before / child (mode `ADD`) |
+| `d d` | Cut selected node (inert on the Root) |
+| `p` then `p`/`P`/`l` | Paste as sibling after / before / child (mode `PASTE`; the Root accepts only `l`) |
+| `a` then `a`/`A`/`l` | Add sibling after / before / child (mode `ADD`; the Root accepts only `l`) |
 | `/` | Search |
 | `Esc` | Clear search highlights |
 | `q` / `Ctrl+C` | Quit |

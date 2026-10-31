@@ -480,7 +480,11 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
             state.toggle_expand();
         }
         Action::Cut => {
-            state.mode = InputMode::PendingCut;
+            // The Root has no parent and so no sibling slot: `d` is inert there
+            // rather than arming a prefix that can only be cancelled.
+            if !state.is_root_selected() {
+                state.mode = InputMode::PendingCut;
+            }
         }
         Action::PasteStart => {
             if state.cut_buffer.is_some() {
@@ -539,9 +543,13 @@ fn handle_pending_paste(key: event::KeyEvent, state: &mut TreeState) {
 }
 
 fn handle_pending_add(key: event::KeyEvent, state: &mut TreeState) {
+    // The Root has no parent and so no sibling slot: its sibling targets fall
+    // through to the cancel arm, exactly like an unmapped key. The Add form is
+    // never opened there, so it cannot become a session that cannot commit.
+    let root_selected = state.is_root_selected();
     let position = match Action::from_pending_add(&key) {
-        Action::AddSiblingNode => AddPosition::SiblingAfter,
-        Action::AddBefore => AddPosition::SiblingBefore,
+        Action::AddSiblingNode if !root_selected => AddPosition::SiblingAfter,
+        Action::AddBefore if !root_selected => AddPosition::SiblingBefore,
         Action::AddNode => AddPosition::Child,
         _ => {
             state.mode = InputMode::Normal;
@@ -646,10 +654,12 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
         InputMode::Normal => (
             texts::MODE_NAV,
             ElementStyle::ModeNormal,
-            if state.cut_buffer.is_some() {
-                texts::HINT_TREE_PASTE
-            } else {
-                texts::HINT_TREE
+            // The Root offers no `d:cut`, so it picks from the root variants.
+            match (state.is_root_selected(), state.cut_buffer.is_some()) {
+                (false, false) => texts::HINT_TREE,
+                (false, true) => texts::HINT_TREE_PASTE,
+                (true, false) => texts::HINT_TREE_ROOT,
+                (true, true) => texts::HINT_TREE_ROOT_PASTE,
             },
         ),
         InputMode::Search => (
@@ -665,12 +675,20 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, &'static 
         InputMode::PendingPaste => (
             texts::MODE_PASTE,
             ElementStyle::ModePendingPaste,
-            texts::HINT_PASTE,
+            if state.is_root_selected() {
+                texts::HINT_PASTE_ROOT
+            } else {
+                texts::HINT_PASTE
+            },
         ),
         InputMode::PendingAdd => (
             texts::MODE_PENDING_ADD,
             ElementStyle::ModePendingAdd,
-            texts::HINT_PENDING_ADD,
+            if state.is_root_selected() {
+                texts::HINT_PENDING_ADD_ROOT
+            } else {
+                texts::HINT_PENDING_ADD
+            },
         ),
     }
 }
@@ -1311,13 +1329,160 @@ mod tests {
         assert!(matches!(state.mode, InputMode::PendingPaste));
     }
 
+    /// A state whose root "Root" has one expanded child "Child", so row 0 is
+    /// the Root and row 1 a node that has a parent.
+    fn state_with_a_child() -> TreeState {
+        let root = Node::with_children("Root", vec![Node::new("Child")]);
+        let root_id = root.id;
+        let mut state = TreeState::new(root);
+        state.expanded.insert(root_id);
+        state.update_visible();
+        state
+    }
+
     #[test]
-    fn normal_hint_advertises_paste_only_with_a_cut_buffer() {
-        let mut state = TreeState::new(Node::new("Root"));
+    fn normal_hint_switches_to_the_root_set() {
+        let mut state = state_with_a_child();
+        state.selected = 1;
         assert_eq!(status_bar_parts(&state).2, texts::HINT_TREE);
 
+        state.selected = 0;
+        assert_eq!(status_bar_parts(&state).2, texts::HINT_TREE_ROOT);
+    }
+
+    #[test]
+    fn normal_hint_advertises_paste_only_with_a_cut_buffer() {
+        let mut state = state_with_a_child();
+        state.selected = 1;
         state.cut_buffer = Some(Node::new("X"));
         assert_eq!(status_bar_parts(&state).2, texts::HINT_TREE_PASTE);
+
+        state.selected = 0;
+        assert_eq!(status_bar_parts(&state).2, texts::HINT_TREE_ROOT_PASTE);
+    }
+
+    #[test]
+    fn add_hint_narrows_to_a_child_on_the_root() {
+        let mut state = state_with_a_child();
+        state.mode = InputMode::PendingAdd;
+        state.selected = 1;
+        assert_eq!(status_bar_parts(&state).2, texts::HINT_PENDING_ADD);
+
+        state.selected = 0;
+        assert_eq!(status_bar_parts(&state).2, texts::HINT_PENDING_ADD_ROOT);
+    }
+
+    #[test]
+    fn paste_hint_narrows_to_a_child_on_the_root() {
+        let mut state = state_with_a_child();
+        state.mode = InputMode::PendingPaste;
+        state.selected = 1;
+        assert_eq!(status_bar_parts(&state).2, texts::HINT_PASTE);
+
+        state.selected = 0;
+        assert_eq!(status_bar_parts(&state).2, texts::HINT_PASTE_ROOT);
+    }
+
+    #[test]
+    fn cut_prefix_is_inert_on_the_root() {
+        let mut state = state_with_a_child();
+        state.selected = 0;
+        handle_normal(key(KeyCode::Char('d')), &mut state);
+        assert!(matches!(state.mode, InputMode::Normal));
+    }
+
+    #[test]
+    fn cut_prefix_is_armed_off_the_root() {
+        let mut state = state_with_a_child();
+        state.selected = 1;
+        handle_normal(key(KeyCode::Char('d')), &mut state);
+        assert!(matches!(state.mode, InputMode::PendingCut));
+    }
+
+    #[test]
+    fn add_sibling_on_the_root_cancels_the_prefix_and_opens_no_form() {
+        for sibling in [KeyCode::Char('a'), KeyCode::Char('A')] {
+            let mut state = state_with_a_child();
+            state.selected = 0;
+            handle_normal(key(KeyCode::Char('a')), &mut state);
+            assert!(matches!(state.mode, InputMode::PendingAdd));
+
+            handle_pending_add(key(sibling), &mut state);
+            assert!(matches!(state.mode, InputMode::Normal));
+            assert!(state.modal.is_none());
+        }
+    }
+
+    #[test]
+    fn add_sibling_off_the_root_still_opens_the_form() {
+        let mut state = state_with_a_child();
+        state.selected = 1;
+        handle_normal(key(KeyCode::Char('a')), &mut state);
+        handle_pending_add(key(KeyCode::Char('a')), &mut state);
+        assert_eq!(state.add_position, AddPosition::SiblingAfter);
+        assert!(detail(&state).form().is_some());
+    }
+
+    #[test]
+    fn add_child_on_the_root_creates_a_child_node() {
+        let mut state = state_with_a_child();
+        state.selected = 0;
+        handle_normal(key(KeyCode::Char('a')), &mut state);
+        handle_pending_add(key(KeyCode::Char('l')), &mut state);
+        assert_eq!(state.add_position, AddPosition::Child);
+        assert!(detail(&state).form().is_some());
+
+        dispatch_key(key(KeyCode::Char('i')), &mut state);
+        type_text(&mut state, "New");
+        dispatch_key(key(KeyCode::Enter), &mut state);
+
+        assert!(state.root.children.iter().any(|child| child.name == "New"));
+        assert!(state.modified);
+    }
+
+    #[test]
+    fn tree_hints_stay_within_the_shipped_width() {
+        // The status bar is one unwrapped line and the mode badge is drawn in
+        // front of the hint, so the hints must not grow past the widest one the
+        // Tree already shipped (this is a ceiling, not a terminal-width
+        // guarantee).
+        const BUDGET: usize = 82;
+        let hints = [
+            texts::HINT_TREE,
+            texts::HINT_TREE_PASTE,
+            texts::HINT_TREE_ROOT,
+            texts::HINT_TREE_ROOT_PASTE,
+            texts::HINT_SEARCH,
+            texts::HINT_PENDING_CUT,
+            texts::HINT_PASTE,
+            texts::HINT_PASTE_ROOT,
+            texts::HINT_PENDING_ADD,
+            texts::HINT_PENDING_ADD_ROOT,
+            texts::HINT_DETAIL,
+            texts::HINT_DETAIL_ALERT,
+            texts::HINT_FORM,
+            texts::HINT_FORM_EXTRA,
+            texts::HINT_FORM_EXTRA_PASTE,
+            texts::HINT_FORM_ADD,
+            texts::HINT_FORM_INPUT,
+            texts::HINT_FORM_GENERATOR_INPUT,
+            texts::HINT_GENERATOR,
+            texts::HINT_SYMBOLS,
+            texts::HINT_SELECT_FIELD_TYPE,
+            texts::HINT_CUSTOM_FIELD_NAME,
+            texts::HINT_CONFIRM_DELETE,
+            texts::HINT_FIELD_CUT,
+            texts::HINT_FIELD_PASTE,
+            texts::HINT_SAVE_EXIT_BLOCKED,
+            texts::HINT_DISCARD_CONFIRM,
+            texts::HINT_HELP,
+        ];
+        for hint in hints {
+            assert!(
+                hint.chars().count() <= BUDGET,
+                "hint exceeds the {BUDGET}-char budget: {hint:?}"
+            );
+        }
     }
 
     #[test]
