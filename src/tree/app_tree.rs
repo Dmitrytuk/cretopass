@@ -506,7 +506,9 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
         Action::ToggleSearch => {
             state.mode = InputMode::Search;
         }
-        Action::ExportNode => {
+        Action::ExportStart => {
+            // Temporary: until the `PendingExport` prefix lands, `Ctrl+E` still
+            // opens the export wizard directly.
             if let Some(node) = state.current_node_ref() {
                 state.modal = Some(Modal::Export(ExportWizard::new(node.clone())));
             }
@@ -1491,9 +1493,10 @@ mod tests {
     fn tree_hints_stay_within_the_shipped_width() {
         // The status bar is one unwrapped line and the mode badge is drawn in
         // front of the hint, so the hints must not grow past the widest one the
-        // Tree already shipped (this is a ceiling, not a terminal-width
-        // guarantee).
-        const BUDGET: usize = 82;
+        // Tree already ships (`HINT_TREE_PASTE`, which now also advertises the
+        // `^E` export/share prefix). This is a ceiling, not a terminal-width
+        // guarantee.
+        const BUDGET: usize = 90;
         let hints = [
             texts::HINT_TREE,
             texts::HINT_TREE_PASTE,
