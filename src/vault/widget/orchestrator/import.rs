@@ -15,6 +15,7 @@ use crate::theming::texts;
 use crate::tree::node::Node;
 
 use super::super::{HomeState, Modal, run_with_spinner};
+use super::errors;
 /// Merges the tree stored in `import_path` into the open vault and saves it.
 ///
 /// The imported tree is filed under a timestamped wrapper node inside the open
@@ -27,7 +28,7 @@ pub(super) fn import<B: Backend>(
     let imported = match file_handling::import::import_tree(&import_path) {
         Ok(node) => node,
         Err(e) => {
-            state.modal = Some(Modal::alert(format!("{e}")));
+            state.modal = Some(Modal::alert(errors::message(&e)));
             return Ok(());
         }
     };
@@ -43,7 +44,7 @@ pub(super) fn import<B: Backend>(
 
     state.modal = Some(match outcome {
         Ok(()) => Modal::alert(texts::MSG_IMPORT_SUCCESS.to_string()),
-        Err(e) => Modal::alert(format!("{}{}", texts::MSG_SAVE_FAILED, e)),
+        Err(e) => Modal::alert(errors::message(&e)),
     });
     Ok(())
 }

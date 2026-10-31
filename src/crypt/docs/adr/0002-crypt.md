@@ -20,8 +20,13 @@ existing tools.
 - `decrypt()` uses `age::scrypt::Identity` for passphrase-derived identity.
 - Passphrases are consumed as `&str`; the module internally wraps them in
   `age::secrecy::SecretString`.
-- Both functions return `Box<dyn Error>` — callers in `file_handling` map this to
-  `FileHandlingError::Crypt`.
+- Both functions return `Result<_, CryptError>`. `CryptError` names the two
+  outcomes a user can act on — `WrongPassphrase` vs `CorruptFile` — plus
+  `EncryptionFailed`; callers in `file_handling` wrap it in
+  `FileHandlingError::Crypt`. age unwraps the file key eagerly but verifies the
+  ciphertext body lazily, so a wrong passphrase (eager unwrap failure) and a
+  damaged body or header (lazy read or parse failure) end up in different
+  variants.
 
 This module has zero dependencies on other project modules. It is a pure leaf.
 

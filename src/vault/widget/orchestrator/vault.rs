@@ -20,6 +20,7 @@ use crate::vault::utils;
 
 use super::super::modal::{CreateSecretPrompt, UnlockPrompt};
 use super::super::{HomeState, Modal, run_with_spinner};
+use super::errors;
 /// Re-encrypts the open secret file with the typed replacement master password.
 ///
 /// Validation lives here, not in the prompt: the "current password" field is
@@ -76,7 +77,7 @@ pub(super) fn change_master_password<B: Backend>(
 
     match outcome {
         Err(e) => {
-            prompt.reject_and_clear(format!("{}{e}", texts::MSG_SAVE_FAILED));
+            prompt.reject_and_clear(errors::message(&e));
             state.modal = Some(Modal::ChangePassword(prompt));
             Ok(())
         }
@@ -104,7 +105,7 @@ pub(super) fn choose_file_to_create(state: &mut HomeState, file_path: String) {
 pub(super) fn choose_file_to_open(state: &mut HomeState, file_path: String) {
     state.modal = Some(match file_handling::validate_encrypted_file(&file_path) {
         Ok(data) => Modal::Unlock(UnlockPrompt::new(file_path, data)),
-        Err(e) => Modal::alert(format!("{e}")),
+        Err(e) => Modal::alert(errors::message(&e)),
     });
 }
 
@@ -130,7 +131,7 @@ pub(super) fn create_secret<B: Backend>(
 
     match outcome {
         Err(e) => {
-            prompt.reject(format!("{e}"));
+            prompt.reject(errors::message(&e));
             state.modal = Some(Modal::CreateSecret(prompt));
             Ok(())
         }
@@ -160,7 +161,7 @@ pub(super) fn create_without_password<B: Backend>(
 
     match outcome {
         Err(e) => {
-            state.modal = Some(Modal::alert(format!("{e}")));
+            state.modal = Some(Modal::alert(errors::message(&e)));
             Ok(())
         }
         Ok(node) => {
@@ -286,7 +287,7 @@ pub(super) fn unlock<B: Backend>(
 
     match outcome {
         Err(e) => {
-            prompt.reject(format!("{}{e}", texts::MSG_WRONG_PW));
+            prompt.reject(errors::message(&e));
             state.modal = Some(Modal::Unlock(prompt));
             Ok(())
         }
