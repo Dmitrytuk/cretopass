@@ -580,6 +580,34 @@ mod tests {
     // ── Filesystem operation tests ──
 
     #[test]
+    fn is_dir_empty_is_true_for_an_empty_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(is_dir_empty(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn is_dir_empty_counts_a_hidden_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(".hidden.txt"), b"hidden").unwrap();
+
+        assert!(
+            !is_dir_empty(dir.path()).unwrap(),
+            "a dot-prefixed entry still makes the directory non-empty"
+        );
+    }
+
+    #[test]
+    fn is_dir_empty_errors_on_a_missing_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("does-not-exist");
+
+        assert!(matches!(
+            is_dir_empty(&missing),
+            Err(FileHandlingError::Io(_))
+        ));
+    }
+
+    #[test]
     fn test_list_dir_invalid_path() {
         let result = list_dir(Path::new("/nonexistent_dir_abc123"));
         assert!(result.is_err());
