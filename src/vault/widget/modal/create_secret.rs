@@ -6,9 +6,9 @@
 use std::borrow::Cow;
 
 use super::HomeAction;
+use crate::cursor::{SecretField, SecretFieldGroup, password_field_spans};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{display_path, make_overlay, paint_overlay};
-use crate::vault::widget::secret_field::{SecretField, SecretFieldGroup, password_field_spans};
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;

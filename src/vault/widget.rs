@@ -18,7 +18,6 @@ mod menu;
 mod modal;
 mod orchestrator;
 mod render;
-mod secret_field;
 mod state;
 
 pub use state::HomeState;

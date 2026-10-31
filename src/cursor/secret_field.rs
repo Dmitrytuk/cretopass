@@ -1,17 +1,18 @@
-//! Masked password fields shared by the Home modals.
+//! Masked password fields shared by the Home prompts and the Share flow.
 //!
-//! `PassphraseInput`, `CreateSecretFile` and `ChangePwInput` all edit N masked
-//! text fields with one focused field and a shared "reveal plaintext" flag.
-//! This module owns that behaviour, so the three modals stop re-implementing
-//! the same editing and span-building code.
+//! The unlock, create-secret and change-password prompts all edit N masked text
+//! fields with one focused field and a shared "reveal plaintext" flag. This
+//! module owns that behaviour on top of the [`super::core`] editing primitives,
+//! so every prompt stops re-implementing the same editing and span-building
+//! code.
 
 use ratatui::text::Span;
 
-use crate::cursor::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
+use super::core::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
 use crate::theming::ElementStyle;
 
 /// A single masked text field: its text and a byte-offset cursor
-/// ([ADR 0003](../../cursor/docs/adr/0003-cursor.md)).
+/// ([ADR 0003](docs/adr/0003-cursor.md)).
 #[derive(Debug, Default, Clone)]
 pub struct SecretField {
     text: String,
@@ -65,8 +66,9 @@ impl SecretField {
 
 /// A group of [`SecretField`]s with one focused field and one reveal flag.
 ///
-/// The modals differ only in how many fields they hold: one for unlocking, two
-/// for creating a secret file, three for changing the master password.
+/// The prompts differ only in how many fields they hold: one for unlocking, two
+/// for creating a secret file or a share bundle, three for changing the master
+/// password.
 #[derive(Debug, Default, Clone)]
 pub struct SecretFieldGroup {
     fields: Vec<SecretField>,
@@ -173,7 +175,7 @@ pub fn secret_field_spans(field: &SecretField, focused: bool, show: bool) -> Vec
 }
 
 /// The padded `  Label: ` prefix followed by [`secret_field_spans`]: the layout
-/// the multi-field modals use.
+/// the multi-field prompts use.
 pub fn password_field_spans(
     label: &str,
     field: &SecretField,
