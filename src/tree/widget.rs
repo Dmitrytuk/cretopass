@@ -11,6 +11,7 @@
 //! `pub(crate)`: the tree event loop (`app_tree`) and the modals are the only
 //! consumers inside the crate.
 
+mod busy;
 mod form;
 mod modal;
 mod orchestrator;

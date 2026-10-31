@@ -32,7 +32,9 @@ impl TreeWidget {
             .unwrap_or_else(|| crate::theming::texts::TITLE_TREE_DEFAULT.to_string());
 
         let mut title_spans: Vec<Span> = Vec::new();
-        if let Some(status) = state.save_state.title_status() {
+        // A blocking operation (e.g. the share write) outranks the autosave
+        // status while it runs; both share the same spinner glyph.
+        if let Some(status) = state.operation_status.or(state.save_state.title_status()) {
             let mut text = String::new();
             if status.spins() {
                 text.push_str(state.spinner.glyph());

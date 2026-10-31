@@ -109,7 +109,7 @@ pub fn run_app<B: Backend>(
                                 }
                             } else {
                                 if state.modal.is_some() {
-                                    handle_modal_key(key, state)?;
+                                    handle_modal_key(key, state, terminal)?;
                                 } else {
                                     dispatch_key(key, state);
                                 }
@@ -399,7 +399,11 @@ fn dispatch_key(key: event::KeyEvent, state: &mut TreeState) {
 /// The modal reads the key itself and reports a [`TreeAction`], which [`execute`]
 /// then performs. The modal is taken out of [`TreeState`] for the duration, so an
 /// action that dismisses it simply does not put it back.
-fn handle_modal_key(key: event::KeyEvent, state: &mut TreeState) -> io::Result<()> {
+fn handle_modal_key<B: Backend>(
+    key: event::KeyEvent,
+    state: &mut TreeState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
     let Some(mut modal) = state.modal.take() else {
         return Ok(());
     };
@@ -423,7 +427,7 @@ fn handle_modal_key(key: event::KeyEvent, state: &mut TreeState) -> io::Result<(
                 _ => {}
             }
             let keeps_produced = !matches!(action, TreeAction::Close);
-            let result = execute(state, action);
+            let result = execute(state, terminal, action, ui);
             state.modal = retained_modal(keeps_produced, modal, state.modal.take());
             result
         }
@@ -923,7 +927,8 @@ mod tests {
     /// modal first, then the navigation mode.
     fn dispatch_key(key: KeyEvent, state: &mut TreeState) {
         if state.modal.is_some() {
-            let _ = super::handle_modal_key(key, state);
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            let _ = super::handle_modal_key(key, state, &mut terminal);
         } else {
             super::dispatch_key(key, state);
         }
@@ -1706,6 +1711,10 @@ mod tests {
             matches!(state.modal, Some(Modal::Alert(_))),
             "a successful share must be reported in an alert"
         );
+        assert!(
+            state.operation_status.is_none(),
+            "the blocking status is cleared once the write finishes"
+        );
 
         let bundle = dir.path().join("vault_Root");
         let file = bundle.join("vault_Root.cretopass");
@@ -2285,5 +2294,33 @@ mod tests {
         state.mode = InputMode::Search;
         state.search_query = "Ro".to_string();
         assert_no_terminal_background(&mut state);
+    }
+
+    /// The Tree title bar shows a blocking operation's status ahead of the
+    /// autosave status, with its busy glyph.
+    #[test]
+    fn a_blocking_operation_shows_the_saving_spinner_in_the_title_bar() {
+        let mut state = TreeState::new(Node::new("Root"));
+        state.save_state = SaveState::Idle;
+        state.operation_status = Some(crate::theming::Status::Saving);
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| ui(f, &mut state)).unwrap();
+
+        let content: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(
+            content.contains(texts::STATUS_SAVING),
+            "the title bar must show the operation status: {content:?}"
+        );
+        assert!(
+            content.contains(crate::theming::Spinner::default().glyph()),
+            "the busy glyph must be shown: {content:?}"
+        );
     }
 }

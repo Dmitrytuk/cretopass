@@ -8,17 +8,31 @@
 use std::io::{self, Write};
 use std::path::Path;
 
+use ratatui::Frame;
+use ratatui::Terminal;
+use ratatui::backend::Backend;
+
+use super::busy::run_with_busy;
 use super::modal::TreeAction;
 use super::{ExportDestination, Modal, ShareDestination, SharePassphrase, TreeState};
 use crate::file_handling::export::{ExportFormat, export_tree};
 use crate::file_handling::share::share_tree;
 use crate::share::ShareScope;
-use crate::theming::texts;
+use crate::theming::{Status, texts};
 use crate::tree::node::Node;
 
 /// Performs `action`. The modal that produced it has already been taken out of
 /// [`TreeState`], so dismissing it is the act of not putting it back.
-pub(crate) fn execute(state: &mut TreeState, action: TreeAction) -> io::Result<()> {
+///
+/// `terminal` and `draw` are only needed by actions that block (the share
+/// write): they let [`run_with_busy`] keep the title-bar status animating while
+/// the work runs off-thread. `draw` is the screen's full-frame renderer.
+pub(crate) fn execute<B: Backend>(
+    state: &mut TreeState,
+    terminal: &mut Terminal<B>,
+    action: TreeAction,
+    draw: fn(&mut Frame, &mut TreeState),
+) -> io::Result<()> {
     match action {
         TreeAction::Close => Ok(()),
         TreeAction::CopyToClipboard { text } => {
@@ -57,10 +71,7 @@ pub(crate) fn execute(state: &mut TreeState, action: TreeAction) -> io::Result<(
             scope,
             dest,
             passphrase,
-        } => {
-            share(state, node, scope, &dest, &passphrase);
-            Ok(())
-        }
+        } => share(state, terminal, draw, node, scope, &dest, &passphrase),
     }
 }
 
@@ -128,26 +139,44 @@ fn export(
 /// alert.
 ///
 /// `WholeFile` shares the open Root rather than the Node selected when the wizard
-/// opened, and names the bundle after the file's stem alone.
-fn share(state: &mut TreeState, node: Node, scope: ShareScope, path: &str, passphrase: &str) {
+/// opened, and names the bundle after the file's stem alone. The write runs off
+/// the UI thread so the title bar keeps animating its `Saving` status while the
+/// bundle is re-encrypted and fsynced.
+fn share<B: Backend>(
+    state: &mut TreeState,
+    terminal: &mut Terminal<B>,
+    draw: fn(&mut Frame, &mut TreeState),
+    node: Node,
+    scope: ShareScope,
+    path: &str,
+    passphrase: &str,
+) -> io::Result<()> {
     let (bundle_root, node_name) = match scope {
-        ShareScope::Branch => (node.clone(), Some(node.name.clone())),
+        ShareScope::Branch => {
+            let name = node.name.clone();
+            (node, Some(name))
+        }
         ShareScope::WholeFile => (state.root.clone(), None),
     };
-    let base_path = state.active_vault_path.as_deref().map(Path::new);
+    let base_path = state.active_vault_path.clone();
+    let path = path.to_string();
+    let passphrase = passphrase.to_string();
 
-    let result = share_tree(
-        &bundle_root,
-        Path::new(path),
-        base_path,
-        node_name.as_deref(),
-        passphrase,
-    );
+    let result = run_with_busy(terminal, state, Status::Saving, draw, move || {
+        share_tree(
+            &bundle_root,
+            Path::new(&path),
+            base_path.as_deref().map(Path::new),
+            node_name.as_deref(),
+            &passphrase,
+        )
+    })?;
 
     state.modal = Some(match result {
         Ok(bundle) => Modal::success(format!("{}{}", texts::MSG_SHARE_SUCCESS, bundle.display())),
         Err(error) => Modal::error(format!("{error}")),
     });
+    Ok(())
 }
 
 /// Copies `text` to the system clipboard, trying the platform's helper in turn.
