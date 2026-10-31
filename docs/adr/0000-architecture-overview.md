@@ -14,7 +14,7 @@ snapshot back to an age-encrypted JSON file.
 | `cursor` | [0003](../src/cursor/docs/adr/0003-cursor.md) | UTF-8 byte-offset cursor editing + TUI span helpers, including the masked password fields (`SecretField`/`SecretFieldGroup`) |
 | `theming` | [0004](../src/theming/docs/adr/0004-theming.md) | Centralized keybindings, styles, icons, UI strings, the switchable [dark and light colour schemes](0019-runtime-colour-scheme-switching.md) ([0015](0015-default-dark-colour-scheme.md)), the title-bar `Status`/`Spinner` ([0011](0011-animated-status-spinner.md)), and the shared status bar ([0014](0014-status-bar-unification.md)) |
 | `generator` | [0012](0012-password-generator.md) | Password generation — strict leaf, depends only on `rand`; TUI-free and tree-free |
-| `share` | [0023](0023-sharing-a-vault-subtree.md) | Share flow, UI-agnostic: the scope vocabulary (`ShareScope`) and the recipient's masked password pair (`Passphrase`), wrapped by the Tree and Home modals |
+| `share` | [0023](0023-sharing-a-vault-subtree.md) | Share flow, UI-agnostic: the recipient's masked password pair (`Passphrase`), wrapped by the Tree and Home modals |
 | `tree` | [0005](../src/tree/docs/adr/0005-tree-module.md) | Tree data model, state machine, rendering, async event loop |
 | `vault` | [0006](../src/vault/docs/adr/0006-vault-module.md) | Home screen, active vault state, configuration persistence |
 | `file_browser` | [0007](../src/file_browser/docs/adr/0007-file-browser.md) | OS directory browser overlay with mounted-disk locations and hidden-entry toggle |

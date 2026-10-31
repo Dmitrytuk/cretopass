@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use super::TreeAction;
 use super::chrome::centered_rect;
 use crate::cursor::password_field_spans;
-use crate::share::{Passphrase, PassphraseSubmit, ShareScope};
+use crate::share::{Passphrase, PassphraseSubmit};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::TreeState;
@@ -24,8 +24,8 @@ use crate::tree::widget::TreeState;
 pub(crate) struct SharePassphrase {
     /// The Node chosen before the destination was named.
     node: Node,
-    /// Whether `node` is the branch to share or the whole file is.
-    scope: ShareScope,
+    /// Whether the bundle includes `node`'s children.
+    include_children: bool,
     /// The bundle folder named in the previous step.
     dest: String,
     /// The masked password pair, validated by the shared widget.
@@ -35,11 +35,12 @@ pub(crate) struct SharePassphrase {
 }
 
 impl SharePassphrase {
-    /// A password step for sharing `node` as `scope` into `dest`.
-    pub(crate) fn new(node: Node, scope: ShareScope, dest: String) -> Self {
+    /// A password step for sharing `node`, with or without its children, into
+    /// `dest`.
+    pub(crate) fn new(node: Node, include_children: bool, dest: String) -> Self {
         Self {
             node,
-            scope,
+            include_children,
             dest,
             passphrase: Passphrase::new(),
             confirming_empty: false,
@@ -87,7 +88,7 @@ impl SharePassphrase {
     fn action(&self, passphrase: String) -> TreeAction {
         TreeAction::Share {
             node: self.node.clone(),
-            scope: self.scope,
+            include_children: self.include_children,
             dest: self.dest.clone(),
             passphrase,
         }
@@ -201,11 +202,7 @@ mod tests {
 
     fn prompt() -> (SharePassphrase, TreeState) {
         (
-            SharePassphrase::new(
-                Node::new("Work"),
-                ShareScope::Branch,
-                "/tmp/vault_Work".to_string(),
-            ),
+            SharePassphrase::new(Node::new("Work"), true, "/tmp/vault_Work".to_string()),
             TreeState::new(Node::new("Root")),
         )
     }
@@ -228,12 +225,12 @@ mod tests {
         match prompt.handle_key(key(KeyCode::Enter), &mut state) {
             Some(TreeAction::Share {
                 node,
-                scope,
+                include_children,
                 dest,
                 passphrase,
             }) => {
                 assert_eq!(node.name, "Work");
-                assert_eq!(scope, ShareScope::Branch);
+                assert!(include_children);
                 assert_eq!(dest, "/tmp/vault_Work");
                 assert_eq!(passphrase, "pw");
             }

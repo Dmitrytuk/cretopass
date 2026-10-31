@@ -1,9 +1,9 @@
 //! The Share modal: a one-step wizard that picks what to share.
 //!
-//! `This branch` shares the selected Node and its descendants; `Whole file`
-//! shares the open file's Root. Confirming reports a
-//! [`TreeAction::BeginShareDestination`] — naming the destination folder and
-//! writing the bundle are the orchestrator's job.
+//! `This node` shares the selected Node alone; `This node with children` shares
+//! it and its descendants — the same choice the export wizard offers. Confirming
+//! reports a [`TreeAction::BeginShareDestination`] — naming the destination
+//! folder and writing the bundle are the orchestrator's job.
 
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
@@ -14,23 +14,21 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use super::TreeAction;
 use super::chrome::centered_rect;
 use crate::cursor::selected_span;
-use crate::share::ShareScope;
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::TreeState;
 
-/// The Share modal: pick the scope.
+/// The Share modal: pick what to share.
 #[derive(Debug)]
 pub(crate) struct ShareWizard {
-    /// The Node selected when the wizard opened; the branch scope shares it.
+    /// The Node selected when the wizard opened.
     node: Node,
-    /// Focused row: 0 = this branch, 1 = whole file.
+    /// Focused row: 0 = this node, 1 = this node with children.
     selected: usize,
 }
 
 impl ShareWizard {
-    /// A wizard for sharing `node` (or, on the whole-file row, the open Root),
-    /// starting on the branch row.
+    /// A wizard for sharing `node`, starting on the node-only row.
     pub(crate) fn new(node: Node) -> Self {
         Self { node, selected: 0 }
     }
@@ -52,20 +50,13 @@ impl ShareWizard {
                 self.selected = i;
                 None
             }
+            // Row 1 is "with children", row 0 is the node alone, matching the
+            // export wizard's scope step.
             Action::Confirm => Some(TreeAction::BeginShareDestination {
                 node: self.node.clone(),
-                scope: self.scope(),
+                include_children: self.selected == 1,
             }),
             _ => None,
-        }
-    }
-
-    /// The scope the current selection stands for.
-    fn scope(&self) -> ShareScope {
-        if self.selected == 0 {
-            ShareScope::Branch
-        } else {
-            ShareScope::WholeFile
         }
     }
 
@@ -120,25 +111,30 @@ mod tests {
     }
 
     #[test]
-    fn the_branch_row_is_chosen_by_default() {
+    fn the_node_row_is_chosen_by_default() {
         let (mut wizard, mut state) = wizard();
 
         match wizard.handle_key(key(KeyCode::Enter), &mut state) {
-            Some(TreeAction::BeginShareDestination { node, scope }) => {
+            Some(TreeAction::BeginShareDestination {
+                node,
+                include_children,
+            }) => {
                 assert_eq!(node.name, "Work");
-                assert_eq!(scope, ShareScope::Branch);
+                assert!(!include_children);
             }
             _ => panic!("expected a share destination request"),
         }
     }
 
     #[test]
-    fn the_whole_file_row_is_reachable_by_j() {
+    fn the_with_children_row_is_reachable_by_j() {
         let (mut wizard, mut state) = wizard();
         let _ = wizard.handle_key(key(KeyCode::Char('j')), &mut state);
         match wizard.handle_key(key(KeyCode::Enter), &mut state) {
-            Some(TreeAction::BeginShareDestination { scope, .. }) => {
-                assert_eq!(scope, ShareScope::WholeFile);
+            Some(TreeAction::BeginShareDestination {
+                include_children, ..
+            }) => {
+                assert!(include_children);
             }
             _ => panic!("expected a share destination request"),
         }
@@ -149,8 +145,10 @@ mod tests {
         let (mut wizard, mut state) = wizard();
         let _ = wizard.handle_key(key(KeyCode::Char('2')), &mut state);
         match wizard.handle_key(key(KeyCode::Enter), &mut state) {
-            Some(TreeAction::BeginShareDestination { scope, .. }) => {
-                assert_eq!(scope, ShareScope::WholeFile);
+            Some(TreeAction::BeginShareDestination {
+                include_children, ..
+            }) => {
+                assert!(include_children);
             }
             _ => panic!("expected a share destination request"),
         }

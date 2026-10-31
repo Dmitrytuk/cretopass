@@ -1,5 +1,5 @@
-//! Sharing a Node subtree (or the whole file) as a portable, still-encrypted
-//! bundle.
+//! Sharing a Node (with or without its children) or the whole file as a
+//! portable, still-encrypted bundle.
 //!
 //! A share bundle is a folder holding a new secret file — the chosen subtree,
 //! re-encrypted under a fresh password — plus a plain-text instruction telling

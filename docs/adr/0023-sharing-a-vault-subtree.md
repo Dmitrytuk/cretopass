@@ -6,9 +6,9 @@ exposes every password in the clear on disk. There was no way to hand part of a
 vault to another person as something they can open in cretopass.
 
 **Decision:** a new **Share** flow writes a self-contained *share bundle* — a
-folder holding a new, still-encrypted secret file for the chosen scope plus a
+folder holding a new, still-encrypted secret file for what is shared plus a
 plain-text instruction — for two entry points: the Tree (`Ctrl+E`, then `s`,
-sharing the selected Node's subtree or the whole file) and the Home menu
+sharing the selected Node alone or with its children) and the Home menu
 («Share active file», sharing the whole open vault).
 
 A bundle is:
@@ -39,11 +39,11 @@ Rules that follow from it:
   (`save_tree`), so a crash mid-write never leaves a truncated bundle; the
   instruction is written after it, so a failure there still leaves an openable
   vault.
-- **The scope and the password are shared UI, the chrome is not.** A
-  UI-agnostic `share` module owns the scope vocabulary (`ShareScope`) and the
-  masked password pair (`Passphrase`, over `cursor::SecretFieldGroup`); the Tree
-  and Home screens each wrap them in their own modals, chrome and actions
-  (`TreeAction` / `HomeAction`).
+- **The password is shared UI, the chrome is not.** A UI-agnostic `share` module
+  owns the masked password pair (`Passphrase`, over `cursor::SecretFieldGroup`);
+  the Tree and Home screens each wrap it in their own modals, chrome and actions
+  (`TreeAction` / `HomeAction`). The Tree's scope is the same node / node-with-
+  children choice as export, carried as `include_children`.
 - **The File Browser names the folder.** `FileBrowserMode::ShareDestination`
   names the bundle folder, mirroring the export mode: `n` edits the name and `e`
   on the list (the export's write key) or Enter in the input commits it. An

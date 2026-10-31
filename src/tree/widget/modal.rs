@@ -41,7 +41,6 @@ use crossterm::event::KeyEvent;
 
 use super::TreeState;
 use crate::file_handling::export::ExportFormat;
-use crate::share::ShareScope;
 use crate::tree::node::Node;
 
 /// What the active modal asks the Tree screen to do.
@@ -68,20 +67,20 @@ pub(crate) enum TreeAction {
         format: ExportFormat,
         path: String,
     },
-    /// Open the File Browser to name the folder a share bundle of `node` (and,
-    /// for `WholeFile`, the whole open tree) is written into.
-    BeginShareDestination { node: Node, scope: ShareScope },
+    /// Open the File Browser to name the folder a share bundle of `node`, with
+    /// or without its children, is written into.
+    BeginShareDestination { node: Node, include_children: bool },
     /// Ask for the password a share bundle of `node` is encrypted with, having
     /// named `dest`.
     BeginSharePassphrase {
         node: Node,
-        scope: ShareScope,
+        include_children: bool,
         dest: String,
     },
     /// Write a share bundle of `node` into `dest`, encrypted with `passphrase`.
     Share {
         node: Node,
-        scope: ShareScope,
+        include_children: bool,
         dest: String,
         passphrase: String,
     },
@@ -102,7 +101,8 @@ pub(crate) enum Modal {
     /// Naming the destination of an export in the File Browser. Boxed because the
     /// browser's state is far larger than the passive modals.
     ExportDestination(Box<ExportDestination>),
-    /// The share flow's first step: pick the scope (branch or whole file).
+    /// The share flow's first step: pick what to share (this node or with its
+    /// children).
     Share(ShareWizard),
     /// Naming the folder a share bundle is written into. Boxed because the
     /// browser's state is far larger than the passive modals.

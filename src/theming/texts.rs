@@ -243,8 +243,9 @@ pub const MODE_EXPORT_FORMAT: &str = "EXPORT FMT";
 pub const MODE_PENDING_EXPORT: &str = "EXPORT";
 pub const HINT_PENDING_EXPORT: &str = "e:export  s:share  Esc:cancel";
 
-pub const OVERLAY_SHARE_SCOPE: &str = " Share ";
-pub const SHARE_SCOPE_OPTIONS: [&str; 2] = ["1. This branch", "2. Whole file"];
+pub const OVERLAY_SHARE_SCOPE: &str = " Share Node ";
+pub const SHARE_SCOPE_OPTIONS: [&str; 2] =
+    ["1. Share this node", "2. Share this node with children"];
 pub const HINT_SHARE_SCOPE: &str = "j/k:nav  1-2:select  Enter:choose  Esc:cancel";
 pub const MODE_SHARE: &str = "SHARE";
 

@@ -64,7 +64,7 @@ _Avoid_: Recent files, History
 **Export**: Writing a Node (with or without children) to a plain-text file in JSON, XML, or CSV format. The File Browser names the destination: the directory it has open is where the file lands, and the file name is shown in the browser's path bar. An export never overwrites a secret file.
 _Avoid_: Dump, Backup
 
-**Share**: Writing a self-contained bundle for another person: a new secret file re-encrypted under a recipient password — the selected branch or the whole open file — plus a plain-text instruction. The File Browser names the bundle folder; the recipient's password is never stored in the bundle.
+**Share**: Writing a self-contained bundle for another person: a new secret file re-encrypted under a recipient password — the selected node (with or without its children) or the whole open file — plus a plain-text instruction. The File Browser names the bundle folder; the recipient's password is never stored in the bundle.
 _Avoid_: Transfer, Send
 
 **Share bundle**: The folder a Share writes: `<stem>.cretopass` (an ordinary secret file) and `HOW-TO-OPEN.txt`. Distinct from an Export, which is plain text.

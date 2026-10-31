@@ -17,7 +17,6 @@ use super::modal::TreeAction;
 use super::{ExportDestination, Modal, ShareDestination, SharePassphrase, TreeState};
 use crate::file_handling::export::{ExportFormat, export_tree};
 use crate::file_handling::share::share_tree;
-use crate::share::ShareScope;
 use crate::theming::{Status, texts};
 use crate::tree::node::Node;
 
@@ -56,22 +55,39 @@ pub(crate) fn execute<B: Backend>(
             export(state, node, include_children, format, &path);
             Ok(())
         }
-        TreeAction::BeginShareDestination { node, scope } => {
-            open_share_destination(state, node, scope);
+        TreeAction::BeginShareDestination {
+            node,
+            include_children,
+        } => {
+            open_share_destination(state, node, include_children);
             Ok(())
         }
-        TreeAction::BeginSharePassphrase { node, scope, dest } => {
+        TreeAction::BeginSharePassphrase {
+            node,
+            include_children,
+            dest,
+        } => {
             state.modal = Some(Modal::SharePassphrase(Box::new(SharePassphrase::new(
-                node, scope, dest,
+                node,
+                include_children,
+                dest,
             ))));
             Ok(())
         }
         TreeAction::Share {
             node,
-            scope,
+            include_children,
             dest,
             passphrase,
-        } => share(state, terminal, draw, node, scope, &dest, &passphrase),
+        } => share(
+            state,
+            terminal,
+            draw,
+            node,
+            include_children,
+            &dest,
+            &passphrase,
+        ),
     }
 }
 
@@ -104,10 +120,10 @@ fn open_export_destination(
 ///
 /// The open secret file seeds the suggested folder name and the starting
 /// directory; the browser falls back to its session memory when there is none.
-fn open_share_destination(state: &mut TreeState, node: Node, scope: ShareScope) {
+fn open_share_destination(state: &mut TreeState, node: Node, include_children: bool) {
     let destination = {
         let base_path = state.active_vault_path.as_deref().map(Path::new);
-        ShareDestination::new(node, scope, base_path, &state.browser_session)
+        ShareDestination::new(node, include_children, base_path, &state.browser_session)
     };
 
     state.modal = Some(Modal::ShareDestination(Box::new(destination)));
@@ -135,29 +151,31 @@ fn export(
     });
 }
 
-/// Writes a share bundle of `node` into `path` and reports the outcome as an
-/// alert.
+/// Writes a share bundle of `node`, with or without its children, into `path`
+/// and reports the outcome as an alert.
 ///
-/// `WholeFile` shares the open Root rather than the Node selected when the wizard
-/// opened, and names the bundle after the file's stem alone. The write runs off
-/// the UI thread so the title bar keeps animating its `Saving` status while the
-/// bundle is re-encrypted and fsynced.
+/// The bundle is named after the Node. The write runs off the UI thread so the
+/// title bar keeps animating its `Saving` status while the bundle is re-encrypted
+/// and fsynced.
 fn share<B: Backend>(
     state: &mut TreeState,
     terminal: &mut Terminal<B>,
     draw: fn(&mut Frame, &mut TreeState),
     node: Node,
-    scope: ShareScope,
+    include_children: bool,
     path: &str,
     passphrase: &str,
 ) -> io::Result<()> {
-    let (bundle_root, node_name) = match scope {
-        ShareScope::Branch => {
-            let name = node.name.clone();
-            (node, Some(name))
-        }
-        ShareScope::WholeFile => (state.root.clone(), None),
+    // Mirror the export wizard: a node shared without its children drops them
+    // before it is written.
+    let bundle_root = if include_children {
+        node
+    } else {
+        let mut node = node;
+        node.children = Vec::new();
+        node
     };
+    let node_name = Some(bundle_root.name.clone());
     let base_path = state.active_vault_path.clone();
     let path = path.to_string();
     let passphrase = passphrase.to_string();

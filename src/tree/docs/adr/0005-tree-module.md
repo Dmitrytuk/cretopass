@@ -96,13 +96,14 @@ pure over their own state, their `handle_key` is testable without a terminal.
   named afterwards in the File Browser ([`Modal::ExportDestination`]), whose
   confirmed path reports `TreeAction::Export`, which the orchestrator writes to
   disk. See [0022](../../../../docs/adr/0022-user-chosen-export-destination.md).
-- The share flow is three modals: `Modal::Share` (a one-step scope picker,
-  `This branch` / `Whole file`), then `Modal::ShareDestination` (the File Browser
-  naming the bundle folder), then `Modal::SharePassphrase` (the recipient's
-  masked password pair, with an inline `y`-confirm for a passwordless bundle).
-  The confirmed bundle reports `TreeAction::Share`, which the orchestrator writes
-  through `file_handling::share`; `Whole file` resolves to the open Root, taken
-  from memory. See [0023](../../../../docs/adr/0023-sharing-a-vault-subtree.md).
+- The share flow is three modals: `Modal::Share` (a one-step picker of what to
+  share — `This node` / `This node with children`, the same choice as export),
+  then `Modal::ShareDestination` (the File Browser naming the bundle folder),
+  then `Modal::SharePassphrase` (the recipient's masked password pair, with an
+  inline `y`-confirm for a passwordless bundle). The confirmed bundle reports
+  `TreeAction::Share`, which the orchestrator writes through
+  `file_handling::share`; a node shared without its children drops them, exactly
+  like an export. See [0023](../../../../docs/adr/0023-sharing-a-vault-subtree.md).
 
 ## Prefix modes
 
