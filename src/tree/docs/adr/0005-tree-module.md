@@ -99,12 +99,16 @@ pure over their own state, their `handle_key` is testable without a terminal.
 
 `PendingCut`, `PendingPaste`, and `PendingAdd` are one-key prefix modes:
 
-- `d` enters `PendingCut`; a second `d` cuts, any other key cancels.
+- `d` enters `PendingCut`; a second `d` cuts, any other key cancels. The Root
+  has no sibling slot, so `d` is inert while the Root is selected.
 - `p` enters `PendingPaste` only when the cut buffer is non-empty; `p`/`P`/`l`(→)
-  choose paste after/before/child, any other key cancels.
+  choose paste after/before/child, any other key cancels. On the Root only
+  `l`(→) applies; `p`/`P` are no-ops.
 - `a` enters `PendingAdd`; `a`/`A`/`l`(→) choose add after/before/child,
-  any other key cancels. The choice is stored in `TreeState::add_position`
-  (`AddPosition`) and consumed when the form is confirmed.
+  any other key cancels. On the Root only `l`(→) is offered: `a`/`A` cancel
+  instead of opening a form whose first commit could never insert. The choice
+  is stored in `TreeState::add_position` (`AddPosition`) and consumed when the
+  form is confirmed.
 
 `h`/`←` collapses an expanded parent; otherwise it moves the cursor to the
 parent row (`collapse_or_select_parent`).
@@ -188,7 +192,8 @@ parent row (`collapse_or_select_parent`).
 - `p` enters `PendingPaste` only when the buffer is non-empty; `p` pastes after,
   `P` pastes before, `l`/`→` pastes as last child.
 - System clipboard only used in the Detail modal (copy a row's value). Targets: `pbcopy` (macOS), `wl-copy`/`xclip`/`xsel` (Linux).
-- `remove_node()` only targets children (not root). Root cannot be cut.
+- `remove_node()` only targets children (not root). The Root cannot be cut, so
+  `d` is inert while the Root is selected.
 
 ## Autosave flow
 

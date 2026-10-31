@@ -182,6 +182,16 @@ impl TreeState {
         self.visible.get(self.selected).map(|v| v.id)
     }
 
+    /// Returns `true` when the selected visible row is the Root.
+    ///
+    /// The Root is the only Node without a parent, so it has no sibling slot:
+    /// it cannot be cut, and nothing can be added or pasted beside it.
+    pub(crate) fn is_root_selected(&self) -> bool {
+        self.visible
+            .get(self.selected)
+            .is_some_and(|row| row.id == self.root.id)
+    }
+
     /// Toggles the expanded/collapsed state of the selected node.
     pub fn toggle_expand(&mut self) {
         if let Some(id) = self.selected_node_id() {
@@ -678,5 +688,19 @@ mod tests {
             assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "B"]);
             assert!(!state.modified);
         }
+    }
+
+    #[test]
+    fn is_root_selected_is_true_for_the_root_row() {
+        let mut state = make_tree();
+        state.selected = 0;
+        assert!(state.is_root_selected());
+    }
+
+    #[test]
+    fn is_root_selected_is_false_off_the_root() {
+        let mut state = make_tree();
+        state.selected = 1; // "A"
+        assert!(!state.is_root_selected());
     }
 }
