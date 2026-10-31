@@ -391,14 +391,15 @@ fn fb_hint(state: &FileBrowserState) -> String {
         parts.push(texts::FB_HINT_IMPORT_TYPES);
     }
 
-    // Export and share name a destination in the path bar; `n` edits it (and `e`
-    // writes an export to the directory now open).
+    // Export and share name a destination in the path bar; `n` edits it, and `e`
+    // writes the export or commits the share into the directory now open.
     if state.mode.export_format().is_some() {
         parts.push(texts::FB_HINT_EXPORT_NAME);
         parts.push(texts::FB_HINT_EXPORT);
     }
     if state.mode.is_share_destination() {
         parts.push(texts::FB_HINT_SHARE_NAME);
+        parts.push(texts::FB_HINT_SHARE);
     }
 
     parts.extend([
@@ -1414,7 +1415,7 @@ mod tests {
     }
 
     #[test]
-    fn status_parts_share_advertises_the_name_key() {
+    fn status_parts_share_advertises_the_name_and_commit_keys() {
         let dir = tempfile::tempdir().unwrap();
         let state = share_state(dir.path());
 
@@ -1426,8 +1427,8 @@ mod tests {
             "the share browser should advertise the name key: {hint}"
         );
         assert!(
-            !hint.contains("[e]export"),
-            "a share does not write with `e`: {hint}"
+            hint.contains("[e]share"),
+            "the share browser should advertise the commit key: {hint}"
         );
     }
 

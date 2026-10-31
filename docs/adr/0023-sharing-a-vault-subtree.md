@@ -45,10 +45,11 @@ Rules that follow from it:
   and Home screens each wrap them in their own modals, chrome and actions
   (`TreeAction` / `HomeAction`).
 - **The File Browser names the folder.** `FileBrowserMode::ShareDestination`
-  names the bundle folder, mirroring the export mode: `n` edits the name and
-  Enter in the input commits it. An existing folder that is not empty asks for
-  confirmation first, so a re-share can update the same bundle; a path that is
-  an existing file — in particular another secret file — is refused.
+  names the bundle folder, mirroring the export mode: `n` edits the name and `e`
+  on the list (the export's write key) or Enter in the input commits it. An
+  existing folder that is not empty asks for confirmation first, so a re-share
+  can update the same bundle; a path that is an existing file — in particular
+  another secret file — is refused.
 - **Unsaved edits are included.** Like an export, a share takes the tree from
   memory.
 - **The extension is a label.** The bundle's file is written with `.cretopass`

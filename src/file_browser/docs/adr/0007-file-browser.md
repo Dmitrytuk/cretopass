@@ -30,7 +30,7 @@ file listing UX to vault-specific modal logic, preventing reuse.
 - `FileBrowserState::session()` captures `current_dir` and `show_hidden`; `vault::widget` stores the returned `FileBrowserSession` in `HomeState` and passes it to every subsequent opening. The session is in memory only — it is never written to config or disk.
 - `handle_key(key, state) → Option<FileBrowserAction>` — returns `None` while browsing, `Some(Selected(path))` or `Some(Cancelled)` to exit.
 - Enter in the name input returns `Selected` only when no file with that name exists at the target path; otherwise it shows a dismissable error popup and stays open. In `ExportFile` mode Enter only accepts the draft and returns to the list; `e` on the list resolves the typed name through `file_handling::export::output_path`, refusing a blank name and a secret-file target and asking for an overwrite confirmation (`confirm_overwrite`, dismissed by any other key) before reporting `Selected` for the directory now open.
-- In `ShareDestination` mode Enter in the name input commits the typed folder: a blank name is refused, a path that exists as a file is refused, and an existing folder that is not empty asks for confirmation (`confirm_overwrite`) before reporting `Selected` for the folder. The list only picks the parent directory.
+- In `ShareDestination` mode `e` on the list (like an export's write key) and Enter in the name input both commit the typed folder: a blank name is refused, a path that exists as a file is refused, and an existing folder that is not empty asks for confirmation (`confirm_overwrite`) before reporting `Selected` for the folder. The list only picks the parent directory.
 - The name input, rename input, delete confirmation, and errors render as centered popups stacked over the browser; an error popup sits on top of any active dialog and is dismissed by the next key.
 - The Locations overlay pins `Home` first, then lists mounted disks returned by `file_handling::list_disks()`. It preselects the location with the longest path that is an ancestor of `current_dir`, falling back to the first row. Enter on an unreadable location keeps the overlay open and shows the error popup on top.
 - Hidden entries are names starting with `.`; nothing else is treated as hidden. `list_dir` excludes them and `list_dir_including_hidden` includes them.
@@ -46,7 +46,7 @@ file listing UX to vault-specific modal logic, preventing reuse.
 | `j`/`k` | Navigate files |
 | `Enter` | Enter directory or select file (in `ExportFile` and `ShareDestination` modes, a file row does nothing: only the open directory is a target) |
 | `n` | (`ExportFile`/`ShareDestination` mode) Focus the name input; in `ExportFile` Enter accepts the draft and returns to the list, in `ShareDestination` Enter commits the bundle folder |
-| `e` | (`ExportFile` mode) Write the export to the directory now open (resolves the format's extension, refuses a secret-file or blank name, asks before overwriting) |
+| `e` | Write or commit the destination named in the path bar: (`ExportFile` mode) write the export (resolves the format's extension, refuses a secret-file or blank name, asks before overwriting); (`ShareDestination` mode) commit the typed folder the bundle is written into (refuses a blank name or an existing file, asks before writing into a non-empty folder) |
 | `/` | Search filter |
 | `D` | Open the Locations overlay (list focus only, not while searching) |
 | `Ctrl+h` / `Ctrl+Backspace` | Toggle hidden (dot-prefixed) entries (list focus; ignored in search and text inputs) |

@@ -252,6 +252,7 @@ pub const BROWSER_SHARE: &str = " Share into ";
 pub const OVERLAY_SHARE_FOLDER: &str = " Share Folder ";
 pub const LABEL_FOLDER_INLINE: &str = " Folder: ";
 pub const FB_HINT_SHARE_NAME: &str = " [n]name ";
+pub const FB_HINT_SHARE: &str = " [e]share ";
 pub const FB_HINT_SHARE_CONFIRM: &str = "Enter:share";
 pub const FB_PROMPT_SHARE_FOLDER: &str = " Write into ";
 

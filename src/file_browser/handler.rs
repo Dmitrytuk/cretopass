@@ -255,6 +255,7 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
                 None
             }
             KeyCode::Char('e') if state.mode.export_format().is_some() => begin_export(state),
+            KeyCode::Char('e') if state.mode.is_share_destination() => begin_share(state),
             _ => None,
         };
     }
@@ -300,8 +301,8 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
             if state.mode.names_destination() {
                 // The list picks the directory only: a file row is not a target.
                 // The export name is edited with `n` and written with `e`; the
-                // share folder is edited with `n` and committed with Enter in the
-                // input.
+                // share folder is edited with `n` and committed with `e` on the
+                // list or Enter in the input.
                 return None;
             }
 
@@ -333,13 +334,15 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
             state.pending = AddPrefix::Pending;
             None
         }
-        // Naming a destination: `n` edits the name, `e` writes an export to the
-        // directory now open, and Enter in the input commits a share's folder.
+        // Naming a destination: `n` edits the name; `e` writes an export to the
+        // directory now open or commits a share's folder, and Enter in the input
+        // also commits a share.
         KeyCode::Char('n') if state.mode.names_destination() => {
             state.focus = FocusTarget::Input;
             None
         }
         KeyCode::Char('e') if state.mode.export_format().is_some() => begin_export(state),
+        KeyCode::Char('e') if state.mode.is_share_destination() => begin_share(state),
         KeyCode::Char('r') => {
             if let Some(entry) = state.entries.get(state.selected)
                 && entry.is_age_file
@@ -497,11 +500,11 @@ fn confirm_export_destination(
 
 /// Commits the typed name as the folder a share bundle is written into.
 ///
-/// The name is required (unlike an export, Enter is the only way to commit, so
-/// the empty-name check belongs here). A path that already exists as a file is
-/// refused — a bundle is a folder — and an existing folder that is not empty
-/// asks for confirmation first, so a re-share can update a bundle this flow
-/// produced before.
+/// The name is required (unlike an export, the share is committed with `e` on
+/// the list or Enter in the input, so the empty-name check belongs here). A path
+/// that already exists as a file is refused — a bundle is a folder — and an
+/// existing folder that is not empty asks for confirmation first, so a re-share
+/// can update a bundle this flow produced before.
 fn begin_share(state: &mut FileBrowserState) -> Option<FileBrowserAction> {
     let name = state.creating_name.trim();
     if name.is_empty() {
@@ -1554,14 +1557,46 @@ mod tests {
     }
 
     #[test]
-    fn test_share_does_not_write_on_e() {
+    fn test_share_e_commits_the_folder() {
         let dir = tempfile::tempdir().unwrap();
         let mut state = share_state(dir.path());
 
-        // `e` writes an export; a share commits with Enter in its input.
+        // `e` commits the folder, matching an export's write key.
+        let result = handle_key(key(KeyCode::Char('e')), &mut state);
+
+        assert_eq!(
+            result,
+            Some(FileBrowserAction::Selected(
+                dir.path().join("vault").to_string_lossy().to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_share_e_with_a_blank_name_shows_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = share_state(dir.path());
+        state.creating_name = "   ".to_string();
+
         let result = handle_key(key(KeyCode::Char('e')), &mut state);
 
         assert_eq!(result, None);
-        assert_eq!(state.focus, FocusTarget::List);
+        assert_eq!(state.error.as_deref(), Some(texts::MSG_NAME_REQUIRED));
+    }
+
+    #[test]
+    fn test_share_e_asks_before_writing_into_a_non_empty_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("vault");
+        std::fs::create_dir(&bundle).unwrap();
+        std::fs::write(bundle.join("HOW-TO-OPEN.txt"), b"old").unwrap();
+        let mut state = share_state(dir.path());
+
+        let result = handle_key(key(KeyCode::Char('e')), &mut state);
+        assert_eq!(result, None, "the folder must be confirmed first");
+        assert!(state.confirm_overwrite.is_some());
+
+        let confirmed = handle_key(key(KeyCode::Char('y')), &mut state);
+        assert!(matches!(confirmed, Some(FileBrowserAction::Selected(_))));
     }
 }
