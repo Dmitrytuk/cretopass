@@ -3,7 +3,8 @@
 The `file_handling` module is the **single point of filesystem access** for the
 entire application. No other module imports `std::fs`. This was a deliberate
 boundary decision: all disk I/O is mediated through this module so that
-encryption, backup, error handling, and import/export logic share one place.
+encryption, backup, error handling, and import/export/share logic share one
+place.
 
 **Rejected alternative:** sprinkling `std::fs` calls across modules. This would
 make it impossible to guarantee atomic saves, enforce encryption on write, or
@@ -19,11 +20,13 @@ audit I/O patterns.
 | `error.rs` | `FileHandlingError` enum (+ `crypt::CryptError` for typed encryption/decryption failures) wrapping Io / Serde / typed crypt errors + domain errors |
 | `export.rs` | `ExportFormat` (JSON/XML/CSV), recursive XML serialization, flattened CSV export |
 | `import.rs` | `ImportFormat` detection, JSON/XML/CSV import with custom parsers, `build_tree_from_paths()` |
+| `share.rs` | `suggest_name` (the bundle-folder name) and `share_tree`: writes a share bundle — a re-encrypted secret file via `save_tree`, then a `HOW-TO-OPEN.txt` instruction ([0023](../../../../docs/adr/0023-sharing-a-vault-subtree.md)) |
 
 ## Contracts
 
 - All public functions accept `&str` or `&Path` for paths (not `PathBuf`).
 - `save_tree()` is crash-safe: writes to `{path}.tmp` → `fsync` → copies original to `{path}.bak` → `rename(tmp, original)` → removes `.bak`.
+- `share_tree()` refuses a destination that already exists as a file, creates the folder, writes the bundle's secret file through `save_tree()`, and only then writes the `HOW-TO-OPEN.txt` instruction.
 - `Autosave` serializes all writes through one thread. Callers submit a root snapshot and receive a generation; a newer submission replaces one that has not started. The worker emits `SaveEvent` after every attempt. Because `save_tree()` uses fixed `{path}.tmp` and `{path}.bak` names, concurrent saves for the same path are not supported.
 - `validate_encrypted_file()` enforces a 50MB size cap and scans for the `age-encryption.org` magic header.
 - `list_dir()` skips hidden (dot-prefixed) entries; `list_dir_including_hidden()` returns them too. Both sort directories first, then alphabetically.

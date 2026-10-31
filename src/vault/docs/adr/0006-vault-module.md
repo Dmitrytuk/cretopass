@@ -22,11 +22,10 @@ to reason about.
 | `widget/state.rs` | `HomeState` — menu cursor, active vault, busy status and spinner, File Browser session memory, generator settings. |
 | `widget/menu.rs` | The Home menu: `handle_home_key` and the pure `menu_intent`. |
 | `widget/modal.rs` | The contract vocabulary: `Modal` (the one-window slot) and `HomeAction` (what a modal asks for); re-exports the modal types. |
-| `widget/modal/` | One file per modal: `browser.rs`, `unlock.rs`, `create_secret.rs`, `change_password.rs`, `configuration.rs`, `confirmation.rs`, `export.rs`, `alert.rs`, `about.rs`. |
-| `widget/orchestrator.rs` | The one place that performs a `HomeAction`: `execute`, plus the File Browser opener. |
-| `widget/orchestrator/` | One file per flow group: `vault.rs` (unlock, create, re-key, launch Tree), `import.rs`, `recent.rs`, `settings.rs`, `export.rs`. |
+| `widget/modal/` | One file per modal: `browser.rs`, `unlock.rs`, `create_secret.rs`, `change_password.rs`, `configuration.rs`, `confirmation.rs`, `export.rs`, `share.rs`, `alert.rs`, `about.rs`. |
+| `widget/orchestrator.rs` | The one place that performs a `HomeAction`: `execute`, plus the File Browser openers. |
+| `widget/orchestrator/` | One file per flow group: `vault.rs` (unlock, create, re-key, launch Tree), `import.rs`, `recent.rs`, `settings.rs`, `export.rs`, `share.rs`. |
 | `widget/render.rs` | Rendering the menu, the modal on top of it, and the status bar. |
-| `widget/secret_field.rs` | `SecretField` / `SecretFieldGroup`: masked multi-field editing, shared by the three password prompts. |
 | `widget/chrome.rs` | Overlay geometry and painting shared by the modals. |
 | `active_file.rs` | `ActiveVaultState` — holds `path: Option<String>`, `passphrase: Zeroizing<Vec<u8>>`, `node: Option<Node>`. Bridge between home and tree. |
 | `utils.rs` | `Configuration` struct, `config_dir()`, `push_recent_secret_file()`, `save_config()`/`load_config()` via rkyv, legacy `settings.pwd` → `config.pwd` migration |
@@ -37,7 +36,7 @@ the orchestrator performs it. See [0021](0021-home-intent-contract.md).
 ## Home screen flow
 
 1. `cargo run` → `vault::widget::run()`
-2. Menu: "Open secret file", "Create new secret file", "Import from file", recent files list, "Configuration", "Export active file", "Change master password", "Quit"
+2. Menu: "Open secret file", "Create new secret file", "Import from file", recent files list, "Configuration", "Export active file", "Share active file", "Change master password", "Quit"
 3. "Open secret file" → `BrowserModal` (OpenFile mode) → validate age header + size → `UnlockPrompt` → decrypt → `push_recent_secret_file()` → launch tree
 4. "Create new secret file" → `BrowserModal` (CreateFile mode) → Enter on a name hard-blocks if the path already exists → probe writability → `CreateSecretPrompt` (passphrase + confirmation, `Ctrl+S` reveals) → create encrypted file with root `"Secrets"` → launch tree. An all-empty pair falls through to the `Confirmation` asking for a passwordless file.
 5. Auto-open on startup: if config has `open_last_opened_file_on_startup`, validates the file and opens the unlock prompt immediately
@@ -46,10 +45,11 @@ the orchestrator performs it. See [0021](0021-home-intent-contract.md).
 
 ## Modals
 
-Nine `Modal` variants: `FileBrowser`, `Unlock`, `CreateSecret`, `Configuration`,
+Ten `Modal` variants: `FileBrowser`, `Unlock`, `CreateSecret`, `Configuration`,
 `Alert`, `Confirmation` (carrying a `ConfirmKind`), `ChangePassword`, `Export`
 (a one-step `ExportWizard` picking the format, with the destination then named in
-the File Browser), `About`.
+the File Browser), `SharePassphrase` (the recipient's password and confirmation
+for a share bundle), `About`.
 
 Password fields (`Unlock`, `ChangePassword`, `CreateSecret`) mask input by
 default; `Ctrl+S` toggles plaintext. `CreateSecret` validates that the passphrase
@@ -81,6 +81,7 @@ launching the tree, so returning to home does not re-show the dialog.
 - `file_handling` — all I/O
 - `file_browser` — the directory browser, wrapped as a `Modal` variant
 - `theming` — Action dispatch, strings, styles
-- `cursor` — text editing in `secret_field`
+- `cursor` — the masked password fields (`SecretField`) and text editing
+- `share` — the UI-agnostic share flow: the scope vocabulary and the recipient's masked password pair, shared with the Tree
 - `tree::node` — Node type for ActiveVaultState
 - `tree::app_tree` — tree screen launch

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Share** a branch or the whole vault as a still-encrypted bundle the
+  recipient opens in cretopass with their own password. Reached from the Tree
+  with `Ctrl+E` then `s`, or from Home's "Share active file". The File Browser
+  names the bundle folder, which gets a `<stem>.cretopass` file and a
+  plain-text `HOW-TO-OPEN.txt`; the password is never written into the bundle.
 - File browser can switch to mounted disks through a `Locations` overlay
   (`D`), toggle hidden dot-entries with `Ctrl+h` (or `Ctrl+Backspace`), and
   remember the last browsed directory and hidden setting for the rest of the

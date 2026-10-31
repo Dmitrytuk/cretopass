@@ -4,7 +4,7 @@ Vault lifecycle: opening, creating, browsing for, configuring, and exchanging se
 
 ## Language
 
-**Home**: The launcher shown on startup. Lists Open secret file, Create new secret file, Configuration, Change file password, Export/Import actions, and Recent secret files.
+**Home**: The launcher shown on startup. Lists Open secret file, Create new secret file, Configuration, Change file password, Export/Share/Import actions, and Recent secret files.
 _Avoid_: Settings menu, Launcher
 
 **Modal**: A window that takes over the keyboard until it is dismissed. At most one is open at a time, over the Home menu or the Tree. Nothing outside it reacts to keys while it is up.
@@ -19,7 +19,7 @@ _Avoid_: Prompt, Warning
 **About modal**: The Home Modal opened with `?`. Shows the app name, version, tagline, the Feedback channel link, the private security-reporting form, and the license. Dismissed by any key, like the Tree's help overlay.
 _Avoid_: Help screen, Info dialog, About overlay
 
-**File Browser**: Modal for navigating the filesystem to pick a secret file (Open), name a new one (Create), select a file for import, or name the destination of an export.
+**File Browser**: Modal for navigating the filesystem to pick a secret file (Open), name a new one (Create), select a file for import, name the destination of an export, or name the folder a share bundle is written into.
 _Avoid_: File Picker, Directory Browser
 
 **File Browser session**: In-memory state shared by successive File Browser openings during one program run: the Last directory and whether Hidden entries are shown. Never written to config or disk.
@@ -63,5 +63,11 @@ _Avoid_: Recent files, History
 
 **Export**: Writing a Node (with or without children) to a plain-text file in JSON, XML, or CSV format. The File Browser names the destination: the directory it has open is where the file lands, and the file name is shown in the browser's path bar. An export never overwrites a secret file.
 _Avoid_: Dump, Backup
+
+**Share**: Writing a self-contained bundle for another person: a new secret file re-encrypted under a recipient password — the selected branch or the whole open file — plus a plain-text instruction. The File Browser names the bundle folder; the recipient's password is never stored in the bundle.
+_Avoid_: Transfer, Send
+
+**Share bundle**: The folder a Share writes: `<stem>.cretopass` (an ordinary secret file) and `HOW-TO-OPEN.txt`. Distinct from an Export, which is plain text.
+_Avoid_: Package, Archive, Zip
 
 **Import**: Reading a JSON, XML, or CSV file and merging the parsed Node tree as a child of the current Root. A timestamped wrapper node is created for multi-root imports.

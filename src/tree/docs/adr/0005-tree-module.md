@@ -3,8 +3,8 @@
 The tree module is the core of the application: it owns the `Node` data model,
 renders the tree UI, runs the event loop, and hosts the Tree's input-capturing
 windows. Those are `Modal`s — Detail (with the Add/Edit `Form` Popup nested in
-it), Help, Alert, and Export — over a small set of navigation *modes* (Normal,
-Search, the cut/paste/add prefixes).
+it), Help, Alert, Export, and Share — over a small set of navigation *modes*
+(Normal, Search, the cut/paste/add/export prefixes).
 
 **Decision:** represent the tree as a recursive `Node` struct and flatten it to
 a `Vec<VisibleNode>` via DFS for rendering. Navigation happens on the flat index
@@ -59,9 +59,10 @@ their descriptions. Once a migrated vault is saved, the legacy key is gone.
 
 ## Navigation modes
 
-`InputMode` is a five-variant enum of navigation modes, each carrying no
-payload: `Normal`, `Search`, `PendingCut`, `PendingPaste`, `PendingAdd`. They
-change how a key is interpreted in the tree itself; none of them is a window.
+`InputMode` is a six-variant enum of navigation modes, each carrying no
+payload: `Normal`, `Search`, `PendingCut`, `PendingPaste`, `PendingAdd`,
+`PendingExport`. They change how a key is interpreted in the tree itself; none
+of them is a window.
 
 Each mode has one handler in `app_tree.rs`; the handlers transform state and set
 the next mode (or open a modal).
@@ -95,10 +96,18 @@ pure over their own state, their `handle_key` is testable without a terminal.
   named afterwards in the File Browser ([`Modal::ExportDestination`]), whose
   confirmed path reports `TreeAction::Export`, which the orchestrator writes to
   disk. See [0022](../../../../docs/adr/0022-user-chosen-export-destination.md).
+- The share flow is three modals: `Modal::Share` (a one-step scope picker,
+  `This branch` / `Whole file`), then `Modal::ShareDestination` (the File Browser
+  naming the bundle folder), then `Modal::SharePassphrase` (the recipient's
+  masked password pair, with an inline `y`-confirm for a passwordless bundle).
+  The confirmed bundle reports `TreeAction::Share`, which the orchestrator writes
+  through `file_handling::share`; `Whole file` resolves to the open Root, taken
+  from memory. See [0023](../../../../docs/adr/0023-sharing-a-vault-subtree.md).
 
 ## Prefix modes
 
-`PendingCut`, `PendingPaste`, and `PendingAdd` are one-key prefix modes:
+`PendingCut`, `PendingPaste`, `PendingAdd`, and `PendingExport` are one-key
+prefix modes:
 
 - `d` enters `PendingCut`; a second `d` cuts, any other key cancels. The Root
   has no sibling slot, so `d` is inert while the Root is selected.
@@ -110,6 +119,8 @@ pure over their own state, their `handle_key` is testable without a terminal.
   instead of opening a form whose first commit could never insert. The choice
   is stored in `TreeState::add_position` (`AddPosition`) and consumed when the
   form is confirmed.
+- `Ctrl+E` enters `PendingExport`; `e` keeps the export wizard, `s` opens the
+  share wizard, any other key cancels.
 
 `h`/`←` collapses an expanded parent; otherwise it moves the cursor to the
 parent row (`collapse_or_select_parent`).

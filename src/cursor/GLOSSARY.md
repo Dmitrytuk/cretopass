@@ -15,3 +15,6 @@ _Avoid_: Text input, Editable field, Text box
 
 **Inverted cursor**: The rendering style for the character under cursor in an active Cursor field: white background, black text. If the cursor is past the end of the text, a space with the same style is displayed instead.
 _Avoid_: Cursor highlight, Caret, Blinking block
+
+**Secret field**: A masked text field for passwords (`SecretField`), or a group of them with one focused field and one reveal flag (`SecretFieldGroup`). Built on the Cursor primitives; the value is rendered masked unless revealed. Shared by the Home prompts and the Share flow.
+_Avoid_: Password box, Masked input
