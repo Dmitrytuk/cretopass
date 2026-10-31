@@ -130,6 +130,20 @@ fn open_share_destination(state: &mut TreeState, node: Node, include_children: b
     state.modal = Some(Modal::ShareDestination(Box::new(destination)));
 }
 
+/// `node` as the scope selects it: unchanged when `include_children`, otherwise
+/// with its children dropped so a single node is written as a leaf.
+///
+/// Shared by the export and share flows, so "this node only" means the same
+/// thing in both.
+fn node_for_scope(node: Node, include_children: bool) -> Node {
+    if include_children {
+        return node;
+    }
+    let mut node = node;
+    node.children = Vec::new();
+    node
+}
+
 /// Writes `node` to `path` as `format` and reports the outcome as an alert.
 fn export(
     state: &mut TreeState,
@@ -138,13 +152,7 @@ fn export(
     format: ExportFormat,
     path: &str,
 ) {
-    let export_node = if include_children {
-        node
-    } else {
-        let mut node = node;
-        node.children = Vec::new();
-        node
-    };
+    let export_node = node_for_scope(node, include_children);
 
     state.modal = Some(match export_tree(&export_node, path, format) {
         Ok(out_path) => Modal::success(format!("{}{}", texts::MSG_EXPORT_NODE_SUCCESS, out_path)),
@@ -169,13 +177,7 @@ fn share<B: Backend>(
 ) -> io::Result<()> {
     // Mirror the export wizard: a node shared without its children drops them
     // before it is written.
-    let bundle_root = if include_children {
-        node
-    } else {
-        let mut node = node;
-        node.children = Vec::new();
-        node
-    };
+    let bundle_root = node_for_scope(node, include_children);
     let node_name = Some(bundle_root.name.clone());
     let base_path = state.active_vault_path.clone();
     let path = path.to_string();

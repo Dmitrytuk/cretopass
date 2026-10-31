@@ -12,7 +12,7 @@
 
 use zeroize::Zeroizing;
 
-use crate::cursor::{SecretField, SecretFieldGroup};
+use crate::cursor::{FieldEdit, PairVerdict, SecretFieldGroup};
 use crate::theming::{Action, texts};
 
 /// What confirming the password pair produced.
@@ -107,18 +107,11 @@ impl Passphrase {
     /// here; every other [`Action`] either edits the focused field or does
     /// nothing.
     pub fn apply(&mut self, action: Action) {
-        match action {
-            Action::NextField => self.fields.next_field(),
-            Action::PrevField => self.fields.prev_field(),
-            Action::ToggleShowPassword => self.fields.toggle_show(),
-            Action::InsertChar(c) => self.edit(|field| field.insert(c)),
-            Action::Backspace => self.edit(SecretField::backspace),
-            Action::DeleteChar => self.edit(SecretField::delete),
-            Action::CursorLeft => self.fields.apply(SecretField::move_left),
-            Action::CursorRight => self.fields.apply(SecretField::move_right),
-            Action::CursorHome => self.fields.apply(SecretField::move_home),
-            Action::CursorEnd => self.fields.apply(SecretField::move_end),
-            _ => {}
+        if matches!(
+            self.fields.apply_action(action),
+            FieldEdit::Inserted | FieldEdit::Deleted
+        ) {
+            self.error = None;
         }
     }
 
@@ -128,24 +121,14 @@ impl Passphrase {
     /// rejected (the report is kept and the cursors reset so it can be
     /// corrected); anything else is [`PassphraseSubmit::Password`].
     pub fn submit(&mut self) -> PassphraseSubmit {
-        let password = self.fields.field(0).text();
-        let confirmation = self.fields.field(1).text();
-
-        if password.is_empty() && confirmation.is_empty() {
-            return PassphraseSubmit::Empty;
+        match self.fields.pair_verdict() {
+            PairVerdict::Empty => PassphraseSubmit::Empty,
+            PairVerdict::Mismatch => {
+                self.error = Some(texts::MSG_PW_MISMATCH.to_string());
+                PassphraseSubmit::Mismatch
+            }
+            PairVerdict::Match => PassphraseSubmit::Password,
         }
-        if password != confirmation {
-            self.error = Some(texts::MSG_PW_MISMATCH.to_string());
-            self.fields.reset_cursors();
-            return PassphraseSubmit::Mismatch;
-        }
-        PassphraseSubmit::Password
-    }
-
-    /// Edits the focused field and clears the previous report.
-    fn edit(&mut self, action: impl FnOnce(&mut SecretField)) {
-        self.fields.apply(action);
-        self.error = None;
     }
 }
 

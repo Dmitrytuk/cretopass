@@ -13,7 +13,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
-use crate::cursor::{SecretField, SecretFieldGroup, password_field_spans};
+use crate::cursor::{FieldEdit, SecretFieldGroup, password_field_spans};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
 
@@ -69,42 +69,18 @@ impl ChangePasswordPrompt {
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<HomeAction> {
         match Action::from_change_pw_input(&key) {
             Action::Cancel => Some(HomeAction::Close),
-            Action::NextField => {
-                self.fields.next_field();
-                None
-            }
-            Action::PrevField => {
-                self.fields.prev_field();
-                None
-            }
-            Action::ToggleShowPassword => {
-                self.fields.toggle_show();
-                None
-            }
-            Action::InsertChar(c) => self.edit(|field| field.insert(c)),
-            Action::Backspace => self.edit(SecretField::backspace),
-            Action::DeleteChar => self.edit(SecretField::delete),
-            Action::CursorLeft => self.move_cursor(SecretField::move_left),
-            Action::CursorRight => self.move_cursor(SecretField::move_right),
-            Action::CursorHome => self.move_cursor(SecretField::move_home),
-            Action::CursorEnd => self.move_cursor(SecretField::move_end),
             // The orchestrator checks the three fields against the open vault.
             Action::Confirm => Some(HomeAction::ChangeMasterPassword),
-            _ => None,
+            action => {
+                if matches!(
+                    self.fields.apply_action(action),
+                    FieldEdit::Inserted | FieldEdit::Deleted
+                ) {
+                    self.error = None;
+                }
+                None
+            }
         }
-    }
-
-    /// Edits the focused field and clears the previous report.
-    fn edit(&mut self, action: impl FnOnce(&mut SecretField)) -> Option<HomeAction> {
-        self.fields.apply(action);
-        self.error = None;
-        None
-    }
-
-    /// Moves the cursor in the focused field, leaving the report untouched.
-    fn move_cursor(&mut self, action: impl FnOnce(&mut SecretField)) -> Option<HomeAction> {
-        self.fields.apply(action);
-        None
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {

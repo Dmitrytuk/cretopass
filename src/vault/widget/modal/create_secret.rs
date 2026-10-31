@@ -6,7 +6,7 @@
 use std::borrow::Cow;
 
 use super::HomeAction;
-use crate::cursor::{SecretField, SecretFieldGroup, password_field_spans};
+use crate::cursor::{FieldEdit, PairVerdict, SecretFieldGroup, password_field_spans};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{display_path, make_overlay, paint_overlay};
 use crossterm::event::KeyEvent;
@@ -53,59 +53,32 @@ impl CreateSecretPrompt {
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<HomeAction> {
         match Action::from_create_secret_file(&key) {
             Action::Cancel => Some(HomeAction::Close),
-            Action::NextField => {
-                self.fields.next_field();
-                None
-            }
-            Action::PrevField => {
-                self.fields.prev_field();
-                None
-            }
-            Action::ToggleShowPassword => {
-                self.fields.toggle_show();
-                None
-            }
-            Action::InsertChar(c) => self.edit(|field| field.insert(c)),
-            Action::Backspace => self.edit(SecretField::backspace),
-            Action::DeleteChar => self.edit(SecretField::delete),
-            Action::CursorLeft => self.move_cursor(SecretField::move_left),
-            Action::CursorRight => self.move_cursor(SecretField::move_right),
-            Action::CursorHome => self.move_cursor(SecretField::move_home),
-            Action::CursorEnd => self.move_cursor(SecretField::move_end),
             Action::Confirm => self.confirm(),
-            _ => None,
+            action => {
+                if matches!(
+                    self.fields.apply_action(action),
+                    FieldEdit::Inserted | FieldEdit::Deleted
+                ) {
+                    self.error = None;
+                }
+                None
+            }
         }
-    }
-
-    /// Edits the focused field and clears the previous report.
-    fn edit(&mut self, action: impl FnOnce(&mut SecretField)) -> Option<HomeAction> {
-        self.fields.apply(action);
-        self.error = None;
-        None
-    }
-
-    /// Moves the cursor in the focused field, leaving the report untouched.
-    fn move_cursor(&mut self, action: impl FnOnce(&mut SecretField)) -> Option<HomeAction> {
-        self.fields.apply(action);
-        None
     }
 
     /// Validates the pair: empty means "no passphrase" (a separate confirmation),
     /// mismatched re-shows the dialog, anything else can be created.
     fn confirm(&mut self) -> Option<HomeAction> {
-        let passphrase = self.fields.field(0).text();
-        let confirmation = self.fields.field(1).text();
-
-        if passphrase.is_empty() && confirmation.is_empty() {
-            return Some(HomeAction::ConfirmNoPassphrase {
+        match self.fields.pair_verdict() {
+            PairVerdict::Empty => Some(HomeAction::ConfirmNoPassphrase {
                 file_path: self.file_path.clone(),
-            });
+            }),
+            PairVerdict::Mismatch => {
+                self.reject(texts::MSG_PW_MISMATCH.to_string());
+                None
+            }
+            PairVerdict::Match => Some(HomeAction::CreateSecret),
         }
-        if passphrase != confirmation {
-            self.reject(texts::MSG_PW_MISMATCH.to_string());
-            return None;
-        }
-        Some(HomeAction::CreateSecret)
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect, display_full_path: bool) {
