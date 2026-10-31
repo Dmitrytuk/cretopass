@@ -1,3 +1,4 @@
+pub mod alert;
 pub mod background;
 pub mod icon;
 pub mod key;
@@ -13,6 +14,7 @@ use std::sync::RwLock;
 
 use ratatui::style::Color;
 
+pub use alert::{AlertKind, render_alert};
 pub use background::paint_background;
 pub use icon::Icon;
 pub use key::Action;

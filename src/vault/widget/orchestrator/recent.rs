@@ -40,7 +40,7 @@ pub(super) fn open_recent<B: Backend>(
 
     state.modal = Some(match file_handling::validate_encrypted_file(&path) {
         Ok(data) => Modal::Unlock(UnlockPrompt::new(path, data)),
-        Err(e) => Modal::alert(errors::message(&e)),
+        Err(e) => Modal::error(errors::message(&e)),
     });
     Ok(())
 }

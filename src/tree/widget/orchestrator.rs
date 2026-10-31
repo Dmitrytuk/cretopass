@@ -84,8 +84,8 @@ fn export(
     };
 
     state.modal = Some(match export_tree(&export_node, path, format) {
-        Ok(out_path) => Modal::alert(format!("{}{}", texts::MSG_EXPORT_NODE_SUCCESS, out_path)),
-        Err(error) => Modal::alert(format!("{error}")),
+        Ok(out_path) => Modal::success(format!("{}{}", texts::MSG_EXPORT_NODE_SUCCESS, out_path)),
+        Err(error) => Modal::error(format!("{error}")),
     });
 }
 

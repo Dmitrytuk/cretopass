@@ -138,7 +138,7 @@ pub fn execute<B: Backend>(
             state.modal = Some(if state.active_vault.is_some() {
                 Modal::Confirmation(Confirmation::change_password())
             } else {
-                Modal::alert(texts::MSG_NO_OPEN_FILE.to_string())
+                Modal::error(texts::MSG_NO_OPEN_FILE.to_string())
             });
             Ok(())
         }
@@ -146,7 +146,7 @@ pub fn execute<B: Backend>(
             state.modal = Some(if state.active_vault.is_some() {
                 Modal::Export(ExportWizard::new())
             } else {
-                Modal::alert(texts::MSG_NO_OPEN_FILE.to_string())
+                Modal::error(texts::MSG_NO_OPEN_FILE.to_string())
             });
             Ok(())
         }
@@ -163,7 +163,7 @@ pub fn execute<B: Backend>(
                 == Some(path.as_str());
 
             state.modal = Some(if is_open {
-                Modal::alert(texts::MSG_CANNOT_DELETE_OPEN.to_string())
+                Modal::error(texts::MSG_CANNOT_DELETE_OPEN.to_string())
             } else {
                 Modal::Confirmation(Confirmation::delete_recent(path))
             });
@@ -181,7 +181,7 @@ pub fn execute<B: Backend>(
         }
         HomeAction::SaveConfig => {
             let _ = utils::save_config(&state.config);
-            state.modal = Some(Modal::alert(texts::MSG_CONFIG_SAVED.to_string()));
+            state.modal = Some(Modal::success(texts::MSG_CONFIG_SAVED.to_string()));
             Ok(())
         }
         HomeAction::DiscardConfig => {
@@ -212,7 +212,7 @@ fn open_export_destination(state: &mut HomeState, format: ExportFormat) {
 
     state.modal = Some(match browser {
         Some(browser) => Modal::FileBrowser(Box::new(browser)),
-        None => Modal::alert(texts::MSG_NO_OPEN_FILE.to_string()),
+        None => Modal::error(texts::MSG_NO_OPEN_FILE.to_string()),
     });
 }
 

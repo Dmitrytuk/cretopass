@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::io;
 
 use crate::file_handling::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree};
@@ -602,7 +603,13 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
     TreeWidget::render(frame, layout[0], state);
 
     let (mode_str, mode_style, hint) = status_bar_parts(state);
-    render_status_bar(frame, layout[1], mode_str, mode_style.style(), &hint);
+    render_status_bar(
+        frame,
+        layout[1],
+        mode_str,
+        mode_style.style(),
+        hint.as_ref(),
+    );
 
     if let InputMode::Search = &state.mode {
         render_search_overlay(frame, area, state);
@@ -636,20 +643,20 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
 ///
 /// A parked save overlay takes priority over the mode because it is drawn on
 /// top of it. It carries no badge: it is a transient prompt, not a mode.
-fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, String) {
+fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, Cow<'_, str>) {
     match state.save_exit {
         SaveExit::ConfirmDiscard => {
             return (
                 "",
                 ElementStyle::ModeNormal,
-                texts::HINT_DISCARD_CONFIRM.to_string(),
+                Cow::Borrowed(texts::HINT_DISCARD_CONFIRM),
             );
         }
         SaveExit::Blocked => {
             return (
                 "",
                 ElementStyle::ModeNormal,
-                texts::HINT_SAVE_EXIT_BLOCKED.to_string(),
+                Cow::Borrowed(texts::HINT_SAVE_EXIT_BLOCKED),
             );
         }
         SaveExit::None => {}
@@ -658,24 +665,35 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, String) {
         return (
             "",
             ElementStyle::ModeNormal,
-            texts::HINT_DETAIL_ALERT.to_string(),
+            Cow::Borrowed(texts::HINT_DETAIL_ALERT),
         );
     }
 
     if let Some(modal) = &state.modal {
-        let (mode, style, hint) = match modal {
-            Modal::Help(help) => help.status_parts(),
-            Modal::Alert(alert) => alert.status_parts(),
-            Modal::Detail(detail) => detail.status_parts(&state.root),
-            Modal::Export(wizard) => wizard.status_parts(),
+        return match modal {
+            Modal::Help(help) => {
+                let (mode, style, hint) = help.status_parts();
+                (mode, style, Cow::Borrowed(hint))
+            }
+            Modal::Alert(alert) => {
+                let (mode, style, hint) = alert.status_parts();
+                (mode, style, Cow::Borrowed(hint))
+            }
+            Modal::Detail(detail) => {
+                let (mode, style, hint) = detail.status_parts(&state.root);
+                (mode, style, Cow::Borrowed(hint))
+            }
+            Modal::Export(wizard) => {
+                let (mode, style, hint) = wizard.status_parts();
+                (mode, style, Cow::Borrowed(hint))
+            }
             // The File Browser owns its badge and hint — they follow its mode and
             // the overlay it is showing — so its parts pass through unchanged.
             Modal::ExportDestination(destination) => {
                 let (mode, style, hint) = destination.status_parts();
-                return (mode, style, hint);
+                (mode, style, Cow::Owned(hint))
             }
         };
-        return (mode, style, hint.to_string());
     }
 
     let (mode, style, hint) = match &state.mode {
@@ -719,7 +737,7 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, String) {
             },
         ),
     };
-    (mode, style, hint.to_string())
+    (mode, style, Cow::Borrowed(hint))
 }
 
 fn render_search_overlay(frame: &mut Frame, area: Rect, state: &TreeState) {
@@ -1032,7 +1050,7 @@ mod tests {
         let mut terminal = ratatui::Terminal::new(TestBackend::new(4, 2)).unwrap();
 
         let mut alert = TreeState::new(Node::new("Root"));
-        alert.modal = Some(Modal::alert("boom"));
+        alert.modal = Some(Modal::error("boom"));
         terminal.draw(|f| ui(f, &mut alert)).unwrap();
 
         let mut search = TreeState::new(Node::new("Root"));
@@ -1545,7 +1563,7 @@ mod tests {
     #[test]
     fn a_modal_installed_by_execute_replaces_the_produced_one() {
         let produced = Modal::Help(Help);
-        let installed = Modal::alert("exported");
+        let installed = Modal::success("exported");
         assert!(matches!(
             retained_modal(true, produced, Some(installed)),
             Some(Modal::Alert(_))

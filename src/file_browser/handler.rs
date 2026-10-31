@@ -479,12 +479,13 @@ fn confirm_export_destination(
         return None;
     }
 
-    let target = target.to_string_lossy().to_string();
-    if Path::new(&target).exists() {
-        state.confirm_overwrite = Some(target);
+    if target.exists() {
+        state.confirm_overwrite = Some(target.to_string_lossy().into_owned());
         return None;
     }
-    Some(FileBrowserAction::Selected(target))
+    Some(FileBrowserAction::Selected(
+        target.to_string_lossy().into_owned(),
+    ))
 }
 
 fn handle_rename_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBrowserAction> {

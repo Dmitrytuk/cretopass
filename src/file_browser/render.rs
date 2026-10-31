@@ -3,7 +3,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use std::path::Path;
+use std::borrow::Cow;
 
 use super::state::{AddPrefix, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget};
 use crate::cursor::cursor_field_spans;
@@ -26,19 +26,21 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
     // Clear overlay area first, then draw block borders on top
     frame.render_widget(Clear, overlay_area);
 
-    let title = match state.mode {
-        FileBrowserMode::OpenFile => texts::BROWSER_OPEN.to_string(),
-        FileBrowserMode::CreateFile => texts::BROWSER_CREATE.to_string(),
-        FileBrowserMode::ImportFile => texts::BROWSER_IMPORT.to_string(),
+    let title: Cow<'static, str> = match state.mode {
+        FileBrowserMode::OpenFile => Cow::Borrowed(texts::BROWSER_OPEN),
+        FileBrowserMode::CreateFile => Cow::Borrowed(texts::BROWSER_CREATE),
+        FileBrowserMode::ImportFile => Cow::Borrowed(texts::BROWSER_IMPORT),
         // The title names the format: the chosen extension replaces the typed
         // one, and the user should see that before confirming.
-        FileBrowserMode::ExportFile { format } => {
-            format!("{}{} ", texts::BROWSER_EXPORT, format_label(format))
-        }
+        FileBrowserMode::ExportFile { format } => Cow::Owned(format!(
+            "{}{} ",
+            texts::BROWSER_EXPORT,
+            format_label(format)
+        )),
     };
 
     let block = Block::default()
-        .title(title)
+        .title(title.as_ref())
         .borders(Borders::ALL)
         .style(ElementStyle::DetailBlock.style());
 
@@ -119,17 +121,16 @@ fn make_overlay(area: Rect) -> Rect {
 fn render_path_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     // In export mode the bar also names the file about to be written, shown the
     // way it will land on disk (the format resolves the extension).
-    let (dir, file_name) = match state.export_target() {
+    let target = state.export_target();
+    let (dir, file_name) = match target.as_deref() {
         Some(target) => {
             let dir = target
                 .parent()
                 .filter(|dir| !dir.as_os_str().is_empty())
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| state.current_dir.clone());
-            let name = target.file_name().map(|n| n.to_string_lossy().into_owned());
-            (dir, name)
+                .unwrap_or(state.current_dir.as_path());
+            (dir, target.file_name())
         }
-        None => (state.current_dir.clone(), None),
+        None => (state.current_dir.as_path(), None),
     };
 
     let mut spans = vec![Span::styled(
@@ -142,7 +143,10 @@ fn render_path_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
             std::path::MAIN_SEPARATOR.to_string(),
             ElementStyle::FbPathBar.style(),
         ));
-        spans.push(Span::styled(name, ElementStyle::FbExportName.style()));
+        spans.push(Span::styled(
+            name.to_string_lossy().into_owned(),
+            ElementStyle::FbExportName.style(),
+        ));
     }
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -276,7 +280,7 @@ fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBrowserState)
 /// prefix is armed it is the add-file prompt, and otherwise it is the set of
 /// advertised keys.
 ///
-/// The badge is the browser mode (`OPEN`/`CREATE`/`IMPORT`) unless the
+/// The badge is the browser mode (`OPEN`/`CREATE`/`IMPORT`/`EXPORT`) unless the
 /// PwdKeeper-only filter is active, in which case it is `PWD` in every mode.
 pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementStyle, String) {
     // Overlays are drawn on top of the list and route keys themselves.
@@ -565,14 +569,14 @@ fn render_error_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
     let block = Block::default()
         .title(texts::ALERT_TITLE)
         .borders(Borders::ALL)
-        .style(ElementStyle::HomeAlertBlock.style());
+        .style(ElementStyle::AlertErrorBlock.style());
 
     let inner = block.inner(popup_area);
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
             format!(" {err}"),
-            ElementStyle::ConfirmMessage.style(),
+            ElementStyle::AlertErrorText.style(),
         )),
     ];
 

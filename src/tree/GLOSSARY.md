@@ -41,7 +41,7 @@ _Avoid_: generator config, password defaults
 **Tree**: The main workspace where the node tree is navigated, searched, and edited. Entered from Home after opening a secret file.
 _Avoid_: Tree view, Tree app, Workspace
 
-**Modal**: A window that takes over the keyboard until it is dismissed. At most one is open at a time, over the Tree's Normal navigation. Nothing outside it reacts to keys while it is up. Help, Detail, Alert, and Export are Modals.
+**Modal**: A window that takes over the keyboard until it is dismissed. At most one is open at a time, over the Tree's Normal navigation. Nothing outside it reacts to keys while it is up. Help, Detail, Alert, Export, and the File Browser are Modals.
 _Avoid_: Overlay, Dialog, Window
 
 **Popup**: A window nested inside a Modal — the Form inside Detail, or the field-type picker inside Form. It never outlives the Modal that opened it and returns to it when dismissed.
@@ -82,9 +82,9 @@ _Avoid_: Clipboard, Yank buffer
 
 **Help**: Modal opened with `?`. Lists the Tree's key bindings. Any key dismisses it.
 
-**Alert**: Modal shown on save errors and other unexpected conditions. Displays a message; any key dismisses it.
+**Alert**: Modal reporting an outcome — a successful export, a saved setting, a refused action. Displays a message; any key dismisses it.
 
-**Export**: Modal for writing a Node (with or without children) to a plain-text file beside the secret file. Two steps: pick the scope, then the format (JSON, XML, or CSV).
+**Export**: Writing a Node (with or without children) to a plain-text file. Three steps: pick the scope, pick the format (JSON, XML, or CSV), then name the destination in the File Browser. An export never overwrites a secret file.
 
 **Search**: A navigation mode that filters the visible tree by node name. Activated with `/`. Matched nodes are highlighted; navigation is constrained to matches while search is active.
 _Avoid_: Filter, Find

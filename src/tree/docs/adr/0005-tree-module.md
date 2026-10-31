@@ -20,12 +20,12 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 |------|---------------|
 | `node.rs` | `Node` struct (id, name, children, extra_fields), `ExtraField`, `FieldType` enum, legacy-`description` migration, recursive `find`/`find_mut`/`contains`, wire-label helpers for import/export |
 | `widget.rs` | module facade: declares the sub-modules and re-exports the public API (`TreeState`, `InputMode`, `SaveState`, `TreeWidget`), the internal API (`Modal`, `TreeAction`, `Detail`, `FormState`, …, `execute`) and the test-only helpers. Holds no logic |
-| `widget/state.rs` | the tree model and its operations: `TreeState` (root, expanded set, selected index, visible list, navigation mode, vault path, modified flag, cut buffer, search state, `SaveState`, `SaveExit`, the `Modal` slot), `VisibleNode`, the five-variant `InputMode` enum, `AddPosition`, and all tree mutation, navigation and search operations |
+| `widget/state.rs` | the tree model and its operations: `TreeState` (root, expanded set, selected index, visible list, navigation mode, vault path, modified flag, cut buffer, search state, `SaveState`, `SaveExit`, the `Modal` slot, the File Browser session memory), `VisibleNode`, the five-variant `InputMode` enum, `AddPosition`, and all tree mutation, navigation and search operations |
 | `widget/form.rs` | the Add/Edit form: `FormState` + undo/redo history (`Snapshot`, `Scratch`), the `FormRow`/`FormFocus`/`FormPending` enums, and `GeneratorModal` |
 | `widget/save.rs` | the autosave status `SaveState` and the parked exit `SaveExit` |
 | `widget/render.rs` | `TreeWidget::render()`: the DFS flat-list view and its title bar |
 | `widget/modal.rs` | the `Modal` slot, the `TreeAction` intent enum, and the `handle_key(key, &mut TreeState) -> Option<TreeAction>` contract; declares the per-modal sub-modules |
-| `widget/modal/*.rs` | one file per modal (or popup): `help`, `alert`, `detail` (the Form and its picker/name/confirm/generator popups), `export`; `chrome.rs` holds the shared overlay geometry |
+| `widget/modal/*.rs` | one file per modal (or popup): `help`, `alert`, `detail` (the Form and its picker/name/confirm/generator popups), `export`, `export_destination` (the File Browser naming an export's destination); `chrome.rs` holds the shared overlay geometry |
 | `widget/orchestrator.rs` | the one place a `TreeAction` becomes real work: system clipboard, export file write, screen transitions |
 | `app_tree.rs` | `run_app()` async event loop (`EventStream` + `tokio::select!`), navigation-mode key handlers, routing to the active modal, autosave submission, bounded exit flush with the force-quit escape hatch, search overlay, save-error and status-bar rendering |
 

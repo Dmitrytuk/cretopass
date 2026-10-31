@@ -92,11 +92,11 @@ pub(super) fn change_master_password<B: Backend>(
 /// or report why it cannot be created there.
 pub(super) fn choose_file_to_create(state: &mut HomeState, file_path: String) {
     if std::path::Path::new(&file_path).exists() {
-        state.modal = Some(Modal::alert(texts::MSG_FILE_EXISTS.to_string()));
+        state.modal = Some(Modal::error(texts::MSG_FILE_EXISTS.to_string()));
     } else if file_handling::probe_path_writable(&file_path).is_ok() {
         state.modal = Some(Modal::CreateSecret(CreateSecretPrompt::new(file_path)));
     } else {
-        state.modal = Some(Modal::alert(texts::MSG_CANNOT_WRITE.to_string()));
+        state.modal = Some(Modal::error(texts::MSG_CANNOT_WRITE.to_string()));
     }
 }
 
@@ -105,7 +105,7 @@ pub(super) fn choose_file_to_create(state: &mut HomeState, file_path: String) {
 pub(super) fn choose_file_to_open(state: &mut HomeState, file_path: String) {
     state.modal = Some(match file_handling::validate_encrypted_file(&file_path) {
         Ok(data) => Modal::Unlock(UnlockPrompt::new(file_path, data)),
-        Err(e) => Modal::alert(errors::message(&e)),
+        Err(e) => Modal::error(errors::message(&e)),
     });
 }
 
@@ -161,7 +161,7 @@ pub(super) fn create_without_password<B: Backend>(
 
     match outcome {
         Err(e) => {
-            state.modal = Some(Modal::alert(errors::message(&e)));
+            state.modal = Some(Modal::error(errors::message(&e)));
             Ok(())
         }
         Ok(node) => {

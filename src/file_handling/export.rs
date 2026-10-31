@@ -33,8 +33,8 @@ impl ExportFormat {
 /// exported, the Node's name when a single Node is exported, and the format's
 /// extension.
 ///
-/// Characters outside `[A-Za-z0-9_-]` in `node_name` become `_`, so the
-/// suggestion is always a usable file name.
+/// Every character in `node_name` that is not alphanumeric or `-`/`_` becomes
+/// `_`, so the suggestion is always a usable file name.
 pub fn suggest_name(
     base_path: Option<&Path>,
     node_name: Option<&str>,

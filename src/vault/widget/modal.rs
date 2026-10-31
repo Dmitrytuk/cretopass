@@ -125,11 +125,14 @@ pub enum Modal {
 }
 
 impl Modal {
-    /// A passive alert carrying `message`.
-    pub fn alert(message: impl Into<String>) -> Self {
-        Self::Alert(Alert {
-            message: message.into(),
-        })
+    /// A passive alert reporting a successful outcome.
+    pub fn success(message: impl Into<String>) -> Self {
+        Self::Alert(Alert::success(message))
+    }
+
+    /// A passive alert reporting a refusal or a failure.
+    pub fn error(message: impl Into<String>) -> Self {
+        Self::Alert(Alert::error(message))
     }
 
     /// Reads a key: `None` means the modal consumed it and stays open, `Some` is

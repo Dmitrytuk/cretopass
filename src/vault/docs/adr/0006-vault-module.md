@@ -48,7 +48,8 @@ the orchestrator performs it. See [0021](0021-home-intent-contract.md).
 
 Nine `Modal` variants: `FileBrowser`, `Unlock`, `CreateSecret`, `Configuration`,
 `Alert`, `Confirmation` (carrying a `ConfirmKind`), `ChangePassword`, `Export`
-(a two-step `ExportWizard`), `About`.
+(a one-step `ExportWizard` picking the format, with the destination then named in
+the File Browser), `About`.
 
 Password fields (`Unlock`, `ChangePassword`, `CreateSecret`) mask input by
 default; `Ctrl+S` toggles plaintext. `CreateSecret` validates that the passphrase

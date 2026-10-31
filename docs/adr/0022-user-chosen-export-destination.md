@@ -63,8 +63,10 @@ Rules that follow from it:
 
 ## Consequences
 
-- Export may write anywhere the user can write. `MSG_NO_ACTIVE_FILE` disappears:
-  an open vault is needed only to seed the suggested name and starting directory.
+- Export may write anywhere the user can write. `MSG_NO_ACTIVE_FILE` disappears.
+  The Tree needs an open vault only to seed the suggested name and starting
+  directory; Home still refuses to open the browser without one, because there is
+  nothing to export.
 - The File Browser contract "Enter in the name input returns `Selected` only when
   no file with that name exists" (ADR 0007) gains an exception for the export
   mode — a re-export must be able to land on the file it produced last time — and
