@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use super::modal::Modal;
 use super::save::{SaveExit, SaveState};
+use crate::file_browser::FileBrowserSession;
 use crate::generator::PasswordParams;
 use crate::theming::Spinner;
 use crate::tree::node::Node;
@@ -68,6 +69,9 @@ pub struct TreeState {
     pub(crate) return_to_menu: bool,
     /// Path of the currently opened secret file, if any.
     pub(crate) active_vault_path: Option<String>,
+    /// Directory and hidden-entry memory of the File Browser, seeded from Home
+    /// and written back when the tree exits.
+    pub(crate) browser_session: FileBrowserSession,
     /// Set to `true` when a commit has not yet been submitted to autosave.
     /// Cleared as soon as the snapshot is handed to the save worker.
     pub(crate) modified: bool,
@@ -105,6 +109,7 @@ impl TreeState {
             quit: false,
             return_to_menu: false,
             active_vault_path: None,
+            browser_session: FileBrowserSession::default(),
             modified: false,
             save_state: SaveState::Idle,
             spinner: Spinner::default(),

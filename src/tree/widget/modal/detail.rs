@@ -1418,14 +1418,14 @@ fn render_copy_alert(frame: &mut Frame, area: Rect) {
     let block = Block::default()
         .title(texts::OVERLAY_COPIED)
         .borders(Borders::ALL)
-        .style(ElementStyle::CopiedBlock.style());
+        .style(ElementStyle::AlertSuccessBlock.style());
 
     let inner = block.inner(overlay_area);
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
             texts::COPY_CHECK,
-            ElementStyle::CopiedText.style(),
+            ElementStyle::AlertSuccessText.style(),
         )),
     ];
 

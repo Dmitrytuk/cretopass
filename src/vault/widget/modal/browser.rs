@@ -2,12 +2,12 @@
 //!
 //! The browser keeps its own vocabulary ([`FileBrowserAction`]): what a cancelled
 //! key, a rename or a selection *means* depends on why it was opened — picking a
-//! file to unlock, naming a new one, or choosing something to import. Translating
-//! that into [`HomeAction`] happens here, so the orchestrator never learns about
-//! the browser's internals.
+//! file to unlock, naming a new one, choosing something to import, or naming an
+//! export's destination. Translating that into [`HomeAction`] happens here, so
+//! the orchestrator never learns about the browser's internals.
 
 use std::borrow::Cow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
@@ -17,6 +17,7 @@ use super::HomeAction;
 use crate::file_browser::{
     self, FileBrowserAction, FileBrowserMode, FileBrowserSession, FileBrowserState,
 };
+use crate::file_handling::export::ExportFormat;
 use crate::theming::ElementStyle;
 
 /// The directory browser overlay, as one of the Home modals.
@@ -30,6 +31,21 @@ impl BrowserModal {
     pub fn new(mode: FileBrowserMode, session: &FileBrowserSession) -> Self {
         Self {
             state: FileBrowserState::new(mode, session),
+        }
+    }
+
+    /// A browser opened to name the destination of an export, in `format`.
+    ///
+    /// `base_path` is the secret file being exported and `node_name` the Node,
+    /// when only one is; both feed the prefilled name and the starting directory.
+    pub fn for_export(
+        format: ExportFormat,
+        base_path: Option<&Path>,
+        node_name: Option<&str>,
+        session: &FileBrowserSession,
+    ) -> Self {
+        Self {
+            state: FileBrowserState::for_export(format, base_path, node_name, session),
         }
     }
 
@@ -66,6 +82,7 @@ impl BrowserModal {
             FileBrowserMode::ImportFile => HomeAction::ImportFileChosen { import_path: path },
             FileBrowserMode::CreateFile => HomeAction::CreateFileChosen { file_path: path },
             FileBrowserMode::OpenFile => HomeAction::OpenFileChosen { file_path: path },
+            FileBrowserMode::ExportFile { format } => HomeAction::Export { path, format },
         }
     }
 
@@ -104,6 +121,39 @@ mod tests {
             browser(FileBrowserMode::ImportFile).selected("/tmp/x.json".to_string()),
             HomeAction::ImportFileChosen { import_path } if import_path == "/tmp/x.json"
         ));
+        assert!(matches!(
+            browser(FileBrowserMode::ExportFile {
+                format: ExportFormat::Xml
+            })
+            .selected("/tmp/x.xml".to_string()),
+            HomeAction::Export { path, format }
+                if path == "/tmp/x.xml" && format == ExportFormat::Xml
+        ));
+    }
+
+    #[test]
+    fn an_export_browser_prefills_the_suggested_name_beside_the_secret_file() {
+        let modal = BrowserModal::for_export(
+            ExportFormat::Json,
+            Some(Path::new("/tmp/vault.age")),
+            None,
+            &FileBrowserSession::default(),
+        );
+
+        assert_eq!(modal.state.creating_name, "vault.json");
+        assert_eq!(modal.state.current_dir, Path::new("/tmp"));
+    }
+
+    #[test]
+    fn an_export_browser_suggests_a_node_name_for_a_single_node() {
+        let modal = BrowserModal::for_export(
+            ExportFormat::Xml,
+            Some(Path::new("/tmp/vault.age")),
+            Some("Work Email"),
+            &FileBrowserSession::default(),
+        );
+
+        assert_eq!(modal.state.creating_name, "vault_Work_Email.xml");
     }
 
     #[test]

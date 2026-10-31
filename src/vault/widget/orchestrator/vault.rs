@@ -92,11 +92,11 @@ pub(super) fn change_master_password<B: Backend>(
 /// or report why it cannot be created there.
 pub(super) fn choose_file_to_create(state: &mut HomeState, file_path: String) {
     if std::path::Path::new(&file_path).exists() {
-        state.modal = Some(Modal::alert(texts::MSG_FILE_EXISTS.to_string()));
+        state.modal = Some(Modal::error(texts::MSG_FILE_EXISTS.to_string()));
     } else if file_handling::probe_path_writable(&file_path).is_ok() {
         state.modal = Some(Modal::CreateSecret(CreateSecretPrompt::new(file_path)));
     } else {
-        state.modal = Some(Modal::alert(texts::MSG_CANNOT_WRITE.to_string()));
+        state.modal = Some(Modal::error(texts::MSG_CANNOT_WRITE.to_string()));
     }
 }
 
@@ -105,7 +105,7 @@ pub(super) fn choose_file_to_create(state: &mut HomeState, file_path: String) {
 pub(super) fn choose_file_to_open(state: &mut HomeState, file_path: String) {
     state.modal = Some(match file_handling::validate_encrypted_file(&file_path) {
         Ok(data) => Modal::Unlock(UnlockPrompt::new(file_path, data)),
-        Err(e) => Modal::alert(errors::message(&e)),
+        Err(e) => Modal::error(errors::message(&e)),
     });
 }
 
@@ -161,7 +161,7 @@ pub(super) fn create_without_password<B: Backend>(
 
     match outcome {
         Err(e) => {
-            state.modal = Some(Modal::alert(errors::message(&e)));
+            state.modal = Some(Modal::error(errors::message(&e)));
             Ok(())
         }
         Ok(node) => {
@@ -210,6 +210,7 @@ pub fn open_tree<B: Backend>(
     let mut tree_state = crate::tree::widget::TreeState::new(node);
     tree_state.display_full_path = state.config.display_full_path;
     tree_state.generator = state.generator;
+    tree_state.browser_session = state.browser_session.clone();
     run_tree(state, terminal, tree_state, target)
 }
 
@@ -236,6 +237,9 @@ pub(super) fn run_tree<B: Backend>(
     // Generator settings are per app run: copy them back even when the tree
     // exits with an error or the user discards changes.
     state.generator = tree_state.generator;
+    // Same for the File Browser's memory: an export named from inside the tree
+    // leaves Home starting where the user last browsed.
+    state.browser_session = tree_state.browser_session;
     let return_to_menu = tree_state.return_to_menu;
     match result {
         Ok(ExitStatus::Saved) => {

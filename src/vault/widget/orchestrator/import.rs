@@ -28,7 +28,7 @@ pub(super) fn import<B: Backend>(
     let imported = match file_handling::import::import_tree(&import_path) {
         Ok(node) => node,
         Err(e) => {
-            state.modal = Some(Modal::alert(errors::message(&e)));
+            state.modal = Some(Modal::error(errors::message(&e)));
             return Ok(());
         }
     };
@@ -43,8 +43,8 @@ pub(super) fn import<B: Backend>(
     })?;
 
     state.modal = Some(match outcome {
-        Ok(()) => Modal::alert(texts::MSG_IMPORT_SUCCESS.to_string()),
-        Err(e) => Modal::alert(errors::message(&e)),
+        Ok(()) => Modal::success(texts::MSG_IMPORT_SUCCESS.to_string()),
+        Err(e) => Modal::error(errors::message(&e)),
     });
     Ok(())
 }
@@ -85,7 +85,7 @@ pub(super) fn wrap_import(
     };
 
     if let Some(message) = problem {
-        state.modal = Some(Modal::alert(message.to_string()));
+        state.modal = Some(Modal::error(message.to_string()));
     }
     target
 }

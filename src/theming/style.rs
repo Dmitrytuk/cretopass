@@ -39,11 +39,14 @@ pub enum ElementStyle {
     GeneratorBlock,
     SymbolsBlock,
     ConfirmDeleteBlock,
-    CopiedBlock,
+    /// The alert card, coloured by outcome: success green, error red.
+    AlertSuccessBlock,
+    AlertErrorBlock,
     DetailBlock,
     HelpBlock,
     HelpText,
-    CopiedText,
+    AlertSuccessText,
+    AlertErrorText,
     ConfirmMessage,
     SearchText,
     /// Inline error inside the password-generator modal.
@@ -55,6 +58,8 @@ pub enum ElementStyle {
     StatusSaveFailed,
     StatusInfo,
     FbPathBar,
+    /// The file name an export will write, appended to the browser's path bar.
+    FbExportName,
     FbDirName,
     FbAgeFileName,
     FbRegularFileName,
@@ -73,7 +78,6 @@ pub enum ElementStyle {
     HomeChangePwBlock,
     HomeNoPassBlock,
     HomePassBlock,
-    HomeAlertBlock,
     HomeErrorBar,
     HomePassLabel,
     HomeFieldLabel,
@@ -156,13 +160,15 @@ impl ElementStyle {
             Self::GeneratorBlock => Style::default().bg(scheme.surface).fg(scheme.accent),
             Self::SymbolsBlock => Style::default().bg(scheme.surface).fg(scheme.accent),
             Self::ConfirmDeleteBlock => Style::default().bg(scheme.surface).fg(scheme.danger),
-            Self::CopiedBlock => Style::default().bg(scheme.surface).fg(scheme.success),
+            Self::AlertSuccessBlock => Style::default().bg(scheme.surface).fg(scheme.success),
+            Self::AlertErrorBlock => Style::default().bg(scheme.surface).fg(scheme.danger),
             Self::DetailBlock => Style::default().bg(scheme.surface).fg(scheme.accent),
             Self::HelpBlock => Style::default().bg(scheme.surface).fg(scheme.accent),
             Self::HelpText => Style::default().fg(scheme.text),
-            Self::CopiedText => Style::default()
+            Self::AlertSuccessText => Style::default()
                 .fg(scheme.success)
                 .add_modifier(Modifier::BOLD),
+            Self::AlertErrorText => Style::default().fg(scheme.text),
             Self::ConfirmMessage => Style::default().fg(scheme.text),
             Self::SearchText => Style::default().fg(scheme.text),
             Self::GeneratorError => Style::default()
@@ -176,6 +182,10 @@ impl ElementStyle {
             Self::StatusInfo => Style::default().fg(scheme.text),
             Self::FbPathBar => Style::default()
                 .fg(scheme.text)
+                .add_modifier(Modifier::BOLD)
+                .bg(scheme.path_bar_bg),
+            Self::FbExportName => Style::default()
+                .fg(scheme.accent)
                 .add_modifier(Modifier::BOLD)
                 .bg(scheme.path_bar_bg),
             Self::FbDirName => Style::default().fg(scheme.dir_name),
@@ -196,7 +206,6 @@ impl ElementStyle {
             Self::HomeChangePwBlock => Style::default().bg(scheme.surface).fg(scheme.warning),
             Self::HomeNoPassBlock => Style::default().bg(scheme.surface).fg(scheme.warning),
             Self::HomePassBlock => Style::default().bg(scheme.surface).fg(scheme.accent),
-            Self::HomeAlertBlock => Style::default().bg(scheme.surface).fg(scheme.danger),
             Self::HomeErrorBar => Style::default().bg(scheme.danger).fg(scheme.text),
             Self::HomePassLabel => Style::default().fg(scheme.accent),
             Self::HomeFieldLabel => Style::default().fg(scheme.text),
