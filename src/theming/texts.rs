@@ -79,6 +79,7 @@ pub const MENU_ITEMS: &[&str] = &[
     "Configuration",
     "Change file password",
     "Export active file",
+    "Share active file",
     "Import from file",
 ];
 
@@ -245,11 +246,14 @@ pub const HINT_PENDING_EXPORT: &str = "e:export  s:share  Esc:cancel";
 pub const OVERLAY_SHARE_SCOPE: &str = " Share ";
 pub const SHARE_SCOPE_OPTIONS: [&str; 2] = ["1. This branch", "2. Whole file"];
 pub const HINT_SHARE_SCOPE: &str = "j/k:nav  1-2:select  Enter:choose  Esc:cancel";
-pub const MODE_SHARE_SCOPE: &str = "SHARE";
+pub const MODE_SHARE: &str = "SHARE";
 
 pub const BROWSER_SHARE: &str = " Share into ";
+pub const OVERLAY_SHARE_FOLDER: &str = " Share Folder ";
+pub const LABEL_FOLDER_INLINE: &str = " Folder: ";
 pub const FB_HINT_SHARE_NAME: &str = " [n]name ";
-pub const FB_HINT_SHARE: &str = " [Enter]share ";
+pub const FB_HINT_SHARE_CONFIRM: &str = "Enter:share";
+pub const FB_PROMPT_SHARE_FOLDER: &str = " Write into ";
 
 pub const SHARE_TITLE_PASSPHRASE: &str = " Share Bundle Password ";
 pub const HINT_SHARE_PASSPHRASE: &str = "Tab/↑/↓:switch  Ctrl+S:show  Enter:share  Esc:cancel";

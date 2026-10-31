@@ -17,6 +17,7 @@ mod configuration;
 mod confirmation;
 mod create_secret;
 mod export;
+mod share;
 mod unlock;
 
 pub use about::About;
@@ -27,6 +28,7 @@ pub use configuration::{ConfigurationModal, Setting};
 pub use confirmation::Confirmation;
 pub use create_secret::CreateSecretPrompt;
 pub use export::ExportWizard;
+pub use share::SharePassphrase;
 pub use unlock::UnlockPrompt;
 
 use crossterm::event::KeyEvent;
@@ -94,6 +96,17 @@ pub enum HomeAction {
     BeginExport,
     /// Open the file browser to name the destination of an export in `format`.
     BeginExportDestination { format: ExportFormat },
+    /// Open the file browser to name the folder a share bundle is written into.
+    BeginShare,
+    /// Open the share passphrase prompt for the named bundle folder.
+    ShareDestinationChosen { dest: String },
+    /// A passwordless share was asked for; confirm it before writing.
+    ShareNoPassphrase { dest: String },
+    /// Re-open the share passphrase prompt for `dest` after it was declined.
+    ReopenSharePassphrase { dest: String },
+    /// Write the open vault as a share bundle into `dest`, encrypted with
+    /// `passphrase`.
+    Share { dest: String, passphrase: String },
     /// Unlock and open `path` from the recent list.
     OpenRecent { path: String },
     /// Confirm dropping `path` from the recent list.
@@ -120,6 +133,9 @@ pub enum Modal {
     ChangePassword(ChangePasswordPrompt),
     /// The export flow's first step: pick a format.
     Export(ExportWizard),
+    /// The share flow's password step: the recipient's password and its
+    /// confirmation.
+    SharePassphrase(SharePassphrase),
     /// App identity, version, and feedback links, opened with `?` from the menu.
     About(About),
 }
@@ -147,6 +163,7 @@ impl Modal {
             Self::Configuration(modal) => modal.handle_key(key),
             Self::Confirmation(confirmation) => confirmation.handle_key(key),
             Self::Export(wizard) => wizard.handle_key(key),
+            Self::SharePassphrase(prompt) => prompt.handle_key(key),
             Self::FileBrowser(browser) => browser.handle_key(key),
         }
     }

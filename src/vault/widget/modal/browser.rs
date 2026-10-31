@@ -49,6 +49,21 @@ impl BrowserModal {
         }
     }
 
+    /// A browser opened to name the folder a share bundle is written into.
+    ///
+    /// `base_path` is the open secret file and `node_name` the Node, when only one
+    /// branch is shared; both feed the prefilled folder name and the starting
+    /// directory.
+    pub fn for_share(
+        base_path: Option<&Path>,
+        node_name: Option<&str>,
+        session: &FileBrowserSession,
+    ) -> Self {
+        Self {
+            state: FileBrowserState::for_share(base_path, node_name, session),
+        }
+    }
+
     /// Marks the open vault, so the browser refuses to overwrite or delete it.
     pub fn set_active_vault_path(&mut self, path: Option<PathBuf>) {
         self.state.set_active_vault_path(path);
@@ -83,6 +98,7 @@ impl BrowserModal {
             FileBrowserMode::CreateFile => HomeAction::CreateFileChosen { file_path: path },
             FileBrowserMode::OpenFile => HomeAction::OpenFileChosen { file_path: path },
             FileBrowserMode::ExportFile { format } => HomeAction::Export { path, format },
+            FileBrowserMode::ShareDestination => HomeAction::ShareDestinationChosen { dest: path },
         }
     }
 

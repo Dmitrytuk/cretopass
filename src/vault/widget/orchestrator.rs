@@ -23,12 +23,14 @@ mod export;
 mod import;
 mod recent;
 mod settings;
+mod share;
 mod vault;
 
 use export::export;
 use import::import;
 use recent::{delete_recent, open_recent, rename_file};
 use settings::apply_setting;
+use share::share;
 use vault::{
     change_master_password, choose_file_to_create, choose_file_to_open, create_secret,
     create_without_password, launch_tree, unlock,
@@ -36,7 +38,7 @@ use vault::{
 
 use super::modal::{
     About, BrowserModal, ChangePasswordPrompt, ConfigurationModal, Confirmation,
-    CreateSecretPrompt, ExportWizard, HomeAction,
+    CreateSecretPrompt, ExportWizard, HomeAction, SharePassphrase,
 };
 use super::{HomeState, Modal};
 
@@ -154,6 +156,22 @@ pub fn execute<B: Backend>(
             open_export_destination(state, format);
             Ok(())
         }
+        HomeAction::BeginShare => {
+            open_share_destination(state);
+            Ok(())
+        }
+        HomeAction::ShareDestinationChosen { dest } => {
+            state.modal = Some(Modal::SharePassphrase(SharePassphrase::new(dest)));
+            Ok(())
+        }
+        HomeAction::ShareNoPassphrase { dest } => {
+            state.modal = Some(Modal::Confirmation(Confirmation::share_no_passphrase(dest)));
+            Ok(())
+        }
+        HomeAction::ReopenSharePassphrase { dest } => {
+            state.modal = Some(Modal::SharePassphrase(SharePassphrase::new(dest)));
+            Ok(())
+        }
         HomeAction::OpenRecent { path } => open_recent(state, terminal, path),
         HomeAction::RequestDeleteRecent { path } => {
             let is_open = state
@@ -171,6 +189,10 @@ pub fn execute<B: Backend>(
         }
         HomeAction::Export { path, format } => {
             export(state, &path, format);
+            Ok(())
+        }
+        HomeAction::Share { dest, passphrase } => {
+            share(state, &dest, &passphrase);
             Ok(())
         }
         HomeAction::ToggleSetting(setting) => {
@@ -204,6 +226,27 @@ fn open_export_destination(state: &mut HomeState, format: ExportFormat) {
         active.node.as_ref()?;
         Some(BrowserModal::for_export(
             format,
+            Some(Path::new(path)),
+            None,
+            &state.browser_session,
+        ))
+    });
+
+    state.modal = Some(match browser {
+        Some(browser) => Modal::FileBrowser(Box::new(browser)),
+        None => Modal::error(texts::MSG_NO_OPEN_FILE.to_string()),
+    });
+}
+
+/// Opens the File Browser to name the folder a share bundle is written into.
+///
+/// Without an open tree there is no directory, stem, or content to share, so the
+/// user gets the "no open file" alert instead of a browser that cannot finish.
+fn open_share_destination(state: &mut HomeState) {
+    let browser = state.active_vault.as_ref().and_then(|active| {
+        let path = active.path.as_deref()?;
+        active.node.as_ref()?;
+        Some(BrowserModal::for_share(
             Some(Path::new(path)),
             None,
             &state.browser_session,

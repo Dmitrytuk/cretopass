@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::file_handling::export::{self, ExportFormat};
+use crate::file_handling::share::suggest_name;
 use crate::file_handling::{self, FileEntry, FileHandlingError};
 use crate::theming::texts;
 
@@ -14,6 +15,8 @@ pub enum FileBrowserMode {
     ExportFile {
         format: ExportFormat,
     },
+    /// Naming the folder a share bundle is written into.
+    ShareDestination,
 }
 
 impl FileBrowserMode {
@@ -25,12 +28,26 @@ impl FileBrowserMode {
         }
     }
 
+    /// Whether this mode names a destination the user types — the export file or
+    /// the share bundle folder — rather than picking an existing entry.
+    pub fn names_destination(self) -> bool {
+        self.export_format().is_some() || self.is_share_destination()
+    }
+
+    /// Whether this mode names the folder a share bundle is written into.
+    pub fn is_share_destination(self) -> bool {
+        matches!(self, Self::ShareDestination)
+    }
+
     /// Whether the browser may rename or delete the secret files it lists.
     ///
-    /// Import and export only read the filesystem through the browser: editing a
-    /// vault is not what the user opened it for.
+    /// Import, export and share only read the filesystem through the browser:
+    /// editing a vault is not what the user opened it for.
     pub(crate) fn allows_entry_actions(self) -> bool {
-        !matches!(self, Self::ImportFile | Self::ExportFile { .. })
+        !matches!(
+            self,
+            Self::ImportFile | Self::ExportFile { .. } | Self::ShareDestination
+        )
     }
 }
 
@@ -211,6 +228,37 @@ impl FileBrowserState {
         state
     }
 
+    /// A browser opened to name the folder a share bundle is written into.
+    ///
+    /// It starts on the directory list, in the secret file's own directory
+    /// rather than wherever the browser was last, with [`suggest_name`]
+    /// (the source stem, plus the Node name for a single branch) prefilled. `n`
+    /// edits the folder name and Enter in the input commits it; a folder that
+    /// already exists and is not empty asks for confirmation first.
+    pub fn for_share(
+        base_path: Option<&Path>,
+        node_name: Option<&str>,
+        session: &FileBrowserSession,
+    ) -> Self {
+        let mut state = Self::new(FileBrowserMode::ShareDestination, session);
+
+        if let Some(dir) = base_path
+            .and_then(Path::parent)
+            .filter(|dir| !dir.as_os_str().is_empty())
+            && let Ok(entries) = list_entries(dir, state.show_hidden)
+        {
+            state.current_dir = dir.to_path_buf();
+            state.entries = entries;
+            state.selected = 0;
+        }
+
+        let suggested = suggest_name(base_path, node_name);
+        state.creating_cursor = suggested.len();
+        state.creating_name = suggested;
+        state.focus = FocusTarget::List;
+        state
+    }
+
     /// The exact file an export would write: the open directory joined with the
     /// typed name, with the format's extension resolved (see
     /// [`export::output_path`]).
@@ -224,6 +272,22 @@ impl FileBrowserState {
             return None;
         }
         Some(export::output_path(&self.current_dir.join(name), format))
+    }
+
+    /// The folder a share bundle would be written into: the open directory joined
+    /// with the typed name.
+    ///
+    /// `None` outside `ShareDestination` mode and while the name is blank — there
+    /// is nothing to show until the user types one.
+    pub fn share_target(&self) -> Option<PathBuf> {
+        if !self.mode.is_share_destination() {
+            return None;
+        }
+        let name = self.creating_name.trim();
+        if name.is_empty() {
+            return None;
+        }
+        Some(self.current_dir.join(name))
     }
 
     /// Sets the active file path that the browser should protect.

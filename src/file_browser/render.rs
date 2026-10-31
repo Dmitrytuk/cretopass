@@ -37,6 +37,7 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
             texts::BROWSER_EXPORT,
             format_label(format)
         )),
+        FileBrowserMode::ShareDestination => Cow::Borrowed(texts::BROWSER_SHARE),
     };
 
     let block = Block::default()
@@ -83,6 +84,15 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
             &state.creating_name,
             state.creating_cursor,
         );
+    } else if state.focus == FocusTarget::Input && state.mode.is_share_destination() {
+        render_input_popup(
+            frame,
+            overlay_area,
+            texts::OVERLAY_SHARE_FOLDER,
+            texts::LABEL_FOLDER_INLINE,
+            &state.creating_name,
+            state.creating_cursor,
+        );
     } else if state.focus == FocusTarget::Rename {
         render_input_popup(
             frame,
@@ -119,9 +129,9 @@ fn make_overlay(area: Rect) -> Rect {
 }
 
 fn render_path_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
-    // In export mode the bar also names the file about to be written, shown the
-    // way it will land on disk (the format resolves the extension).
-    let target = state.export_target();
+    // Export and share name their destination in the bar: the export resolves
+    // the format's extension, while a share shows the folder it writes into.
+    let target = state.export_target().or_else(|| state.share_target());
     let (dir, file_name) = match target.as_deref() {
         Some(target) => {
             let dir = target
@@ -309,7 +319,11 @@ pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementSt
         );
     }
     if state.focus == FocusTarget::Rename {
-        return (texts::MODE_EDIT, ElementStyle::ModeEdit, fb_input_hint());
+        return (
+            texts::MODE_EDIT,
+            ElementStyle::ModeEdit,
+            fb_input_hint(state),
+        );
     }
 
     let (mode_str, mode_style) = match state.mode {
@@ -329,6 +343,10 @@ pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementSt
             FileFilter::PwdKeeperOnly => (texts::MODE_PWD, ElementStyle::ModeNormal),
             FileFilter::All => (texts::MODE_EXPORT, ElementStyle::ModeEdit),
         },
+        FileBrowserMode::ShareDestination => match state.filter {
+            FileFilter::PwdKeeperOnly => (texts::MODE_PWD, ElementStyle::ModeNormal),
+            FileFilter::All => (texts::MODE_SHARE, ElementStyle::ModeEdit),
+        },
     };
 
     let hint = if state.search_active {
@@ -336,7 +354,7 @@ pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementSt
     } else if state.pending == AddPrefix::Pending {
         texts::FB_PROMPT_NEW.to_string()
     } else if state.focus == FocusTarget::Input {
-        fb_input_hint()
+        fb_input_hint(state)
     } else {
         fb_hint(state)
     };
@@ -353,9 +371,14 @@ fn format_label(format: ExportFormat) -> &'static str {
     }
 }
 
-/// The confirm/dismiss hint for the rename and new-file name inputs.
-fn fb_input_hint() -> String {
-    format!("{}  {}", texts::FB_HINT_CONFIRM, texts::FB_HINT_CANCEL)
+/// The confirm/dismiss hint for the rename, name and share-folder inputs.
+fn fb_input_hint(state: &FileBrowserState) -> String {
+    let confirm = if state.mode.is_share_destination() {
+        texts::FB_HINT_SHARE_CONFIRM
+    } else {
+        texts::FB_HINT_CONFIRM
+    };
+    format!("{}  {}", confirm, texts::FB_HINT_CANCEL)
 }
 
 /// Concatenates the key hints advertised by the file list for the current mode
@@ -368,11 +391,14 @@ fn fb_hint(state: &FileBrowserState) -> String {
         parts.push(texts::FB_HINT_IMPORT_TYPES);
     }
 
-    // Export names the destination in the path bar; `n` edits the name and `e`
-    // writes to the directory now open.
+    // Export and share name a destination in the path bar; `n` edits it (and `e`
+    // writes an export to the directory now open).
     if state.mode.export_format().is_some() {
         parts.push(texts::FB_HINT_EXPORT_NAME);
         parts.push(texts::FB_HINT_EXPORT);
+    }
+    if state.mode.is_share_destination() {
+        parts.push(texts::FB_HINT_SHARE_NAME);
     }
 
     parts.extend([
@@ -547,12 +573,16 @@ fn render_overwrite_popup(frame: &mut Frame, area: Rect, state: &FileBrowserStat
         .style(ElementStyle::ConfirmDeleteBlock.style());
 
     let inner = block.inner(popup_area);
+    // An export overwrites a file; a share writes into a folder that already has
+    // something in it.
+    let prompt = if state.mode.is_share_destination() {
+        format!("{}{}? ", texts::FB_PROMPT_SHARE_FOLDER, filename)
+    } else {
+        format!(" Overwrite {filename}? ")
+    };
     let lines = vec![
         Line::from(""),
-        Line::from(Span::styled(
-            format!(" Overwrite {filename}? "),
-            ElementStyle::ConfirmMessage.style(),
-        )),
+        Line::from(Span::styled(prompt, ElementStyle::ConfirmMessage.style())),
     ];
 
     frame.render_widget(Clear, popup_area);
@@ -1344,6 +1374,74 @@ mod tests {
         assert_eq!(
             state.location_scroll, 3,
             "overlay should scroll only after the margin"
+        );
+    }
+
+    // ── Share destination ──
+
+    fn share_state(dir: &std::path::Path) -> FileBrowserState {
+        FileBrowserState::for_share(
+            Some(&dir.join("vault.age")),
+            None,
+            &FileBrowserSession::default(),
+        )
+    }
+
+    #[test]
+    fn test_render_share_titles_the_browser() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = share_state(dir.path());
+
+        let text = render_to_text(&mut state);
+
+        assert!(
+            text.contains("Share into"),
+            "the share browser should name its purpose:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_share_shows_the_folder_in_the_path_bar() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = share_state(dir.path());
+
+        let text = render_to_text(&mut state);
+
+        assert!(
+            text.contains("vault"),
+            "the path bar should name the folder about to be written:\n{text}"
+        );
+    }
+
+    #[test]
+    fn status_parts_share_advertises_the_name_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = share_state(dir.path());
+
+        let (mode, _, hint) = status_parts(&state);
+
+        assert_eq!(mode, texts::MODE_SHARE);
+        assert!(
+            hint.contains("[n]name"),
+            "the share browser should advertise the name key: {hint}"
+        );
+        assert!(
+            !hint.contains("[e]export"),
+            "a share does not write with `e`: {hint}"
+        );
+    }
+
+    #[test]
+    fn status_parts_share_input_names_the_enter_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = share_state(dir.path());
+        state.focus = FocusTarget::Input;
+
+        let (_, _, hint) = status_parts(&state);
+
+        assert!(
+            hint.contains("Enter:share"),
+            "the share input should commit with Enter: {hint}"
         );
     }
 }

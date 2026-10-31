@@ -245,6 +245,17 @@ pub fn probe_path_writable(path: &str) -> Result<(), FileHandlingError> {
     Ok(())
 }
 
+/// Returns `true` when `path` is a directory with no entries at all, including
+/// hidden ones (dot-prefixed).
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::Io`] when the directory cannot be read.
+pub fn is_dir_empty(path: &Path) -> Result<bool, FileHandlingError> {
+    let mut entries = fs::read_dir(path)?;
+    Ok(entries.next().is_none())
+}
+
 // ── Tests ──
 
 #[cfg(test)]

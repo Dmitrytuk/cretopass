@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -250,7 +250,7 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
                 None
             }
             // The name and the write are available even with nothing to list.
-            KeyCode::Char('n') if state.mode.export_format().is_some() => {
+            KeyCode::Char('n') if state.mode.names_destination() => {
                 state.focus = FocusTarget::Input;
                 None
             }
@@ -297,9 +297,11 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
                 return None;
             }
 
-            if state.mode.export_format().is_some() {
-                // The list picks the directory only: a file row is not a target,
-                // and the name is edited with `n` and written with `e`.
+            if state.mode.names_destination() {
+                // The list picks the directory only: a file row is not a target.
+                // The export name is edited with `n` and written with `e`; the
+                // share folder is edited with `n` and committed with Enter in the
+                // input.
                 return None;
             }
 
@@ -331,8 +333,9 @@ fn handle_list_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBr
             state.pending = AddPrefix::Pending;
             None
         }
-        // Export: `n` edits the name, `e` writes to the directory now open.
-        KeyCode::Char('n') if state.mode.export_format().is_some() => {
+        // Naming a destination: `n` edits the name, `e` writes an export to the
+        // directory now open, and Enter in the input commits a share's folder.
+        KeyCode::Char('n') if state.mode.names_destination() => {
             state.focus = FocusTarget::Input;
             None
         }
@@ -413,6 +416,10 @@ fn handle_input_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileB
 
     match key.code {
         KeyCode::Enter => {
+            // A share names a folder rather than a file, so Enter commits it here.
+            if state.mode.is_share_destination() {
+                return begin_share(state);
+            }
             // In export mode Enter accepts the draft and returns to the list; the
             // write runs from there with `e`, which is also where the empty-name
             // check lives.
@@ -486,6 +493,52 @@ fn confirm_export_destination(
     Some(FileBrowserAction::Selected(
         target.to_string_lossy().into_owned(),
     ))
+}
+
+/// Commits the typed name as the folder a share bundle is written into.
+///
+/// The name is required (unlike an export, Enter is the only way to commit, so
+/// the empty-name check belongs here). A path that already exists as a file is
+/// refused — a bundle is a folder — and an existing folder that is not empty
+/// asks for confirmation first, so a re-share can update a bundle this flow
+/// produced before.
+fn begin_share(state: &mut FileBrowserState) -> Option<FileBrowserAction> {
+    let name = state.creating_name.trim();
+    if name.is_empty() {
+        state.error = Some(texts::MSG_NAME_REQUIRED.to_string());
+        return None;
+    }
+    confirm_share_destination(state, state.current_dir.join(name))
+}
+
+/// Resolves the typed folder to the bundle destination, asking before writing
+/// into an existing folder that is not empty.
+fn confirm_share_destination(
+    state: &mut FileBrowserState,
+    target: PathBuf,
+) -> Option<FileBrowserAction> {
+    let selected = || FileBrowserAction::Selected(target.to_string_lossy().into_owned());
+
+    if !target.exists() {
+        return Some(selected());
+    }
+    if !target.is_dir() {
+        state.error = Some(texts::MSG_CANNOT_SHARE_INTO_FILE.to_string());
+        return None;
+    }
+
+    match file_handling::is_dir_empty(&target) {
+        // An existing empty folder is written into without asking.
+        Ok(true) => Some(selected()),
+        Ok(false) => {
+            state.confirm_overwrite = Some(target.to_string_lossy().into_owned());
+            None
+        }
+        Err(e) => {
+            state.error = Some(format!("{e}"));
+            None
+        }
+    }
 }
 
 fn handle_rename_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBrowserAction> {
@@ -1380,5 +1433,135 @@ mod tests {
         assert_eq!(result, None);
         assert_eq!(state.error.as_deref(), Some(texts::MSG_NAME_REQUIRED));
         assert!(state.confirm_overwrite.is_none());
+    }
+
+    // ── Share destinations ──
+
+    /// A share browser over `dir`, as if opened for the secret file
+    /// `dir/vault.age`.
+    fn share_state(dir: &Path) -> FileBrowserState {
+        FileBrowserState::for_share(
+            Some(&dir.join("vault.age")),
+            None,
+            &FileBrowserSession::default(),
+        )
+    }
+
+    #[test]
+    fn test_share_opens_on_the_list_with_the_suggested_folder() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let state = share_state(dir.path());
+
+        assert_eq!(state.focus, FocusTarget::List);
+        assert_eq!(state.creating_name, "vault");
+        assert_eq!(state.current_dir, dir.path());
+    }
+
+    #[test]
+    fn test_share_enter_commits_a_new_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = share_state(dir.path());
+        state.focus = FocusTarget::Input;
+
+        let result = handle_key(key(KeyCode::Enter), &mut state);
+
+        assert_eq!(
+            result,
+            Some(FileBrowserAction::Selected(
+                dir.path().join("vault").to_string_lossy().to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_share_enter_refuses_a_path_that_is_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("vault"), b"x").unwrap();
+        let mut state = share_state(dir.path());
+        state.focus = FocusTarget::Input;
+
+        let result = handle_key(key(KeyCode::Enter), &mut state);
+
+        assert_eq!(result, None);
+        assert_eq!(
+            state.error.as_deref(),
+            Some(texts::MSG_CANNOT_SHARE_INTO_FILE)
+        );
+    }
+
+    #[test]
+    fn test_share_enter_writes_into_an_existing_empty_folder_without_asking() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("vault")).unwrap();
+        let mut state = share_state(dir.path());
+        state.focus = FocusTarget::Input;
+
+        let result = handle_key(key(KeyCode::Enter), &mut state);
+
+        assert!(matches!(result, Some(FileBrowserAction::Selected(_))));
+        assert!(state.confirm_overwrite.is_none());
+    }
+
+    #[test]
+    fn test_share_asks_before_writing_into_a_non_empty_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("vault");
+        std::fs::create_dir(&bundle).unwrap();
+        std::fs::write(bundle.join("HOW-TO-OPEN.txt"), b"old").unwrap();
+        let mut state = share_state(dir.path());
+        state.focus = FocusTarget::Input;
+
+        let result = handle_key(key(KeyCode::Enter), &mut state);
+        assert_eq!(result, None, "the folder must be confirmed first");
+        assert!(state.confirm_overwrite.is_some());
+
+        let confirmed = handle_key(key(KeyCode::Char('y')), &mut state);
+        assert!(matches!(confirmed, Some(FileBrowserAction::Selected(_))));
+    }
+
+    #[test]
+    fn test_share_enter_with_a_blank_name_shows_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = share_state(dir.path());
+        state.creating_name = "   ".to_string();
+        state.focus = FocusTarget::Input;
+
+        let result = handle_key(key(KeyCode::Enter), &mut state);
+
+        assert_eq!(result, None);
+        assert_eq!(state.error.as_deref(), Some(texts::MSG_NAME_REQUIRED));
+    }
+
+    #[test]
+    fn test_share_mode_offers_no_rename_or_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let secret = dir.path().join("other.age");
+        file_handling::create_secret_file(&secret.to_string_lossy(), "pw").unwrap();
+        let mut state = share_state(dir.path());
+        state.selected = state
+            .entries
+            .iter()
+            .position(|e| e.name == "other.age")
+            .expect("the secret file is listed");
+
+        handle_key(key(KeyCode::Char('r')), &mut state);
+        handle_key(key(KeyCode::Char('d')), &mut state);
+
+        assert_eq!(state.focus, FocusTarget::List);
+        assert!(state.rename_target.is_empty());
+        assert!(state.confirm_delete.is_none());
+    }
+
+    #[test]
+    fn test_share_does_not_write_on_e() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = share_state(dir.path());
+
+        // `e` writes an export; a share commits with Enter in its input.
+        let result = handle_key(key(KeyCode::Char('e')), &mut state);
+
+        assert_eq!(result, None);
+        assert_eq!(state.focus, FocusTarget::List);
     }
 }
