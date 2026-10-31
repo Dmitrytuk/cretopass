@@ -4,6 +4,7 @@ pub mod error;
 pub mod export;
 pub mod file_process;
 pub mod import;
+pub mod share;
 
 pub use autosave::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, SaveResult};
 pub use disks::{DiskInfo, list_disks};

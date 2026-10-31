@@ -51,8 +51,9 @@ pub fn suggest_name(
     format!("{name}.{}", format.extension())
 }
 
-/// Replaces every character that may not appear in an export's file name.
-fn sanitize(node_name: &str) -> String {
+/// Replaces every character that may not appear in a generated file name,
+/// shared by the export and share flows.
+pub(crate) fn sanitize(node_name: &str) -> String {
     node_name
         .chars()
         .map(|c| {

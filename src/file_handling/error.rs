@@ -14,6 +14,7 @@ pub enum FileHandlingError {
     PathNotWritable(String),
     ExportError(String),
     ImportError(String),
+    ShareError(String),
 }
 
 impl fmt::Display for FileHandlingError {
@@ -36,6 +37,7 @@ impl fmt::Display for FileHandlingError {
             Self::PathNotWritable(p) => write!(f, "cannot write to path: {p}"),
             Self::ExportError(msg) => write!(f, "export: {msg}"),
             Self::ImportError(msg) => write!(f, "import: {msg}"),
+            Self::ShareError(msg) => write!(f, "share: {msg}"),
         }
     }
 }
