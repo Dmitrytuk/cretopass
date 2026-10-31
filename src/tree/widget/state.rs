@@ -349,14 +349,6 @@ impl TreeState {
         let Some(selected_id) = self.selected_node_id() else {
             return Err(node);
         };
-        let has_sibling_slot = has_parent(&self.root, selected_id);
-        if matches!(
-            position,
-            AddPosition::SiblingAfter | AddPosition::SiblingBefore
-        ) && !has_sibling_slot
-        {
-            return Err(node);
-        }
         let new_id = node.id;
         match position {
             AddPosition::Child => {
@@ -367,12 +359,11 @@ impl TreeState {
                 }
                 self.expanded.insert(selected_id);
             }
-            AddPosition::SiblingAfter => {
-                let _ = insert_after(&mut self.root, selected_id, node);
-            }
-            AddPosition::SiblingBefore => {
-                let _ = insert_before(&mut self.root, selected_id, node);
-            }
+            // `insert_after`/`insert_before` report when the target has no
+            // sibling slot (the root, or an absent node) and hand the node back,
+            // so it is never silently dropped.
+            AddPosition::SiblingAfter => insert_after(&mut self.root, selected_id, node)?,
+            AddPosition::SiblingBefore => insert_before(&mut self.root, selected_id, node)?,
         }
         self.update_visible();
         self.select_by_id(new_id);
@@ -532,15 +523,6 @@ fn insert_before(root: &mut Node, target_id: Uuid, node: Node) -> Result<(), Nod
     Err(node)
 }
 
-/// Returns `true` when some node in the tree has `id` as one of its children
-/// (i.e. `id` is not the root).
-fn has_parent(root: &Node, id: Uuid) -> bool {
-    if root.children.iter().any(|c| c.id == id) {
-        return true;
-    }
-    root.children.iter().any(|c| has_parent(c, id))
-}
-
 fn find_parent_mut(root: &mut Node, id: Uuid) -> Option<&mut Node> {
     if root.children.iter().any(|c| c.id == id) {
         return Some(root);
@@ -684,12 +666,17 @@ mod tests {
     }
 
     #[test]
-    fn insert_node_at_position_is_noop_for_root_sibling() {
-        let mut state = make_tree();
-        state.selected = 0;
-        let node = Node::new("X");
-        let err = state.insert_node_at_position(AddPosition::SiblingBefore, node);
-        assert!(err.is_err());
-        assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "B"]);
+    fn insert_node_at_position_hands_the_node_back_for_root_siblings() {
+        for position in [AddPosition::SiblingBefore, AddPosition::SiblingAfter] {
+            let mut state = make_tree();
+            state.selected = 0;
+            let node = Node::new("X");
+            let Err(returned) = state.insert_node_at_position(position, node) else {
+                panic!("a root has no sibling slot");
+            };
+            assert_eq!(returned.name, "X");
+            assert_eq!(names(&state), vec!["Secrets", "A", "A1", "A2", "B"]);
+            assert!(!state.modified);
+        }
     }
 }

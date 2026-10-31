@@ -15,16 +15,20 @@ use crate::tree::widget::TreeState;
 
 /// The Tree's key-binding list, opened with `?`.
 #[derive(Debug)]
-pub struct Help;
+pub(crate) struct Help;
 
 impl Help {
     /// Any key dismisses the modal: there is nothing to type into it.
-    pub fn handle_key(&mut self, _key: KeyEvent, _state: &mut TreeState) -> Option<TreeAction> {
+    pub(crate) fn handle_key(
+        &mut self,
+        _key: KeyEvent,
+        _state: &mut TreeState,
+    ) -> Option<TreeAction> {
         Some(TreeAction::Close)
     }
 
     /// Draws the key-binding list centred over `area`.
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
+    pub(crate) fn render(&self, frame: &mut Frame, area: Rect) {
         let n_bindings = texts::TREE_HELP_KEY_BINDINGS.len() as u16;
         let overlay_height = (n_bindings + 3).min(area.height.saturating_sub(2));
         let overlay_area = Rect {
@@ -55,7 +59,7 @@ impl Help {
     }
 
     /// Badge and hint for the tree status bar while the modal is open.
-    pub fn status_parts(&self) -> (&'static str, ElementStyle, &'static str) {
+    pub(crate) fn status_parts(&self) -> (&'static str, ElementStyle, &'static str) {
         (texts::MODE_HELP, ElementStyle::ModeHelp, texts::HINT_HELP)
     }
 }

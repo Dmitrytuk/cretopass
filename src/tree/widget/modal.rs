@@ -14,10 +14,12 @@ mod detail;
 mod export;
 mod help;
 
-pub use alert::Alert;
-pub use detail::Detail;
-pub use export::ExportWizard;
-pub use help::Help;
+pub(crate) use alert::Alert;
+pub(crate) use detail::Detail;
+pub(crate) use export::ExportWizard;
+pub(crate) use help::Help;
+
+pub(crate) use chrome::centered_rect;
 
 /// Items the tree's tests reach for; the production build uses them only inside
 /// this module tree.
@@ -38,7 +40,7 @@ use crate::tree::node::Node;
 /// Variants are added by the commit that migrates the flow producing them, so the
 /// enum never carries a case nothing constructs.
 #[derive(Debug)]
-pub enum TreeAction {
+pub(crate) enum TreeAction {
     /// Dismiss the modal and reveal what is underneath.
     Close,
     /// Write `text` to the system clipboard.
@@ -54,7 +56,7 @@ pub enum TreeAction {
 
 /// The Tree's modal slot: at most one at a time, over Normal navigation.
 #[derive(Debug)]
-pub enum Modal {
+pub(crate) enum Modal {
     /// The key-binding list, opened with `?`.
     Help(Help),
     /// A passive message the user acknowledges with any key.
@@ -68,7 +70,7 @@ pub enum Modal {
 
 impl Modal {
     /// A passive alert carrying `message`.
-    pub fn alert(message: impl Into<String>) -> Self {
+    pub(crate) fn alert(message: impl Into<String>) -> Self {
         Self::Alert(Alert {
             message: message.into(),
         })
@@ -79,7 +81,11 @@ impl Modal {
     ///
     /// `state` is the tree the modal may read and mutate in memory; all I/O is
     /// still deferred to the action.
-    pub fn handle_key(&mut self, key: KeyEvent, state: &mut TreeState) -> Option<TreeAction> {
+    pub(crate) fn handle_key(
+        &mut self,
+        key: KeyEvent,
+        state: &mut TreeState,
+    ) -> Option<TreeAction> {
         match self {
             Self::Help(help) => help.handle_key(key, state),
             Self::Alert(alert) => alert.handle_key(key, state),

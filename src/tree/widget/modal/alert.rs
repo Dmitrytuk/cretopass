@@ -10,30 +10,30 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::TreeAction;
+use super::chrome::centered_rect;
 use crate::theming::{ElementStyle, texts};
 use crate::tree::widget::TreeState;
 
 /// A one-line message shown over the Tree until the user acknowledges it.
 #[derive(Debug)]
-pub struct Alert {
+pub(crate) struct Alert {
     /// The message the alert shows.
-    pub message: String,
+    pub(crate) message: String,
 }
 
 impl Alert {
     /// Any key dismisses the alert: there is nothing to type into it.
-    pub fn handle_key(&mut self, _key: KeyEvent, _state: &mut TreeState) -> Option<TreeAction> {
+    pub(crate) fn handle_key(
+        &mut self,
+        _key: KeyEvent,
+        _state: &mut TreeState,
+    ) -> Option<TreeAction> {
         Some(TreeAction::Close)
     }
 
     /// Draws the message centred over `area`.
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let overlay_area = Rect {
-            x: area.width / 6,
-            y: area.height / 2 - 2,
-            width: area.width * 2 / 3,
-            height: 4,
-        };
+    pub(crate) fn render(&self, frame: &mut Frame, area: Rect) {
+        let overlay_area = centered_rect(area, area.width * 2 / 3, 4);
 
         let block = Block::default()
             .title(texts::ALERT_TITLE)
@@ -55,7 +55,7 @@ impl Alert {
     }
 
     /// Badge and hint for the tree status bar while the modal is open.
-    pub fn status_parts(&self) -> (&'static str, ElementStyle, &'static str) {
+    pub(crate) fn status_parts(&self) -> (&'static str, ElementStyle, &'static str) {
         (
             texts::MODE_NORMAL,
             ElementStyle::ModeNormal,

@@ -16,7 +16,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::TreeAction;
-use super::chrome::make_overlay_area;
+use super::chrome::{centered_rect, make_overlay_area};
 use crate::cursor::{
     backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
     selected_span,
@@ -37,7 +37,7 @@ const SYMBOL_COLUMNS: usize = 3;
 
 /// The Detail modal: browse a selected Node's ExtraFields, copy a value, or edit.
 #[derive(Debug, Default)]
-pub struct Detail {
+pub(crate) struct Detail {
     /// Highlighted extra-field row while browsing.
     selected: usize,
     /// Copy-confirmation alert text, if any. The next key dismisses it.
@@ -81,7 +81,7 @@ enum Screen {
 
 impl Detail {
     /// A modal browsing the selected Node, with no Form open.
-    pub fn browse() -> Self {
+    pub(crate) fn browse() -> Self {
         Self::default()
     }
 
@@ -97,7 +97,7 @@ impl Detail {
     }
 
     /// A modal creating a new Node in its Form Popup.
-    pub fn adding() -> Self {
+    pub(crate) fn adding() -> Self {
         Self {
             selected: 0,
             alert: None,
@@ -110,7 +110,11 @@ impl Detail {
     ///
     /// Only effects outside the process become actions: [`TreeAction::Close`] to
     /// dismiss the modal, [`TreeAction::CopyToClipboard`] on a copy.
-    pub fn handle_key(&mut self, key: KeyEvent, state: &mut TreeState) -> Option<TreeAction> {
+    pub(crate) fn handle_key(
+        &mut self,
+        key: KeyEvent,
+        state: &mut TreeState,
+    ) -> Option<TreeAction> {
         match self.screen() {
             Screen::Browse => self.handle_browse(key, state),
             Screen::Form => self.handle_form(key, state),
@@ -164,15 +168,18 @@ impl Detail {
                 None
             }
             Action::CopyField => {
+                // With nothing selected (a node that has no extra fields) `y` is
+                // a no-op: never claim success without a value to copy.
                 let text = state.current_node_ref().and_then(|node| {
                     node.extra_fields
                         .get(self.selected)
                         .map(|ef| ef.value.clone())
-                });
+                })?;
                 self.alert = Some(texts::COPY_CHECK.to_string());
-                match text {
-                    Some(text) if !text.is_empty() => Some(TreeAction::CopyToClipboard { text }),
-                    _ => None,
+                if text.is_empty() {
+                    None
+                } else {
+                    Some(TreeAction::CopyToClipboard { text })
                 }
             }
             Action::EditNode => {
@@ -369,7 +376,7 @@ impl Detail {
             }
         };
         let mut form = self.form.take().expect("the form is open");
-        let items = picker_items(&form);
+        let items = picker_items();
         let selected = selected.min(items.len().saturating_sub(1));
 
         match Action::from_select_field_type(&key) {
@@ -457,7 +464,11 @@ impl Detail {
 
         match Action::from_custom_field_name(&key) {
             Action::Cancel => {
-                self.popup = DetailPopup::SelectFieldType { selected: 3 };
+                let custom = picker_items()
+                    .iter()
+                    .position(|item| *item == PickerItem::Custom)
+                    .unwrap_or(0);
+                self.popup = DetailPopup::SelectFieldType { selected: custom };
                 self.form = Some(form);
             }
             Action::Confirm => {
@@ -715,7 +726,7 @@ impl Detail {
     }
 
     /// Draws the active screen over `area`.
-    pub fn render(&self, frame: &mut Frame, area: Rect, state: &TreeState) {
+    pub(crate) fn render(&self, frame: &mut Frame, area: Rect, state: &TreeState) {
         match self.screen() {
             Screen::Browse => self.render_browse(frame, area, state),
             Screen::Form => self.render_form(frame, area, state),
@@ -785,20 +796,15 @@ impl Detail {
 
     /// Draws the field-type picker.
     fn render_select_field_type(&self, frame: &mut Frame, area: Rect) {
-        let Some(form) = self.form.as_ref() else {
+        if self.form.is_none() {
             return;
-        };
+        }
         let DetailPopup::SelectFieldType { selected } = self.popup else {
             return;
         };
-        let items = picker_items(form);
+        let items = picker_items();
 
-        let overlay_area = Rect {
-            x: area.width / 4,
-            y: area.height / 2 - 4,
-            width: area.width / 2,
-            height: 8,
-        };
+        let overlay_area = centered_rect(area, area.width / 2, 8);
 
         let block = Block::default()
             .title(texts::OVERLAY_SELECT_FIELD_TYPE)
@@ -826,12 +832,7 @@ impl Detail {
             return;
         };
 
-        let overlay_area = Rect {
-            x: area.width / 4,
-            y: area.height / 2 - 2,
-            width: area.width / 2,
-            height: 4,
-        };
+        let overlay_area = centered_rect(area, area.width / 2, 4);
 
         let block = Block::default()
             .title(texts::OVERLAY_CUSTOM_FIELD_NAME)
@@ -869,12 +870,7 @@ impl Detail {
             .map(|ef| ef.field_type.label())
             .unwrap_or_default();
 
-        let overlay_area = Rect {
-            x: area.width / 4,
-            y: area.height / 2 - 2,
-            width: area.width / 2,
-            height: 4,
-        };
+        let overlay_area = centered_rect(area, area.width / 2, 4);
 
         let block = Block::default()
             .title(texts::OVERLAY_CONFIRM_DELETE)
@@ -901,7 +897,7 @@ impl Detail {
     }
 
     /// Badge and hint for the tree status bar while the modal is open.
-    pub fn status_parts(&self, root: &Node) -> (&'static str, ElementStyle, &'static str) {
+    pub(crate) fn status_parts(&self, root: &Node) -> (&'static str, ElementStyle, &'static str) {
         match self.screen() {
             Screen::Browse => (
                 texts::MODE_DETAIL,
@@ -1025,8 +1021,8 @@ impl PickerItem {
     }
 }
 
-/// Items offered by the field-type picker for the given form.
-pub(crate) fn picker_items(_form: &FormState) -> Vec<PickerItem> {
+/// Items offered by the field-type picker, in display order.
+pub(crate) fn picker_items() -> Vec<PickerItem> {
     vec![
         PickerItem::Login,
         PickerItem::Password,
@@ -1369,8 +1365,7 @@ fn render_generate_password_overlay(frame: &mut Frame, area: Rect, modal: &Gener
 fn render_symbol_checklist_overlay(frame: &mut Frame, area: Rect, modal: &GeneratorModal) {
     let rows = u16::try_from(generator::SYMBOLS.len().div_ceil(SYMBOL_COLUMNS))
         .expect("symbol checklist rows fit in a terminal height");
-    let content_height = rows;
-    let overlay_height = (content_height + 2).min(area.height);
+    let overlay_height = (rows + 2).min(area.height);
     let width = u16::try_from(SYMBOL_COLUMNS * 9)
         .expect("symbol checklist width fits in a terminal")
         .min(area.width);
@@ -1418,12 +1413,7 @@ fn render_symbol_checklist_overlay(frame: &mut Frame, area: Rect, modal: &Genera
 
 /// Draws the transient "copied" confirmation over `area`.
 fn render_copy_alert(frame: &mut Frame, area: Rect) {
-    let overlay_area = Rect {
-        x: area.width / 3,
-        y: area.height / 2 - 2,
-        width: area.width / 3,
-        height: 4,
-    };
+    let overlay_area = centered_rect(area, area.width / 3, 4);
 
     let block = Block::default()
         .title(texts::OVERLAY_COPIED)
@@ -1545,6 +1535,18 @@ mod tests {
         let mut state = TreeState::new(node);
         let _ = detail.handle_key(key(KeyCode::Char('y')), &mut state);
         assert_eq!(detail.alert.as_deref(), Some(texts::COPY_CHECK));
+    }
+
+    #[test]
+    fn no_field_skips_both_the_clipboard_and_the_alert() {
+        let mut detail = Detail::browse();
+        let mut state = TreeState::new(Node::new("Root"));
+        assert!(
+            detail
+                .handle_key(key(KeyCode::Char('y')), &mut state)
+                .is_none()
+        );
+        assert!(detail.alert.is_none());
     }
 
     #[test]
