@@ -248,7 +248,7 @@ mod tests {
         assert!(matches!(
             confirmation.handle_key(key(KeyCode::Enter)),
             Some(HomeAction::Share { dest, passphrase })
-                if dest == "/tmp/bundle" && passphrase.is_empty()
+                if dest == "/tmp/bundle" && passphrase.as_bytes().is_empty()
         ));
     }
 

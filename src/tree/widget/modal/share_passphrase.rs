@@ -256,7 +256,7 @@ mod tests {
         let _ = prompt.handle_key(key(KeyCode::Enter), &mut state);
 
         match prompt.handle_key(key(KeyCode::Char('y')), &mut state) {
-            Some(TreeAction::Share { passphrase, .. }) => assert!(passphrase.is_empty()),
+            Some(TreeAction::Share { passphrase, .. }) => assert!(passphrase.as_bytes().is_empty()),
             _ => panic!("expected a share action"),
         }
     }

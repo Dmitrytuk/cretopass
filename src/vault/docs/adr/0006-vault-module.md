@@ -36,7 +36,7 @@ the orchestrator performs it. See [0021](0021-home-intent-contract.md).
 ## Home screen flow
 
 1. `cargo run` → `vault::widget::run()`
-2. Menu: "Open secret file", "Create new secret file", "Import from file", recent files list, "Configuration", "Export active file", "Share active file", "Change master password", "Quit"
+2. Menu: "Open secret file", "Create new secret file", "Configuration", "Change file password", "Export active file", "Share active file", "Import from file", then the recent files list
 3. "Open secret file" → `BrowserModal` (OpenFile mode) → validate age header + size → `UnlockPrompt` → decrypt → `push_recent_secret_file()` → launch tree
 4. "Create new secret file" → `BrowserModal` (CreateFile mode) → Enter on a name hard-blocks if the path already exists → probe writability → `CreateSecretPrompt` (passphrase + confirmation, `Ctrl+S` reveals) → create encrypted file with root `"Secrets"` → launch tree. An all-empty pair falls through to the `Confirmation` asking for a passwordless file.
 5. Auto-open on startup: if config has `open_last_opened_file_on_startup`, validates the file and opens the unlock prompt immediately

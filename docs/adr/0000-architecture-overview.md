@@ -40,9 +40,9 @@ The `generator` module sits below `tree`: `tree::app_tree` maps a `Password`
 field to `generator::generate_password` when the user runs the generator.
 `generator` never imports `tree` (or any other project module).
 
-The `share` module sits beside the two screens: it owns the scope vocabulary and
-the recipient's masked password pair that the Tree and Home share flows both use,
-and never imports `TreeState`/`HomeState`. Writing the bundle itself is
+The `share` module sits beside the two screens: it owns the recipient's masked
+password pair that the Tree and Home share flows both use, and never imports
+`TreeState`/`HomeState`. Writing the bundle itself is
 `file_handling::share`'s job ([0023](0023-sharing-a-vault-subtree.md)).
 
 ## Core design principles

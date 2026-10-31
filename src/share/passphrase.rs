@@ -46,11 +46,6 @@ impl SharePassword {
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_slice()
     }
-
-    /// Whether no password was set (a passwordless bundle).
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
 }
 
 impl std::fmt::Debug for SharePassword {
@@ -97,7 +92,7 @@ impl Passphrase {
     }
 
     /// The masked fields, for the screen's renderer.
-    pub fn fields(&self) -> &SecretFieldGroup {
+    pub(crate) fn fields(&self) -> &SecretFieldGroup {
         &self.fields
     }
 

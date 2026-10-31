@@ -8,4 +8,4 @@
 
 mod passphrase;
 
-pub use passphrase::{Passphrase, PassphraseSubmit, SharePassword};
+pub(crate) use passphrase::{Passphrase, PassphraseSubmit, SharePassword};

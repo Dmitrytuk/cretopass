@@ -145,6 +145,13 @@ impl SecretFieldGroup {
         }
     }
 
+    /// The field at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `index` is out of range. Every caller passes an index within
+    /// the count the group was built with
+    /// ([`SecretFieldGroup::with_fields`]).
     pub fn field(&self, index: usize) -> &SecretField {
         &self.fields[index]
     }

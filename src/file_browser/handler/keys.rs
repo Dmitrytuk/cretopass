@@ -65,7 +65,7 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
         };
     }
 
-    // ── Overwrite confirmation (export only) ──
+    // ── Overwrite confirmation (export file or share folder) ──
     if state.confirm_overwrite.is_some() {
         return match key.code {
             KeyCode::Char('y') | KeyCode::Enter => state

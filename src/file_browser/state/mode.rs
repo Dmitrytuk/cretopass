@@ -18,7 +18,7 @@ pub enum FileBrowserMode {
 
 impl FileBrowserMode {
     /// The export format this mode is naming a file for, if any.
-    pub fn export_format(self) -> Option<ExportFormat> {
+    pub(crate) fn export_format(self) -> Option<ExportFormat> {
         match self {
             Self::ExportFile { format } => Some(format),
             _ => None,
@@ -27,12 +27,12 @@ impl FileBrowserMode {
 
     /// Whether this mode names a destination the user types — the export file or
     /// the share bundle folder — rather than picking an existing entry.
-    pub fn names_destination(self) -> bool {
+    pub(crate) fn names_destination(self) -> bool {
         self.export_format().is_some() || self.is_share_destination()
     }
 
     /// Whether this mode names the folder a share bundle is written into.
-    pub fn is_share_destination(self) -> bool {
+    pub(crate) fn is_share_destination(self) -> bool {
         matches!(self, Self::ShareDestination)
     }
 
