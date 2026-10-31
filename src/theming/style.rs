@@ -55,6 +55,8 @@ pub enum ElementStyle {
     StatusSaveFailed,
     StatusInfo,
     FbPathBar,
+    /// The file name an export will write, appended to the browser's path bar.
+    FbExportName,
     FbDirName,
     FbAgeFileName,
     FbRegularFileName,
@@ -176,6 +178,10 @@ impl ElementStyle {
             Self::StatusInfo => Style::default().fg(scheme.text),
             Self::FbPathBar => Style::default()
                 .fg(scheme.text)
+                .add_modifier(Modifier::BOLD)
+                .bg(scheme.path_bar_bg),
+            Self::FbExportName => Style::default()
+                .fg(scheme.accent)
                 .add_modifier(Modifier::BOLD)
                 .bg(scheme.path_bar_bg),
             Self::FbDirName => Style::default().fg(scheme.dir_name),

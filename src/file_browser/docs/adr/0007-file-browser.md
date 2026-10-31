@@ -25,10 +25,10 @@ file listing UX to vault-specific modal logic, preventing reuse.
 ## Contracts
 
 - `FileBrowserState::new(mode, &FileBrowserSession)` starts at the session's last directory when it is still listable and falls back to the user's home directory otherwise. The session's hidden-entry setting is restored.
-- `FileBrowserState::for_export(format, base_path, node_name, &FileBrowserSession)` starts in the name input instead, in the secret file's directory, with `file_handling::export::suggest_name` prefilled. See [ADR 0022](../../../../docs/adr/0022-user-chosen-export-destination.md).
+- `FileBrowserState::for_export(format, base_path, node_name, &FileBrowserSession)` starts on the file list instead, in the secret file's directory, with `file_handling::export::suggest_name` prefilled and shown in the path bar (resolved to the format's extension). See [ADR 0022](../../../../docs/adr/0022-user-chosen-export-destination.md).
 - `FileBrowserState::session()` captures `current_dir` and `show_hidden`; `vault::widget` stores the returned `FileBrowserSession` in `HomeState` and passes it to every subsequent opening. The session is in memory only — it is never written to config or disk.
 - `handle_key(key, state) → Option<FileBrowserAction>` — returns `None` while browsing, `Some(Selected(path))` or `Some(Cancelled)` to exit.
-- Enter in the name input returns `Selected` only when no file with that name exists at the target path; otherwise it shows a dismissable error popup and stays open. In `ExportFile` mode the typed name is first resolved through `file_handling::export::output_path`: a secret-file target is refused, an existing plain-text target asks for an overwrite confirmation (`confirm_overwrite`, dismissed by any other key), and only then is `Selected` reported.
+- Enter in the name input returns `Selected` only when no file with that name exists at the target path; otherwise it shows a dismissable error popup and stays open. In `ExportFile` mode Enter only accepts the draft and returns to the list; `e` on the list resolves the typed name through `file_handling::export::output_path`, refusing a blank name and a secret-file target and asking for an overwrite confirmation (`confirm_overwrite`, dismissed by any other key) before reporting `Selected` for the directory now open.
 - The name input, rename input, delete confirmation, and errors render as centered popups stacked over the browser; an error popup sits on top of any active dialog and is dismissed by the next key.
 - The Locations overlay pins `Home` first, then lists mounted disks returned by `file_handling::list_disks()`. It preselects the location with the longest path that is an ancestor of `current_dir`, falling back to the first row. Enter on an unreadable location keeps the overlay open and shows the error popup on top.
 - Hidden entries are names starting with `.`; nothing else is treated as hidden. `list_dir` excludes them and `list_dir_including_hidden` includes them.
@@ -42,7 +42,9 @@ file listing UX to vault-specific modal logic, preventing reuse.
 | Keys | Action |
 |------|--------|
 | `j`/`k` | Navigate files |
-| `Enter` | Enter directory or select file (in `ExportFile` mode, a file row returns to the name input) |
+| `Enter` | Enter directory or select file (in `ExportFile` mode, a file row does nothing: only the open directory is a target) |
+| `n` | (`ExportFile` mode) Focus the name input; Enter accepts the draft and returns to the list |
+| `e` | (`ExportFile` mode) Write the export to the directory now open (resolves the format's extension, refuses a secret-file or blank name, asks before overwriting) |
 | `/` | Search filter |
 | `D` | Open the Locations overlay (list focus only, not while searching) |
 | `Ctrl+h` / `Ctrl+Backspace` | Toggle hidden (dot-prefixed) entries (list focus; ignored in search and text inputs) |

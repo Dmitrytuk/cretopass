@@ -24,6 +24,13 @@ Rules that follow from it:
   therefore resolves the typed name to the path it will actually write — its
   existence check, its confirmation, and its title (which names the format) all
   speak about that resolved path.
+- **The open directory is the destination.** The browser opens on the file list,
+  in the secret file's directory; navigating into a directory makes that
+  directory the place the export lands. The file name is shown in the path bar,
+  resolved to the format's extension, so the destination is legible without
+  opening a dialog. `n` edits the name (Enter accepts the draft and returns to
+  the list), and `e` writes to the directory now open. Enter on a file row does
+  nothing: a file is not a target here.
 - **Overwriting is asked about, not assumed.** An existing plain-text target
   raises a confirmation popup inside the browser (`y`/`Enter`), mirroring the
   browser's delete confirmation; the selection is reported only after the
@@ -60,7 +67,9 @@ Rules that follow from it:
   an open vault is needed only to seed the suggested name and starting directory.
 - The File Browser contract "Enter in the name input returns `Selected` only when
   no file with that name exists" (ADR 0007) gains an exception for the export
-  mode — a re-export must be able to land on the file it produced last time.
+  mode — a re-export must be able to land on the file it produced last time — and
+  its meaning narrows: in `ExportFile` mode Enter merely accepts the name, while
+  `e` performs the write.
 - `FileBrowserMode` carries the format for that one mode, so the modes are no
   longer a flat list of three verbs.
 - Home's `Modal::FileBrowser` variant is boxed: the browser is the largest modal,

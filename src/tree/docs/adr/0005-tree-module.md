@@ -91,9 +91,10 @@ pure over their own state, their `handle_key` is testable without a terminal.
   [0013](../../../../docs/adr/0013-login-word-generator.md)).
 - `Modal::Help` lists the key bindings; any key closes it.
 - `Modal::Alert` shows a message; any key closes it.
-- `Modal::Export` is the two-step wizard (scope, then format); confirming
-  reports `TreeAction::Export`, which the orchestrator writes to disk beside the
-  secret file.
+- `Modal::Export` is the two-step wizard (scope, then format); the destination is
+  named afterwards in the File Browser ([`Modal::ExportDestination`]), whose
+  confirmed path reports `TreeAction::Export`, which the orchestrator writes to
+  disk. See [0022](../../../../docs/adr/0022-user-chosen-export-destination.md).
 
 ## Prefix modes
 

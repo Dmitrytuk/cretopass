@@ -117,26 +117,24 @@ mod tests {
     }
 
     #[test]
-    fn esc_steps_back_to_the_list_then_cancels() {
+    fn esc_on_the_list_cancels_the_export() {
         let dir = tempfile::tempdir().unwrap();
         let mut destination = export_of(dir.path(), ExportFormat::Json);
         let mut state = TreeState::new(Node::new("Root"));
-        let esc = KeyEvent::from(KeyCode::Esc);
 
-        assert!(destination.handle_key(esc, &mut state).is_none());
         assert!(matches!(
-            destination.handle_key(esc, &mut state),
+            destination.handle_key(KeyEvent::from(KeyCode::Esc), &mut state),
             Some(TreeAction::Close)
         ));
     }
 
     #[test]
-    fn confirming_the_name_reports_the_export_with_the_node() {
+    fn pressing_e_reports_the_export_with_the_node() {
         let dir = tempfile::tempdir().unwrap();
         let mut destination = export_of(dir.path(), ExportFormat::Csv);
         let mut state = TreeState::new(Node::new("Root"));
 
-        match destination.handle_key(KeyEvent::from(KeyCode::Enter), &mut state) {
+        match destination.handle_key(KeyEvent::from(KeyCode::Char('e')), &mut state) {
             Some(TreeAction::Export {
                 node,
                 include_children,
@@ -161,7 +159,7 @@ mod tests {
 
         assert!(
             destination
-                .handle_key(KeyEvent::from(KeyCode::Enter), &mut state)
+                .handle_key(KeyEvent::from(KeyCode::Char('e')), &mut state)
                 .is_none()
         );
         assert!(destination.browser.confirm_overwrite.is_some());

@@ -181,10 +181,11 @@ impl FileBrowserState {
 
     /// A browser opened to name the destination of an export.
     ///
-    /// It starts in the name input, in the secret file's own directory rather
+    /// It starts on the directory list, in the secret file's own directory rather
     /// than wherever the browser was last, with [`export::suggest_name`]
-    /// prefilled. Cancelling it cancels the export: there is nothing else the
-    /// browser is for here.
+    /// prefilled and shown in the path bar. Navigating picks the destination
+    /// directory; `n` edits the name and `e` writes. Cancelling it cancels the
+    /// export: there is nothing else the browser is for here.
     pub fn for_export(
         format: ExportFormat,
         base_path: Option<&Path>,
@@ -206,8 +207,23 @@ impl FileBrowserState {
         let suggested = export::suggest_name(base_path, node_name, format);
         state.creating_cursor = suggested.len();
         state.creating_name = suggested;
-        state.focus = FocusTarget::Input;
+        state.focus = FocusTarget::List;
         state
+    }
+
+    /// The exact file an export would write: the open directory joined with the
+    /// typed name, with the format's extension resolved (see
+    /// [`export::output_path`]).
+    ///
+    /// `None` outside `ExportFile` mode, and while the name is blank — there is
+    /// nothing to show or write until the user types one.
+    pub fn export_target(&self) -> Option<PathBuf> {
+        let format = self.mode.export_format()?;
+        let name = self.creating_name.trim();
+        if name.is_empty() {
+            return None;
+        }
+        Some(export::output_path(&self.current_dir.join(name), format))
     }
 
     /// Sets the active file path that the browser should protect.

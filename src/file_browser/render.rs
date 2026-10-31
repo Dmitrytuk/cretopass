@@ -3,6 +3,8 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
+use std::path::Path;
+
 use super::state::{AddPrefix, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget};
 use crate::cursor::cursor_field_spans;
 use crate::file_handling::export::ExportFormat;
@@ -115,12 +117,35 @@ fn make_overlay(area: Rect) -> Rect {
 }
 
 fn render_path_bar(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
-    let path_str = state.current_dir.to_string_lossy();
-    let text = Line::from(Span::styled(
-        format!(" {}", path_str),
+    // In export mode the bar also names the file about to be written, shown the
+    // way it will land on disk (the format resolves the extension).
+    let (dir, file_name) = match state.export_target() {
+        Some(target) => {
+            let dir = target
+                .parent()
+                .filter(|dir| !dir.as_os_str().is_empty())
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| state.current_dir.clone());
+            let name = target.file_name().map(|n| n.to_string_lossy().into_owned());
+            (dir, name)
+        }
+        None => (state.current_dir.clone(), None),
+    };
+
+    let mut spans = vec![Span::styled(
+        format!(" {}", dir.to_string_lossy()),
         ElementStyle::FbPathBar.style(),
-    ));
-    frame.render_widget(Paragraph::new(text), area);
+    )];
+
+    if let Some(name) = file_name {
+        spans.push(Span::styled(
+            std::path::MAIN_SEPARATOR.to_string(),
+            ElementStyle::FbPathBar.style(),
+        ));
+        spans.push(Span::styled(name, ElementStyle::FbExportName.style()));
+    }
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// Updates the first visible item so the cursor moves inside a 3-row margin
@@ -339,9 +364,11 @@ fn fb_hint(state: &FileBrowserState) -> String {
         parts.push(texts::FB_HINT_IMPORT_TYPES);
     }
 
-    // Export names the destination in the name input, which the list hides.
+    // Export names the destination in the path bar; `n` edits the name and `e`
+    // writes to the directory now open.
     if state.mode.export_format().is_some() {
         parts.push(texts::FB_HINT_EXPORT_NAME);
+        parts.push(texts::FB_HINT_EXPORT);
     }
 
     parts.extend([
@@ -629,6 +656,58 @@ mod tests {
         assert!(
             text.contains("/tmp"),
             "path bar should show '/tmp', got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_export_shows_the_resolved_file_name_in_the_path_bar() {
+        let mut state = new_state(FileBrowserMode::ExportFile {
+            format: ExportFormat::Csv,
+        });
+        populate_tmp(&mut state);
+        state.creating_name = "backup.txt".to_string();
+
+        let text = render_to_text(&mut state);
+
+        assert!(
+            text.contains("backup.csv"),
+            "the path bar should name the file the format writes:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_render_export_hides_the_name_until_one_is_typed() {
+        let mut state = new_state(FileBrowserMode::ExportFile {
+            format: ExportFormat::Json,
+        });
+        populate_tmp(&mut state);
+        state.creating_name.clear();
+
+        let text = render_to_text(&mut state);
+
+        assert!(
+            !text.contains(".json"),
+            "a blank name must not append an extension to the path bar:\n{text}"
+        );
+    }
+
+    #[test]
+    fn status_parts_export_advertises_name_and_export_keys() {
+        let mut state = new_state(FileBrowserMode::ExportFile {
+            format: ExportFormat::Json,
+        });
+        populate_tmp(&mut state);
+
+        let (mode, _, hint) = status_parts(&state);
+
+        assert_eq!(mode, texts::MODE_EXPORT);
+        assert!(
+            hint.contains("[n]name"),
+            "hint should advertise the name key: {hint}"
+        );
+        assert!(
+            hint.contains("[e]export"),
+            "hint should advertise the export key: {hint}"
         );
     }
 

@@ -371,9 +371,9 @@ mod tests {
             "the suggestion comes from the open vault"
         );
 
-        // The suggested name is accepted as it stands.
+        // The suggested name is accepted as it stands and written with `e`.
         handle_modal_key(
-            event::KeyEvent::from(KeyCode::Enter),
+            event::KeyEvent::from(KeyCode::Char('e')),
             &mut state,
             &mut terminal,
         )

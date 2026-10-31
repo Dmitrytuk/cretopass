@@ -1566,7 +1566,7 @@ mod tests {
             "the format step must open the File Browser"
         );
 
-        dispatch_key(key(KeyCode::Enter), &mut state); // accept the suggested name
+        dispatch_key(key(KeyCode::Char('e')), &mut state); // write the suggested name
 
         let written = dir.path().join("vault_Root.json");
         assert!(
