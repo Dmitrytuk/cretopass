@@ -12,6 +12,7 @@ pub mod cursor;
 pub mod file_browser;
 pub mod file_handling;
 pub mod generator;
+pub mod share;
 pub mod theming;
 pub mod tree;
 pub mod vault;
