@@ -22,7 +22,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 use super::cancel::CancelToken;
 use super::error::FileHandlingError;
@@ -81,17 +81,22 @@ pub struct SaveEvent {
     pub result: SaveResult,
 }
 
-struct Job<T> {
+/// One queued snapshot.
+///
+/// `root` is a [`Zeroizing`] wrapper so a job that is dropped without an
+/// explicit wipe — a replaced slot, or a worker that never picks the job up —
+/// still wipes the plaintext it holds.
+struct Job<T: Zeroize> {
     generation: u64,
-    root: T,
+    root: Zeroizing<T>,
 }
 
-struct State<T> {
+struct State<T: Zeroize> {
     slot: Option<Job<T>>,
     shutdown: bool,
 }
 
-struct Shared<T> {
+struct Shared<T: Zeroize> {
     state: Mutex<State<T>>,
     available: Condvar,
 }
@@ -110,7 +115,7 @@ struct Shared<T> {
 ///
 /// Any snapshot still waiting in the slot is written before the thread exits;
 /// on timeout the thread is detached and left to be reaped at process exit.
-pub struct Autosave<T> {
+pub struct Autosave<T: Zeroize> {
     shared: Arc<Shared<T>>,
     handle: Option<JoinHandle<()>>,
     next_generation: u64,
@@ -176,21 +181,22 @@ impl<T: Send + Zeroize + 'static> Autosave<T> {
         let generation = self.next_generation;
 
         let mut state = lock(&self.shared.state);
-        let replaced = state.slot.replace(Job { generation, root });
+        let replaced = state.slot.replace(Job {
+            generation,
+            root: Zeroizing::new(root),
+        });
         drop(state);
         // Drop the replaced snapshot outside the lock: releasing a large tree
-        // can be expensive and must not block the worker. Zeroize its plaintext
-        // first, since a newer snapshot already supersedes it.
-        if let Some(mut job) = replaced {
-            job.root.zeroize();
-        }
+        // can be expensive and must not block the worker. Its `Zeroizing` root
+        // wipes the superseded plaintext as it drops.
+        drop(replaced);
         self.shared.available.notify_one();
 
         generation
     }
 }
 
-impl<T> Autosave<T> {
+impl<T: Zeroize> Autosave<T> {
     /// Returns `true` while the writer thread is alive.
     ///
     /// The worker stops only after a panic in `on_event` has closed the event
@@ -247,7 +253,7 @@ impl<T> Autosave<T> {
     }
 }
 
-impl<T> Drop for Autosave<T> {
+impl<T: Zeroize> Drop for Autosave<T> {
     fn drop(&mut self) {
         self.request_stop();
 
@@ -314,7 +320,10 @@ where
             generation: job.generation,
             result,
         };
-        // Wipe the plaintext snapshot now that it has been written.
+        // Wipe the plaintext snapshot now that it has been written. This call is
+        // kept (rather than relying on `Zeroizing`'s drop) because it wipes
+        // *before* `on_event` runs; the wrapper's drop is the safety net for the
+        // paths that have no explicit wipe.
         job.root.zeroize();
         // A panicking `on_event` must not leave `submit` accepting jobs that are
         // never attempted and never reported: stop the worker so the app sees a
@@ -493,6 +502,57 @@ mod tests {
         assert!(
             wiped.load(Ordering::SeqCst),
             "the worker must wipe the snapshot after it wrote it"
+        );
+    }
+
+    #[test]
+    fn a_snapshot_abandoned_in_the_slot_is_zeroized_when_the_worker_dies() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let save = move |_: &Spy| {
+            started_tx.send(()).unwrap();
+            let _ = release_rx.recv_timeout(TIMEOUT);
+            Ok(())
+        };
+        let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(CancelToken::new(), save, move |event| {
+            // Delivering the first event, then panicking, stops the worker
+            // before it can pick up the snapshot queued behind the in-flight one.
+            let _ = events_tx.send(event);
+            panic!("on_event boom");
+        })
+        .unwrap();
+
+        autosave.submit(Spy {
+            value: "in-flight".to_string(),
+            zeroized: std::sync::Arc::new(AtomicBool::new(false)),
+        });
+        started_rx.recv_timeout(TIMEOUT).unwrap();
+
+        // This one waits in the slot and is never attempted.
+        let abandoned = std::sync::Arc::new(AtomicBool::new(false));
+        autosave.submit(Spy {
+            value: "abandoned".to_string(),
+            zeroized: std::sync::Arc::clone(&abandoned),
+        });
+
+        release_tx.send(()).unwrap();
+
+        // Wait for the `on_event` panic to stop the worker.
+        let deadline = Instant::now() + TIMEOUT;
+        while autosave.is_running() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!autosave.is_running(), "the worker must have stopped");
+
+        // The abandoned snapshot lives in the shared slot; dropping the last
+        // owner (this `Autosave`) must wipe it.
+        drop(autosave);
+        assert!(
+            abandoned.load(Ordering::SeqCst),
+            "a snapshot abandoned in the slot must be zeroized when the worker is gone"
         );
     }
 

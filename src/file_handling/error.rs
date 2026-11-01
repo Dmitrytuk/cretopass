@@ -118,7 +118,9 @@ pub enum FileHandlingError {
     InvalidPassphraseEncoding,
     /// A path could not be written to.
     PathNotWritable(String),
-    /// The import path's extension maps to no supported format.
+    /// The import path carries no extension the gateway supports (or none at
+    /// all). The payload is that path, so the message names the file the user
+    /// chose.
     UnsupportedImportFormat(String),
     /// An imported document was malformed.
     ImportSyntax(ImportSyntax),
@@ -170,7 +172,7 @@ impl fmt::Display for FileHandlingError {
             Self::InvalidPassphraseEncoding => write!(f, "invalid passphrase encoding"),
             Self::PathNotWritable(p) => write!(f, "cannot write to path: {p}"),
             Self::UnsupportedImportFormat(p) => {
-                write!(f, "import: unsupported file extension: {p}")
+                write!(f, "import: unsupported file format: {p}")
             }
             Self::ImportSyntax(reason) => write!(f, "import: {reason}"),
             Self::CsvRowTooFewFields { line } => {
@@ -235,6 +237,17 @@ mod tests {
         let crypt = error.source().expect("the crypt error is forwarded");
         let cause = crypt.source().expect("the age/io cause is forwarded");
         assert_eq!(cause.to_string(), "unexpected end of file");
+    }
+
+    #[test]
+    fn an_unsupported_import_format_names_the_path() {
+        // The payload is the user's path, not an extension, so the message must
+        // say "file format" and show the path.
+        let error = FileHandlingError::UnsupportedImportFormat("/tmp/notes.txt".to_string());
+        assert_eq!(
+            error.to_string(),
+            "import: unsupported file format: /tmp/notes.txt"
+        );
     }
 
     #[test]
