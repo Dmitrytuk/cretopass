@@ -1,9 +1,6 @@
-use std::io::Read;
-
 use super::FileHandlingError;
-use super::atomic;
 use super::error::ImportSyntax;
-use super::file_process::MAX_FILE_SIZE;
+use super::file_process::{MAX_FILE_SIZE, json_to_node, read_capped};
 use super::format::{Format, decode_path_segment};
 use crate::tree::node::{ExtraField, FieldType, Node, migrate_legacy_description};
 use uuid::Uuid;
@@ -29,29 +26,7 @@ pub fn import_tree(path: &str) -> Result<Node, FileHandlingError> {
     let format = ImportFormat::from_path(path)
         .ok_or_else(|| FileHandlingError::UnsupportedImportFormat(path.to_string()))?;
 
-    let file = atomic::open_for_read(std::path::Path::new(path))?;
-    let meta = file.metadata().map_err(FileHandlingError::Io)?;
-    if meta.len() > MAX_FILE_SIZE {
-        return Err(FileHandlingError::FileTooLarge {
-            size: meta.len(),
-            max: MAX_FILE_SIZE,
-        });
-    }
-
-    // Read through a bounded reader so a file that grows (or is swapped for a
-    // stream) between the metadata check and the read cannot exhaust memory.
-    // The cap is checked on the raw bytes before UTF-8 validation so an
-    // over-sized file is always reported as `FileTooLarge`.
-    let mut bytes = Vec::new();
-    file.take(MAX_FILE_SIZE + 1)
-        .read_to_end(&mut bytes)
-        .map_err(FileHandlingError::Io)?;
-    if bytes.len() as u64 > MAX_FILE_SIZE {
-        return Err(FileHandlingError::FileTooLarge {
-            size: bytes.len() as u64,
-            max: MAX_FILE_SIZE,
-        });
-    }
+    let bytes = read_capped(std::path::Path::new(path), MAX_FILE_SIZE)?;
     let data = String::from_utf8(bytes).map_err(|e| {
         FileHandlingError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     })?;
@@ -62,18 +37,14 @@ pub fn import_tree(path: &str) -> Result<Node, FileHandlingError> {
     let data = data.strip_prefix('\u{feff}').unwrap_or(&data);
 
     match format {
-        Format::Json => import_json(data),
+        // A malformed import is a syntax problem, not a damaged vault: report
+        // it in the import vocabulary so the UI does not tell the user that the
+        // file they are reading from is corrupt. The serde detail is dropped
+        // because it can quote the document that failed to parse.
+        Format::Json => json_to_node(data).map_err(|_| syntax(ImportSyntax::InvalidJson)),
         Format::Xml => import_xml(data),
         Format::Csv => import_csv(data),
     }
-}
-
-fn import_json(data: &str) -> Result<Node, FileHandlingError> {
-    // A malformed import is a syntax problem, not a damaged vault: report it in
-    // the import vocabulary so the UI does not tell the user that the secret
-    // file they are reading from is corrupt. The serde detail is dropped
-    // because it can quote the document that failed to parse.
-    serde_json::from_str(data).map_err(|_| syntax(ImportSyntax::InvalidJson))
 }
 
 /// Maximum XML nesting depth accepted during import, guarding against
@@ -647,10 +618,14 @@ mod tests {
     }
 
     #[test]
-    fn test_import_json_roundtrip() {
+    fn import_tree_json_roundtrip() {
         let original = sample_node();
         let json = serde_json::to_string_pretty(&original).unwrap();
-        let imported = import_json(&json).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("roundtrip.json");
+        std::fs::write(&path, &json).unwrap();
+
+        let imported = import_tree(&path.to_string_lossy()).unwrap();
         // IDs are regenerated, so compare structure
         assert_eq!(imported.name, original.name);
         assert_eq!(imported.extra_fields.len(), original.extra_fields.len());

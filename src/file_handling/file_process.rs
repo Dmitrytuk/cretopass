@@ -69,6 +69,38 @@ pub fn read_file(path: &str) -> Result<Vec<u8>, FileHandlingError> {
     Ok(data)
 }
 
+/// Reads at most `max` bytes of `path`, failing when the file is larger.
+///
+/// The metadata length is checked first so an obviously oversized file is
+/// rejected before it is touched, but the real bound is the `take(max + 1)`
+/// read: a file can grow (or be swapped for a stream) between the two, and the
+/// recheck catches that. Returns [`FileHandlingError::FileTooLarge`] either way
+/// and [`FileHandlingError::Io`] when `path` cannot be opened or read.
+pub(crate) fn read_capped(path: &Path, max: u64) -> Result<Vec<u8>, FileHandlingError> {
+    let file = atomic::open_for_read(path)?;
+    let meta = file.metadata().map_err(FileHandlingError::Io)?;
+    if meta.len() > max {
+        return Err(FileHandlingError::FileTooLarge {
+            size: meta.len(),
+            max,
+        });
+    }
+
+    let mut data = Vec::new();
+    file.take(max + 1)
+        .read_to_end(&mut data)
+        .map_err(FileHandlingError::Io)?;
+
+    if data.len() as u64 > max {
+        return Err(FileHandlingError::FileTooLarge {
+            size: data.len() as u64,
+            max,
+        });
+    }
+
+    Ok(data)
+}
+
 /// Writes `data` to `path` atomically.
 ///
 /// Every write goes through the same exclusive temp file + `fsync` + rename
@@ -94,32 +126,10 @@ pub fn write_file(path: &str, data: &[u8]) -> Result<(), FileHandlingError> {
 /// magic header, [`FileHandlingError::NotAnAgeFile`] when the header does not
 /// match, and [`FileHandlingError::Io`] when the file cannot be opened or read.
 pub fn validate_encrypted_file(path: &str) -> Result<Vec<u8>, FileHandlingError> {
-    let file = atomic::open_for_read(Path::new(path))?;
-    let meta = file.metadata().map_err(FileHandlingError::Io)?;
+    let data = read_capped(Path::new(path), MAX_FILE_SIZE)?;
 
-    if meta.len() > MAX_FILE_SIZE {
-        return Err(FileHandlingError::FileTooLarge {
-            size: meta.len(),
-            max: MAX_FILE_SIZE,
-        });
-    }
-
-    if meta.len() < AGE_MAGIC.len() as u64 {
+    if data.len() < AGE_MAGIC.len() {
         return Err(FileHandlingError::FileTooSmall);
-    }
-
-    // Read through a bounded reader so a file that grows (or is swapped for a
-    // stream) after the metadata check cannot exhaust memory.
-    let mut data = Vec::new();
-    file.take(MAX_FILE_SIZE + 1)
-        .read_to_end(&mut data)
-        .map_err(FileHandlingError::Io)?;
-
-    if data.len() as u64 > MAX_FILE_SIZE {
-        return Err(FileHandlingError::FileTooLarge {
-            size: data.len() as u64,
-            max: MAX_FILE_SIZE,
-        });
     }
 
     if !data.starts_with(AGE_MAGIC) {
@@ -516,6 +526,14 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
+            FileHandlingError::FileTooSmall
+        ));
+
+        // The read length is authoritative, so an empty file is "too small"
+        // too, whatever the metadata says.
+        fs::write(&path, b"").unwrap();
+        assert!(matches!(
+            validate_encrypted_file(&path).unwrap_err(),
             FileHandlingError::FileTooSmall
         ));
 
