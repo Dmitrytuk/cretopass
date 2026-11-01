@@ -3,8 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::file_handling::FileEntry;
-use crate::file_handling::export::{self, ExportFormat};
-use crate::file_handling::share::suggest_name;
+use crate::file_handling::{ExportFormat, output_path, suggest_export_name, suggest_share_name};
 
 use super::locations::{initial_location, list_entries};
 use super::mode::FileBrowserMode;
@@ -91,7 +90,7 @@ impl FileBrowserState {
     /// A browser opened to name the destination of an export.
     ///
     /// It starts on the directory list, in the secret file's own directory rather
-    /// than wherever the browser was last, with [`export::suggest_name`]
+    /// than wherever the browser was last, with [`suggest_export_name`]
     /// prefilled and shown in the path bar. Navigating picks the destination
     /// directory; `n` edits the name and `e` writes. Cancelling it cancels the
     /// export: there is nothing else the browser is for here.
@@ -113,7 +112,7 @@ impl FileBrowserState {
             state.selected = 0;
         }
 
-        let suggested = export::suggest_name(base_path, node_name, format);
+        let suggested = suggest_export_name(base_path, node_name, format);
         state.creating_cursor = suggested.len();
         state.creating_name = suggested;
         state.focus = FocusTarget::List;
@@ -123,7 +122,7 @@ impl FileBrowserState {
     /// A browser opened to name the folder a share bundle is written into.
     ///
     /// It starts on the directory list, in the secret file's own directory
-    /// rather than wherever the browser was last, with [`suggest_name`]
+    /// rather than wherever the browser was last, with [`suggest_share_name`]
     /// (the source stem, plus the Node name for a single branch) prefilled. `n`
     /// edits the folder name and Enter in the input commits it; a folder that
     /// already exists and is not empty asks for confirmation first.
@@ -144,7 +143,7 @@ impl FileBrowserState {
             state.selected = 0;
         }
 
-        let suggested = suggest_name(base_path, node_name);
+        let suggested = suggest_share_name(base_path, node_name);
         state.creating_cursor = suggested.len();
         state.creating_name = suggested;
         state.focus = FocusTarget::List;
@@ -153,7 +152,7 @@ impl FileBrowserState {
 
     /// The exact file an export would write: the open directory joined with the
     /// typed name, with the format's extension resolved (see
-    /// [`export::output_path`]).
+    /// [`output_path`]).
     ///
     /// `None` outside `ExportFile` mode, and while the name is blank — there is
     /// nothing to show or write until the user types one.
@@ -163,7 +162,7 @@ impl FileBrowserState {
         if name.is_empty() {
             return None;
         }
-        Some(export::output_path(&self.current_dir.join(name), format))
+        Some(output_path(&self.current_dir.join(name), format))
     }
 
     /// The folder a share bundle would be written into: the open directory joined

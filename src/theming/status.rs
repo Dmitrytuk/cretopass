@@ -9,7 +9,8 @@ use crate::theming::{ElementStyle, texts};
 /// A title-bar status message that may animate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
-    /// A blocking load (decrypt / open) is running.
+    /// A blocking load is running (decrypt / open, or an import's read and
+    /// parse).
     Loading,
     /// A save is running.
     Saving,

@@ -234,6 +234,17 @@ parent row (`collapse_or_select_parent`).
    See [ADR 0010 — Asynchronous tree autosave](../../../../docs/adr/0010-async-tree-autosave.md#event-loop-contract)
    for the full overlay state machine.
 
+The worker can also die mid-session: a panic in `on_event` closes the event
+channel and stops it. `autosave_action` then reports it at the next commit — a
+modified tree whose worker is no longer running becomes
+`SaveState::Failed { error: WorkerStopped, .. }` at once (title-bar badge plus
+overlay) instead of staying silent until exit. The report is not repeated once
+it is showing, so a dismissed overlay stays dismissed. A vault that is idle (no
+generation outstanding) when its worker dies stays silent until the next edit,
+which is deliberate: nothing is pending to report. A snapshot left in the slot
+when the worker stops is not silent — the closed-event-channel branch reports
+`WorkerStopped` at once, because that generation will never be attempted.
+
 The master passphrase and the vault path travel together in a
 `tree::app_tree::SaveTarget`; `run_app()` accepts it as an `Option<SaveTarget>`.
 `None` means a read-only tree (the library demo) and therefore no worker. See

@@ -22,6 +22,7 @@ On Windows, both use a detached helper to stage self-replace/self-remove.
 - `remove` mirrors the full installer layout via [`layout`](../../src/cli/layout.rs): binary, completions, rc PATH block, GUI artifacts (`.desktop` + icon, `.app` bundle, Start Menu shortcut on both PowerShell profile candidates), User `PATH` and the config directory.
 - `remove` prompts for confirmation before deleting, listing what will be removed, and lists rc files only when they actually contain a cretopass marker.
 - `remove` rewrites shell rc files atomically and never truncates them when a marker block is unterminated.
+- The `cli` module is the single deliberate exception to the "`file_handling` is the only filesystem gateway" contract ([ADR 0001](../../src/file_handling/docs/adr/0001-io-gateway.md)): it manages install artifacts, not secrets, and uses `std::fs` directly. Every other module writes through the gateway.
 - `update` streams the installer's stdout/stderr to the user as a progress report.
 - The `install.sh`/`install.ps1` scripts are the **canonical record** of installation layout; `layout.rs` is the Rust mirror and the only place `detect`/`remove` read it from.
 - `CRETOPASS_UPDATE_URL` is honoured in debug builds only; `CRETOPASS_CONFIG_DIR` is likewise debug-gated in [`vault::utils::config_dir`](../../src/vault/utils.rs).

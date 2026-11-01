@@ -13,7 +13,7 @@ use ratatui::Terminal;
 use ratatui::backend::Backend;
 
 use crate::file_browser::FileBrowserMode;
-use crate::file_handling::export::ExportFormat;
+use crate::file_handling::ExportFormat;
 use crate::theming::texts;
 use crate::theming::{Palette, set_palette};
 use crate::vault::utils;
@@ -133,6 +133,7 @@ pub fn execute<B: Backend>(
             Ok(())
         }
         HomeAction::OpenConfiguration => {
+            state.config_before_modal = state.config.clone();
             state.modal = Some(Modal::Configuration(ConfigurationModal::new()));
             Ok(())
         }
@@ -187,10 +188,7 @@ pub fn execute<B: Backend>(
             });
             Ok(())
         }
-        HomeAction::Export { path, format } => {
-            export(state, &path, format);
-            Ok(())
-        }
+        HomeAction::Export { path, format } => export(state, terminal, path, format),
         HomeAction::Share { dest, passphrase } => share(state, terminal, &dest, passphrase),
         HomeAction::ToggleSetting(setting) => {
             apply_setting(state, setting);
@@ -204,7 +202,7 @@ pub fn execute<B: Backend>(
             Ok(())
         }
         HomeAction::DiscardConfig => {
-            state.config = utils::load_config();
+            state.config = state.config_before_modal.clone();
             // The scheme is applied live on toggle, so discarding the config must
             // restore the colours too (ADR 0019: "Enter persists and Esc reverts").
             set_palette(Palette::from_name(&state.config.palette_name));

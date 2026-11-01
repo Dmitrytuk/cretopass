@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 use std::io;
 
-use crate::file_handling::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree};
+use crate::file_handling::{
+    Autosave, CancelToken, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree_guarded,
+};
 use crate::theming::Action;
 use crate::theming::{ElementStyle, SPINNER_TICK, paint_background, render_status_bar, texts};
 use crate::tree::node::Node;
@@ -114,11 +116,24 @@ pub fn run_app<B: Backend>(
                                     dispatch_key(key, state);
                                 }
 
-                                if state.modified {
-                                    state.modified = false;
-                                    if let Some(ref mut worker) = autosave {
-                                        submitted = worker.submit(state.root.clone());
-                                        state.save_state = SaveState::Saving;
+                                if let Some(ref mut worker) = autosave {
+                                    match autosave_action(
+                                        state.modified,
+                                        worker.is_running(),
+                                        &state.save_state,
+                                    ) {
+                                        AutosaveAction::Submit => {
+                                            state.modified = false;
+                                            submitted = worker.submit(state.root.clone());
+                                            state.save_state = SaveState::Saving;
+                                        }
+                                        AutosaveAction::ReportWorkerStopped => {
+                                            state.save_state = SaveState::Failed {
+                                                error: SaveError::WorkerStopped,
+                                                acknowledged: false,
+                                            };
+                                        }
+                                        AutosaveAction::Idle => {}
                                     }
                                 }
                             }
@@ -241,6 +256,39 @@ enum ExitPlan {
     ResubmitThenWait,
 }
 
+/// What the autosave loop should do with a modified tree this turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutosaveAction {
+    /// Hand the current snapshot to the worker and show `Saving`.
+    Submit,
+    /// The worker is gone: report it now instead of waiting for the exit.
+    ReportWorkerStopped,
+    /// Nothing to do.
+    Idle,
+}
+
+/// Decides the autosave action for a tree.
+///
+/// A worker that has stopped (`is_running() == false`) can never write a
+/// snapshot, so a modified tree is reported immediately rather than staying
+/// silent until the user quits. (Inside the event loop the worker stops only
+/// through the closed-event-channel contract of the `file_handling` autosave
+/// module, so this is a real failure, not a false alarm.) The report is not
+/// repeated once the failure is already showing, so dismissing its overlay
+/// keeps it dismissed.
+fn autosave_action(modified: bool, worker_running: bool, save_state: &SaveState) -> AutosaveAction {
+    if !modified {
+        return AutosaveAction::Idle;
+    }
+    if worker_running {
+        return AutosaveAction::Submit;
+    }
+    if save_state.has_failed() {
+        return AutosaveAction::Idle;
+    }
+    AutosaveAction::ReportWorkerStopped
+}
+
 /// Decides how an exit request should make the vault durable.
 fn exit_plan(modified: bool, save_state: &SaveState, saved: u64, submitted: u64) -> ExitPlan {
     if modified || save_state.has_failed() {
@@ -321,14 +369,21 @@ fn start_autosave(
         return Ok(None);
     };
 
-    let save = move |root: &Node| save_tree(root, &path, &passphrase).map_err(SaveError::Failed);
+    // The worker checks this token immediately before its rename, so a save
+    // that is still running when the user force-quits cannot land on top of a
+    // newer version of the same file.
+    let cancel = CancelToken::new();
+    let save_cancel = cancel.clone();
+    let save = move |root: &Node| {
+        save_tree_guarded(root, &path, &passphrase, &save_cancel).map_err(SaveError::Failed)
+    };
     let on_event = move |event| {
         // The receiver is dropped when the tree screen closes; a late save
         // notification is then expected and intentionally ignored.
         let _ = events.send(event);
     };
 
-    Autosave::spawn(save, on_event).map(Some)
+    Autosave::spawn(cancel, save, on_event).map(Some)
 }
 
 /// Waits until the snapshot with `target` generation has been attempted,
@@ -1750,6 +1805,57 @@ mod tests {
         });
 
         assert!(timed_out.is_err());
+    }
+
+    #[test]
+    fn autosave_action_submits_a_modified_tree_to_a_live_worker() {
+        assert_eq!(
+            autosave_action(true, true, &SaveState::Idle),
+            AutosaveAction::Submit
+        );
+        assert_eq!(
+            autosave_action(true, true, &SaveState::Saving),
+            AutosaveAction::Submit
+        );
+    }
+
+    #[test]
+    fn autosave_action_reports_a_dead_worker_on_the_next_edit() {
+        // The tree still knows it is modified, but the user is told the save
+        // cannot happen instead of finding out only at exit.
+        assert_eq!(
+            autosave_action(true, false, &SaveState::Idle),
+            AutosaveAction::ReportWorkerStopped
+        );
+        assert_eq!(
+            autosave_action(true, false, &SaveState::Saving),
+            AutosaveAction::ReportWorkerStopped
+        );
+    }
+
+    #[test]
+    fn autosave_action_does_not_re_report_a_failure() {
+        // The guard keys on `has_failed()`, not on acknowledgement: an
+        // unacknowledged failure the user is looking at must not be reset.
+        for acknowledged in [false, true] {
+            let failed = SaveState::Failed {
+                error: SaveError::WorkerStopped,
+                acknowledged,
+            };
+            assert_eq!(autosave_action(true, false, &failed), AutosaveAction::Idle);
+        }
+    }
+
+    #[test]
+    fn autosave_action_ignores_an_unmodified_tree() {
+        assert_eq!(
+            autosave_action(false, true, &SaveState::Idle),
+            AutosaveAction::Idle
+        );
+        assert_eq!(
+            autosave_action(false, false, &SaveState::Idle),
+            AutosaveAction::Idle
+        );
     }
 
     #[test]

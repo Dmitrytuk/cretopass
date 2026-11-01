@@ -10,7 +10,7 @@ use std::path::Path;
 
 use crate::file_browser::state::{FileBrowserAction, FileBrowserMode, FileBrowserState};
 use crate::file_handling;
-use crate::file_handling::export::{self, ExportFormat};
+use crate::file_handling::{ExportFormat, output_path};
 use crate::theming::texts;
 
 /// Commits the typed name as the destination the current mode names.
@@ -36,7 +36,7 @@ pub(super) fn begin_destination(state: &mut FileBrowserState) -> Option<FileBrow
 /// the overwrite confirmation first.
 fn begin_export(state: &mut FileBrowserState, format: ExportFormat) -> Option<FileBrowserAction> {
     let name = typed_name(state)?;
-    let target = export::output_path(&state.current_dir.join(name), format);
+    let target = output_path(&state.current_dir.join(name), format);
     if file_handling::is_age_file(&target) {
         state.error = Some(texts::MSG_CANNOT_OVERWRITE_SECRET.to_string());
         return None;
@@ -106,7 +106,7 @@ mod tests {
     use crate::file_browser::state::FocusTarget;
     use crate::file_browser::{FileBrowserAction, FileBrowserSession, FileBrowserState};
     use crate::file_handling;
-    use crate::file_handling::export::ExportFormat;
+    use crate::file_handling::ExportFormat;
     use crate::theming::texts;
 
     // ── Export destinations ──
@@ -218,7 +218,7 @@ mod tests {
         // A secret file is recognised by its contents, so it may carry the very
         // name the export would write to.
         let secret = dir.path().join("vault.json");
-        file_handling::create_secret_file(&secret.to_string_lossy(), "pw").unwrap();
+        file_handling::create_secret_file(&secret, "pw").unwrap();
         let mut state = export_state(dir.path(), ExportFormat::Json);
 
         let result = handle_key(key(KeyCode::Char('e')), &mut state);
@@ -234,7 +234,7 @@ mod tests {
     fn test_export_mode_offers_no_rename_or_delete() {
         let dir = tempfile::tempdir().unwrap();
         let secret = dir.path().join("other.age");
-        file_handling::create_secret_file(&secret.to_string_lossy(), "pw").unwrap();
+        file_handling::create_secret_file(&secret, "pw").unwrap();
         let mut state = export_state(dir.path(), ExportFormat::Json);
         state.focus = FocusTarget::List;
         state.selected = state
@@ -410,7 +410,7 @@ mod tests {
     fn test_share_mode_offers_no_rename_or_delete() {
         let dir = tempfile::tempdir().unwrap();
         let secret = dir.path().join("other.age");
-        file_handling::create_secret_file(&secret.to_string_lossy(), "pw").unwrap();
+        file_handling::create_secret_file(&secret, "pw").unwrap();
         let mut state = share_state(dir.path());
         state.selected = state
             .entries

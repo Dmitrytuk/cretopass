@@ -80,6 +80,24 @@ where
     F: FnOnce() -> T + Send + 'static,
 {
     state.status = Some(status);
+    let outcome = run_animated(terminal, state, work);
+    // Cleared here rather than inside `run_animated`, so a failed draw or a
+    // failed spawn cannot leave the title bar pinned on the busy status.
+    state.status = None;
+    outcome
+}
+
+/// The draw/spin/join loop behind [`run_with_spinner`].
+fn run_animated<B, T, F>(
+    terminal: &mut Terminal<B>,
+    state: &mut HomeState,
+    work: F,
+) -> io::Result<T>
+where
+    B: Backend,
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
     terminal.draw(|f| render(f, f.area(), state))?;
 
     let handle = std::thread::Builder::new()
@@ -100,11 +118,9 @@ where
         }
     }
 
-    let result = handle
+    handle
         .join()
-        .map_err(|_| io::Error::other("blocking worker thread panicked"))?;
-    state.status = None;
-    Ok(result)
+        .map_err(|_| io::Error::other("blocking worker thread panicked"))
 }
 
 // ── Modal key handling ──
@@ -140,12 +156,19 @@ mod tests {
     use crate::file_handling;
     use crate::theming::{Palette, texts};
     use crate::vault::active_file::ActiveVaultState;
+    use crate::vault::utils::Configuration;
     use crate::vault::widget::modal::{About, BrowserModal, ConfigurationModal, ExportWizard};
     use crate::vault::widget::render::home_status_parts;
     use crossterm::event::KeyCode;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
     use std::path::PathBuf;
+
+    // Every test below builds its `HomeState` through `with_config`, so it never
+    // reads the process environment or touches the developer's real config
+    // directory. The environment is only ever *read* — nothing in the test suite
+    // calls `env::set_var`, which would be undefined behaviour under the default
+    // parallel runner.
 
     /// Renders the home screen — including any modal `state` carries — into a
     /// test backend, and asserts that no cell falls through to the terminal's own
@@ -172,7 +195,7 @@ mod tests {
 
     #[test]
     fn home_screen_paints_every_cell() {
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         assert_no_terminal_background(&mut state);
     }
 
@@ -180,7 +203,7 @@ mod tests {
     /// styled blocks must keep every cell off the terminal background.
     #[test]
     fn file_browser_modal_paints_every_cell() {
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         let mut browser =
             BrowserModal::new(FileBrowserMode::OpenFile, &FileBrowserSession::default());
         let inner = browser.state_mut();
@@ -195,7 +218,7 @@ mod tests {
     /// block must keep every cell off the terminal background.
     #[test]
     fn about_modal_paints_every_cell() {
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         state.modal = Some(Modal::About(About));
 
         assert_no_terminal_background(&mut state);
@@ -205,7 +228,7 @@ mod tests {
     /// shared status bar, like every other Home mode.
     #[test]
     fn about_modal_status_bar_parts() {
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         state.modal = Some(Modal::About(About));
 
         let (mode, _, hint) = home_status_parts(&state);
@@ -219,7 +242,7 @@ mod tests {
     /// palette on screen until restart.
     #[test]
     fn config_cancel_reverts_the_live_colour_scheme() {
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         state.modal = Some(Modal::Configuration(ConfigurationModal::new()));
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
 
@@ -259,6 +282,35 @@ mod tests {
         );
     }
 
+    /// Reopening the dialog takes a fresh revert snapshot: a change made while
+    /// the dialog is closed (a file opened in the meantime) must survive the
+    /// next cancel, not roll back to the copy taken at startup.
+    #[test]
+    fn reopening_the_config_dialog_refreshes_the_revert_snapshot() {
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let enter = || event::KeyEvent::from(KeyCode::Enter);
+        let esc = || event::KeyEvent::from(KeyCode::Esc);
+
+        // Open the dialog from the menu (row 2) and cancel.
+        state.selected = 2;
+        handle_home_key(enter(), &mut state, &mut terminal).unwrap();
+        handle_modal_key(esc(), &mut state, &mut terminal).unwrap();
+
+        // A file opened in the meantime changes the live config.
+        state.config.recent_files.push("/opened.age".to_string());
+
+        // Reopen and cancel: the fresh snapshot must win.
+        state.selected = 2;
+        handle_home_key(enter(), &mut state, &mut terminal).unwrap();
+        handle_modal_key(esc(), &mut state, &mut terminal).unwrap();
+
+        assert!(
+            state.config.recent_files.iter().any(|p| p == "/opened.age"),
+            "a change made between dialogs must survive the next cancel"
+        );
+    }
+
     /// Minimal importable fixture: one root node with one child.
     const IMPORT_FIXTURE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <node name="Secrets" description="My vault">
@@ -286,7 +338,7 @@ mod tests {
         std::fs::write(dir.join("note.xml"), IMPORT_FIXTURE_XML).unwrap();
 
         let node = file_handling::create_secret_file(&vault_path, "pw").unwrap();
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         state.active_vault = Some(ActiveVaultState {
             path: Some(vault_path.clone()),
             passphrase: zeroize::Zeroizing::new(b"pw".to_vec()),
@@ -336,6 +388,77 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The symmetric failure pin for the `ImportFile` flow: a malformed import
+    /// is reported in an alert and changes nothing — no wrapper node, no save.
+    #[test]
+    fn a_malformed_import_file_is_reported_and_changes_nothing() {
+        let dir =
+            std::env::temp_dir().join(format!("cretopass-import-bad-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let vault_path = dir.join("vault.age").to_string_lossy().to_string();
+        // Well-formed XML around a `<node>` with no `name` attribute.
+        std::fs::write(dir.join("bad.xml"), "<node>no name here</node>").unwrap();
+
+        let node = file_handling::create_secret_file(&vault_path, "pw").unwrap();
+        let mut state = HomeState::with_config(Configuration::default());
+        state.active_vault = Some(ActiveVaultState {
+            path: Some(vault_path.clone()),
+            passphrase: zeroize::Zeroizing::new(b"pw".to_vec()),
+            node: Some(node),
+        });
+
+        let mut browser =
+            BrowserModal::new(FileBrowserMode::ImportFile, &FileBrowserSession::default());
+        {
+            let inner = browser.state_mut();
+            inner.current_dir = dir.clone();
+            inner.entries = file_handling::list_dir(&dir).unwrap();
+            inner.selected = inner
+                .entries
+                .iter()
+                .position(|e| e.name == "bad.xml")
+                .expect("the fixture must be listed");
+        }
+        state.modal = Some(Modal::FileBrowser(Box::new(browser)));
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Enter),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+
+        match &state.modal {
+            Some(Modal::Alert(alert)) => {
+                assert!(
+                    alert.message.contains(texts::MSG_FILE_ERROR),
+                    "a malformed import must be reported: {}",
+                    alert.message
+                );
+                assert_ne!(
+                    alert.message,
+                    texts::MSG_DAMAGED_SECRET,
+                    "a bad import file does not mean the open vault is damaged"
+                );
+            }
+            _ => panic!("a failed import must be reported in an alert"),
+        }
+
+        // Nothing was written: the vault still holds no wrapper node.
+        let data = file_handling::validate_encrypted_file(&vault_path).unwrap();
+        let saved = file_handling::decrypt_to_node(&data, "pw").unwrap();
+        assert!(
+            !saved
+                .children
+                .iter()
+                .any(|n| n.name.starts_with("imported_")),
+            "a failed import must not touch the vault"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The Home export flow: pick a format, name the destination in the File
     /// Browser, and the plain text lands exactly where it was named.
     #[test]
@@ -345,7 +468,7 @@ mod tests {
         let vault_path = dir.join("vault.age").to_string_lossy().to_string();
         let node = file_handling::create_secret_file(&vault_path, "pw").unwrap();
 
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         state.active_vault = Some(ActiveVaultState {
             path: Some(vault_path.clone()),
             passphrase: zeroize::Zeroizing::new(b"pw".to_vec()),
@@ -408,7 +531,7 @@ mod tests {
         let vault_path = dir.join("vault.age").to_string_lossy().to_string();
         let node = file_handling::create_secret_file(&vault_path, "pw").unwrap();
 
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         state.modal = None;
         state.active_vault = Some(ActiveVaultState {
             path: Some(vault_path.clone()),

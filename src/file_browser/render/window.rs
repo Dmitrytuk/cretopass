@@ -9,7 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::file_browser::state::{FileBrowserMode, FileBrowserState, FocusTarget};
-use crate::file_handling::export::ExportFormat;
+use crate::file_handling::ExportFormat;
 use crate::theming::{ElementStyle, texts};
 
 use super::list::render_file_list;
@@ -177,7 +177,7 @@ mod tests {
     use crate::file_browser::FileBrowserMode;
     use crate::file_browser::state::{FileFilter, FocusTarget};
     use crate::file_handling;
-    use crate::file_handling::export::ExportFormat;
+    use crate::file_handling::ExportFormat;
 
     #[test]
     fn test_render_open_file_shows_path_bar() {

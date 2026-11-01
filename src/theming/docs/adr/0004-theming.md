@@ -25,7 +25,7 @@ impossible without touching every module.
 | `style.rs` | `ElementStyle` enum (69 variants) organized by UI area (Tree, Mode, FileBrowser, Home, Cursor, etc.). Each resolves to a concrete `ratatui::style::Style` built from the active colour scheme. |
 | `status_bar.rs` | The single shared status-bar renderer: `render_status_bar(frame, area, mode_str, mode_style, hint)` draws `[MODE] hints` for every screen (see [0014](../../../docs/adr/0014-status-bar-unification.md)). |
 | `alert.rs` | The single shared alert card: `AlertKind` (`Success`/`Error`) and `render_alert(frame, area, message, kind)`. Both the Home and Tree alert modals draw through it, so a positive outcome is always green and a failure red. |
-| `texts.rs` | All UI string constants: labels, hints, mode names, messages, menu items, keyboard help. ~178 lines. |
+| `texts.rs` | All UI string constants: labels, hints, mode names, messages, menu items, keyboard help — plus `share_instruction()`, which assembles the share bundle's `HOW-TO-OPEN.txt` from those constants so the `file_handling` gateway owns no user-facing prose. |
 
 ## Alerts
 

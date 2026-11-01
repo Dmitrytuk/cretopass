@@ -22,7 +22,10 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::file_handling::error::FileHandlingError;
+use zeroize::{Zeroize, Zeroizing};
+
+use super::cancel::CancelToken;
+use super::error::FileHandlingError;
 
 /// Bound on waiting for the save worker to finish.
 ///
@@ -67,7 +70,7 @@ impl std::error::Error for SaveError {
 }
 
 /// Result of a single background save attempt.
-pub type SaveResult = Result<(), SaveError>;
+pub(crate) type SaveResult = Result<(), SaveError>;
 
 /// Notification emitted after a snapshot has been attempted.
 #[derive(Debug)]
@@ -78,17 +81,22 @@ pub struct SaveEvent {
     pub result: SaveResult,
 }
 
-struct Job<T> {
+/// One queued snapshot.
+///
+/// `root` is a [`Zeroizing`] wrapper so a job that is dropped without an
+/// explicit wipe — a replaced slot, or a worker that never picks the job up —
+/// still wipes the plaintext it holds.
+struct Job<T: Zeroize> {
     generation: u64,
-    root: T,
+    root: Zeroizing<T>,
 }
 
-struct State<T> {
+struct State<T: Zeroize> {
     slot: Option<Job<T>>,
     shutdown: bool,
 }
 
-struct Shared<T> {
+struct Shared<T: Zeroize> {
     state: Mutex<State<T>>,
     available: Condvar,
 }
@@ -96,22 +104,32 @@ struct Shared<T> {
 /// Owns the single background writer thread.
 ///
 /// Generic over the snapshot type `T`; the worker treats it as opaque and only
-/// hands it to the save function. Call [`Autosave::shutdown`] to stop the worker
-/// with a bounded wait; the returned error reports only a join timeout.
-/// [`Autosave::detach`] stops without waiting, for a force-quit while a save is
-/// stuck. [`Drop`] repeats a best-effort bounded join as a fallback for callers
-/// that forget.
+/// hands it to the save function. `T` must be [`Zeroize`] so that a snapshot
+/// holding plaintext can be wiped as soon as it is written or replaced.
+/// Call [`Autosave::shutdown`] to stop the worker with a bounded wait; the
+/// returned error reports only a join timeout. [`Autosave::detach`] stops
+/// without waiting, for a force-quit while a save is stuck, and cancels
+/// `cancel` so a write already in flight cannot replace a newer file.
+/// [`Drop`] repeats a best-effort bounded join as a fallback for callers that
+/// forget, cancelling the token if that join times out.
 ///
 /// Any snapshot still waiting in the slot is written before the thread exits;
 /// on timeout the thread is detached and left to be reaped at process exit.
-pub struct Autosave<T> {
+pub struct Autosave<T: Zeroize> {
     shared: Arc<Shared<T>>,
     handle: Option<JoinHandle<()>>,
     next_generation: u64,
+    /// Signalled to a stalled write when this worker is abandoned, so the write
+    /// gives up before its rename instead of clobbering a newer file.
+    cancel: CancelToken,
 }
 
-impl<T: Send + 'static> Autosave<T> {
+impl<T: Send + Zeroize + 'static> Autosave<T> {
     /// Starts the writer thread.
+    ///
+    /// `cancel` is held by this value and handed to the caller's save function
+    /// as well: call [`CancelToken::clone`] and check it at the point where the
+    /// write can still be abandoned (see [`super::CancelToken`]).
     ///
     /// `save` is called on the writer thread with the latest submitted snapshot;
     /// a panic in `save` is caught and reported as [`SaveError::Panicked`].
@@ -123,7 +141,7 @@ impl<T: Send + 'static> Autosave<T> {
     /// # Errors
     ///
     /// Returns an error when the writer thread cannot be spawned.
-    pub fn spawn<F, G>(save: F, on_event: G) -> std::io::Result<Self>
+    pub fn spawn<F, G>(cancel: CancelToken, save: F, on_event: G) -> std::io::Result<Self>
     where
         F: Fn(&T) -> SaveResult + Send + 'static,
         G: Fn(SaveEvent) + Send + 'static,
@@ -145,6 +163,7 @@ impl<T: Send + 'static> Autosave<T> {
             shared,
             handle: Some(handle),
             next_generation: 0,
+            cancel,
         })
     }
 
@@ -152,15 +171,24 @@ impl<T: Send + 'static> Autosave<T> {
     ///
     /// If an older snapshot is still waiting, it is replaced: the new snapshot
     /// already contains every earlier change.
+    ///
+    /// A stopped worker cannot be detected here: this always returns a
+    /// generation, even when the worker will never attempt the save. Callers
+    /// that need to know should check [`Autosave::is_running`] first (and the
+    /// closed event channel reports [`SaveError::WorkerStopped`]).
     pub fn submit(&mut self, root: T) -> u64 {
         self.next_generation += 1;
         let generation = self.next_generation;
 
         let mut state = lock(&self.shared.state);
-        let replaced = state.slot.replace(Job { generation, root });
+        let replaced = state.slot.replace(Job {
+            generation,
+            root: Zeroizing::new(root),
+        });
         drop(state);
         // Drop the replaced snapshot outside the lock: releasing a large tree
-        // can be expensive and must not block the worker.
+        // can be expensive and must not block the worker. Its `Zeroizing` root
+        // wipes the superseded plaintext as it drops.
         drop(replaced);
         self.shared.available.notify_one();
 
@@ -168,16 +196,36 @@ impl<T: Send + 'static> Autosave<T> {
     }
 }
 
-impl<T> Autosave<T> {
+impl<T: Zeroize> Autosave<T> {
+    /// Returns `true` while the writer thread is alive.
+    ///
+    /// The worker stops only after a panic in `on_event` has closed the event
+    /// channel; from then on [`Autosave::submit`] would accept snapshots that
+    /// are never attempted. Callers use this to avoid reporting a pending save
+    /// that cannot happen.
+    pub fn is_running(&self) -> bool {
+        self.handle
+            .as_ref()
+            .map(|handle| !handle.is_finished())
+            .unwrap_or(false)
+    }
+
     /// Stops the worker, waiting up to `timeout` for it to finish.
     ///
     /// Any snapshot still waiting in the slot is written first. When the thread
     /// does not stop within `timeout` it is detached and left to finish on its
-    /// own; the returned [`SaveError::WorkerStopped`] reports that timeout.
+    /// own; the returned [`SaveError::WorkerStopped`] reports that timeout, and
+    /// the detached write is cancelled so it cannot replace a newer file.
     pub fn shutdown(mut self, timeout: Duration) -> Result<(), SaveError> {
         self.request_stop();
         match self.handle.take() {
-            Some(handle) => join_bounded(handle, timeout),
+            Some(handle) => {
+                let joined = join_bounded(handle, timeout);
+                if joined.is_err() {
+                    self.cancel.cancel();
+                }
+                joined
+            }
             None => Ok(()),
         }
     }
@@ -185,8 +233,13 @@ impl<T> Autosave<T> {
     /// Stops the worker without waiting, detaching the thread.
     ///
     /// Used when the user force-quits while a save is stuck: the thread is left
-    /// to be reaped at process exit so the UI can return immediately.
+    /// to be reaped at process exit so the UI can return immediately. The write
+    /// it is stuck in is cancelled, so a snapshot that has since been superseded
+    /// (the user reopened the same path) cannot land on top of a newer one. A
+    /// snapshot still queued but not yet started is abandoned too, which matches
+    /// the `Unsaved` exit the force-quit reports.
     pub fn detach(mut self) {
+        self.cancel.cancel();
         self.request_stop();
         // Taking the handle detaches the thread; `Drop` then skips its join.
         self.handle.take();
@@ -200,16 +253,19 @@ impl<T> Autosave<T> {
     }
 }
 
-impl<T> Drop for Autosave<T> {
+impl<T: Zeroize> Drop for Autosave<T> {
     fn drop(&mut self) {
         self.request_stop();
 
         if let Some(handle) = self.handle.take() {
             // Best-effort bounded join. On timeout the worker is detached and
-            // reaped at process exit. A worker panic is reported through its
-            // save event when possible; a panic in `on_event` has no receiver
-            // left to report to, so the join result adds nothing here.
-            let _ = join_bounded(handle, SAVE_TIMEOUT);
+            // reaped at process exit, and the write it is in is cancelled so it
+            // cannot commit over a newer file. A worker panic is reported
+            // through its save event when possible; a panic in `on_event` has no
+            // receiver left to report to, so the join result adds nothing here.
+            if join_bounded(handle, SAVE_TIMEOUT).is_err() {
+                self.cancel.cancel();
+            }
         }
     }
 }
@@ -236,11 +292,12 @@ fn join_bounded(handle: JoinHandle<()>, timeout: Duration) -> Result<(), SaveErr
 /// Runs the writer loop until shutdown is requested and the slot is empty.
 fn run_worker<T, F, G>(shared: &Shared<T>, save: &F, on_event: &G)
 where
+    T: Zeroize,
     F: Fn(&T) -> SaveResult,
     G: Fn(SaveEvent),
 {
     loop {
-        let job = {
+        let mut job = {
             let mut state = lock(&shared.state);
             loop {
                 if let Some(job) = state.slot.take() {
@@ -263,6 +320,11 @@ where
             generation: job.generation,
             result,
         };
+        // Wipe the plaintext snapshot now that it has been written. This call is
+        // kept (rather than relying on `Zeroizing`'s drop) because it wipes
+        // *before* `on_event` runs; the wrapper's drop is the safety net for the
+        // paths that have no explicit wipe.
+        job.root.zeroize();
         // A panicking `on_event` must not leave `submit` accepting jobs that are
         // never attempted and never reported: stop the worker so the app sees a
         // closed event channel (`save_rx.recv() -> None`).
@@ -298,10 +360,207 @@ mod tests {
         SaveError::Failed(FileHandlingError::Io(std::io::Error::other(message)))
     }
 
+    /// A snapshot that records whether it was zeroized, for the wipe test.
+    struct Spy {
+        value: String,
+        zeroized: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Zeroize for Spy {
+        fn zeroize(&mut self) {
+            self.value.zeroize();
+            self.zeroized
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn a_detached_writer_cannot_replace_a_newer_save() {
+        use crate::file_handling::{
+            decrypt_to_node, save_tree, save_tree_guarded, validate_encrypted_file,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("vault.age").to_string_lossy().to_string();
+
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let (attempted_tx, attempted_rx) = mpsc::channel::<()>();
+
+        let cancel = CancelToken::new();
+        let save_cancel = cancel.clone();
+        let save_path = target.clone();
+        let save = move |root: &Node| {
+            entered_tx.send(()).unwrap();
+            // Hold the write open so the test can detach mid-save.
+            release_rx
+                .recv_timeout(TIMEOUT)
+                .map_err(|_| failed("test release timed out"))?;
+            let result =
+                save_tree_guarded(root, &save_path, b"pw", &save_cancel).map_err(SaveError::Failed);
+            attempted_tx.send(()).unwrap();
+            result
+        };
+        let mut autosave = Autosave::spawn(cancel, save, |_| {}).unwrap();
+
+        autosave.submit(node("old"));
+        entered_rx.recv_timeout(TIMEOUT).unwrap();
+
+        // The user force-quits while that write is stuck, reopens the same
+        // path, and saves something newer.
+        autosave.detach();
+        save_tree(&node("newer"), &target, b"pw").unwrap();
+
+        // Now let the detached writer run: it must give up before its rename.
+        release_tx.send(()).unwrap();
+        attempted_rx.recv_timeout(TIMEOUT).unwrap();
+
+        let data = validate_encrypted_file(&target).unwrap();
+        assert_eq!(
+            decrypt_to_node(&data, "pw").unwrap().name,
+            "newer",
+            "an abandoned snapshot must not replace a newer file"
+        );
+    }
+
+    #[test]
+    fn a_superseded_snapshot_is_zeroized() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let save = move |_: &Spy| {
+            started_tx.send(()).unwrap();
+            release_rx
+                .recv_timeout(TIMEOUT)
+                .map_err(|_| failed("test release timed out"))?;
+            Ok(())
+        };
+        let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(CancelToken::new(), save, move |event| {
+            let _ = events_tx.send(event);
+        })
+        .unwrap();
+
+        let replaced = std::sync::Arc::new(AtomicBool::new(false));
+        autosave.submit(Spy {
+            value: "first".to_string(),
+            zeroized: std::sync::Arc::new(AtomicBool::new(false)),
+        });
+        started_rx.recv_timeout(TIMEOUT).unwrap();
+
+        // This snapshot waits in the slot...
+        autosave.submit(Spy {
+            value: "second".to_string(),
+            zeroized: std::sync::Arc::clone(&replaced),
+        });
+        // ...and this one replaces (and so zeroizes) it.
+        autosave.submit(Spy {
+            value: "third".to_string(),
+            zeroized: std::sync::Arc::new(AtomicBool::new(false)),
+        });
+
+        assert!(
+            replaced.load(Ordering::SeqCst),
+            "a superseded plaintext snapshot must be zeroized"
+        );
+
+        release_tx.send(()).unwrap();
+    }
+
+    #[test]
+    fn a_consumed_snapshot_is_zeroized_after_the_write() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let wiped = std::sync::Arc::new(AtomicBool::new(false));
+        let at_save = std::sync::Arc::new(AtomicBool::new(true));
+        let save_flag = std::sync::Arc::clone(&wiped);
+        let observed = std::sync::Arc::clone(&at_save);
+        let save = move |_: &Spy| {
+            // The snapshot must still hold its plaintext while `save` runs.
+            observed.store(save_flag.load(Ordering::SeqCst), Ordering::SeqCst);
+            Ok(())
+        };
+
+        let (events_tx, events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(CancelToken::new(), save, move |event| {
+            let _ = events_tx.send(event);
+        })
+        .unwrap();
+
+        autosave.submit(Spy {
+            value: "written".to_string(),
+            zeroized: std::sync::Arc::clone(&wiped),
+        });
+
+        let event = events_rx.recv_timeout(TIMEOUT).unwrap();
+        assert!(event.result.is_ok());
+        assert!(
+            !at_save.load(Ordering::SeqCst),
+            "the snapshot must not be wiped before save runs"
+        );
+        assert!(
+            wiped.load(Ordering::SeqCst),
+            "the worker must wipe the snapshot after it wrote it"
+        );
+    }
+
+    #[test]
+    fn a_snapshot_abandoned_in_the_slot_is_zeroized_when_the_worker_dies() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let save = move |_: &Spy| {
+            started_tx.send(()).unwrap();
+            let _ = release_rx.recv_timeout(TIMEOUT);
+            Ok(())
+        };
+        let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(CancelToken::new(), save, move |event| {
+            // Delivering the first event, then panicking, stops the worker
+            // before it can pick up the snapshot queued behind the in-flight one.
+            let _ = events_tx.send(event);
+            panic!("on_event boom");
+        })
+        .unwrap();
+
+        autosave.submit(Spy {
+            value: "in-flight".to_string(),
+            zeroized: std::sync::Arc::new(AtomicBool::new(false)),
+        });
+        started_rx.recv_timeout(TIMEOUT).unwrap();
+
+        // This one waits in the slot and is never attempted.
+        let abandoned = std::sync::Arc::new(AtomicBool::new(false));
+        autosave.submit(Spy {
+            value: "abandoned".to_string(),
+            zeroized: std::sync::Arc::clone(&abandoned),
+        });
+
+        release_tx.send(()).unwrap();
+
+        // Wait for the `on_event` panic to stop the worker.
+        let deadline = Instant::now() + TIMEOUT;
+        while autosave.is_running() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!autosave.is_running(), "the worker must have stopped");
+
+        // The abandoned snapshot lives in the shared slot; dropping the last
+        // owner (this `Autosave`) must wipe it.
+        drop(autosave);
+        assert!(
+            abandoned.load(Ordering::SeqCst),
+            "a snapshot abandoned in the slot must be zeroized when the worker is gone"
+        );
+    }
+
     #[test]
     fn submit_returns_increasing_generations() {
         let (events_tx, _events_rx) = mpsc::channel();
         let mut autosave = Autosave::spawn(
+            CancelToken::new(),
             |_: &Node| Ok(()),
             move |event| {
                 let _ = events_tx.send(event);
@@ -328,7 +587,7 @@ mod tests {
         };
 
         let (events_tx, events_rx) = mpsc::channel::<SaveEvent>();
-        let mut autosave = Autosave::spawn(save, move |event| {
+        let mut autosave = Autosave::spawn(CancelToken::new(), save, move |event| {
             let _ = events_tx.send(event);
         })
         .unwrap();
@@ -365,7 +624,7 @@ mod tests {
             }
         };
         let (events_tx, events_rx) = mpsc::channel::<SaveEvent>();
-        let mut autosave = Autosave::spawn(save, move |event| {
+        let mut autosave = Autosave::spawn(CancelToken::new(), save, move |event| {
             let _ = events_tx.send(event);
         })
         .unwrap();
@@ -390,7 +649,7 @@ mod tests {
         };
 
         let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
-        let mut autosave = Autosave::spawn(save, move |event| {
+        let mut autosave = Autosave::spawn(CancelToken::new(), save, move |event| {
             let _ = events_tx.send(event);
         })
         .unwrap();
@@ -404,7 +663,9 @@ mod tests {
     #[test]
     fn shutdown_joins_an_idle_worker() {
         let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
+        let probe = CancelToken::new();
         let autosave = Autosave::spawn(
+            probe.clone(),
             |_: &Node| Ok(()),
             move |event| {
                 let _ = events_tx.send(event);
@@ -413,6 +674,10 @@ mod tests {
         .unwrap();
 
         assert!(autosave.shutdown(TIMEOUT).is_ok());
+        assert!(
+            !probe.is_cancelled(),
+            "a clean shutdown must not abandon anything"
+        );
     }
 
     #[test]
@@ -425,7 +690,8 @@ mod tests {
         };
 
         let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
-        let mut autosave = Autosave::spawn(save, move |event| {
+        let probe = CancelToken::new();
+        let mut autosave = Autosave::spawn(probe.clone(), save, move |event| {
             let _ = events_tx.send(event);
         })
         .unwrap();
@@ -434,6 +700,10 @@ mod tests {
         let result = autosave.shutdown(Duration::from_millis(50));
 
         assert!(matches!(result, Err(SaveError::WorkerStopped)));
+        assert!(
+            probe.is_cancelled(),
+            "a worker that had to be detached must be abandoned"
+        );
         // Unblock the detached worker so it does not linger past the test.
         let _ = release_tx.send(());
     }
@@ -447,7 +717,7 @@ mod tests {
         };
 
         let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
-        let mut autosave = Autosave::spawn(save, move |event| {
+        let mut autosave = Autosave::spawn(CancelToken::new(), save, move |event| {
             let _ = events_tx.send(event);
         })
         .unwrap();
@@ -463,6 +733,7 @@ mod tests {
     fn a_panicking_save_is_reported_as_an_error() {
         let (events_tx, events_rx) = mpsc::channel::<SaveEvent>();
         let mut autosave = Autosave::spawn(
+            CancelToken::new(),
             |_: &Node| -> SaveResult { panic!("boom") },
             move |event| {
                 let _ = events_tx.send(event);
@@ -496,7 +767,7 @@ mod tests {
         };
 
         let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
-        let mut autosave = Autosave::spawn(save, move |event| {
+        let mut autosave = Autosave::spawn(CancelToken::new(), save, move |event| {
             let _ = events_tx.send(event);
         })
         .unwrap();
@@ -524,6 +795,7 @@ mod tests {
     fn a_panicking_on_event_stops_the_worker() {
         let (events_tx, events_rx) = mpsc::channel::<SaveEvent>();
         let mut autosave = Autosave::spawn(
+            CancelToken::new(),
             |_: &Node| Ok(()),
             move |event| {
                 // Deliver the event, then panic so the worker stops.
@@ -543,5 +815,23 @@ mod tests {
             events_rx.recv_timeout(TIMEOUT),
             Err(mpsc::RecvTimeoutError::Disconnected)
         ));
+
+        // ...and it reports itself stopped, so the app can stop showing
+        // "Saving" for a save that will never happen.
+        let deadline = Instant::now() + TIMEOUT;
+        while autosave.is_running() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!autosave.is_running(), "the worker must report itself dead");
+    }
+
+    #[test]
+    fn save_error_display_names_each_kind() {
+        assert_eq!(
+            SaveError::Failed(FileHandlingError::FileTooSmall).to_string(),
+            FileHandlingError::FileTooSmall.to_string()
+        );
+        assert_eq!(SaveError::Panicked.to_string(), "save worker panicked");
+        assert_eq!(SaveError::WorkerStopped.to_string(), "save worker stopped");
     }
 }

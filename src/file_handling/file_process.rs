@@ -2,146 +2,269 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use zeroize::Zeroizing;
+
+use super::FileHandlingError;
+use super::atomic;
+use super::cancel::CancelToken;
+use super::error::SerdeContext;
+use super::passphrase::Passphrase;
 use crate::crypt;
-use crate::file_handling::FileHandlingError;
 use crate::theming::texts;
 use crate::tree::node::Node;
 
-const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024;
+/// The maximum size (in bytes) of a vault or import the gateway will read.
+pub(crate) const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024;
+/// The maximum size (in bytes) of a plain file [`read_file`] will read.
+///
+/// The only such file is `config.pwd`, which the app itself writes as a few
+/// hundred bytes; the cap is a generous backstop so a corrupt or hostile file
+/// cannot pull the whole thing into memory.
+pub(crate) const MAX_CONFIG_SIZE: u64 = 1024 * 1024;
+/// The age file-format magic header every encrypted vault begins with.
 const AGE_MAGIC: &[u8; 11] = b"age-encrypt";
+/// Mode (Unix) directories the gateway creates are given: owner only.
+const SECRET_DIR_MODE: u32 = 0o700;
 
 /// A single entry in a directory listing.
 #[derive(Debug, Clone)]
 pub struct FileEntry {
+    /// The entry's file name (lossy for a non-UTF-8 name).
     pub name: String,
+    /// The entry's full path.
     pub path: PathBuf,
+    /// Whether the entry is a directory.
     pub is_dir: bool,
+    /// Whether the entry is a regular file that carries the age magic header.
     pub is_age_file: bool,
 }
 
 // ── JSON helpers ──
 
-pub fn node_to_json(node: &Node) -> Result<String, serde_json::Error> {
-    serde_json::to_string_pretty(node)
+/// Serialises `node` to pretty-printed JSON.
+///
+/// The result holds every secret in the tree in the clear. It is returned in a
+/// [`Zeroizing`] so the plaintext is wiped when the caller drops it, rather than
+/// trusting every call site to remember.
+///
+/// # Errors
+///
+/// Returns a [`serde_json::Error`] when `node` cannot be serialised.
+pub fn node_to_json(node: &Node) -> Result<Zeroizing<String>, serde_json::Error> {
+    serde_json::to_string_pretty(node).map(Zeroizing::new)
 }
 
+/// Parses `json` into a [`Node`], migrating a legacy top-level `description`.
+///
+/// # Errors
+///
+/// Returns a [`serde_json::Error`] when `json` is not a valid node.
 pub fn json_to_node(json: &str) -> Result<Node, serde_json::Error> {
     serde_json::from_str(json)
 }
 
 // ── Raw I/O ──
 
-pub fn read_file(path: &str) -> Result<Vec<u8>, FileHandlingError> {
-    fs::read(path).map_err(FileHandlingError::Io)
+/// Reads `path` into memory, bounded by a one-mebibyte cap, refusing to follow
+/// a symlink.
+///
+/// The only file this reads is `config.pwd`, which the app writes itself, so the
+/// cap is a backstop rather than a working limit: a config larger than it is
+/// rejected and the caller falls back to defaults.
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::FileTooLarge`] when the file exceeds the cap,
+/// and [`FileHandlingError::Io`] when `path` cannot be read, is a symlink
+/// (Unix), or is not a regular file.
+pub fn read_file(path: impl AsRef<Path>) -> Result<Vec<u8>, FileHandlingError> {
+    read_capped(path.as_ref(), MAX_CONFIG_SIZE)
 }
 
-pub fn write_file(path: &str, data: &[u8]) -> Result<(), FileHandlingError> {
-    fs::write(path, data).map_err(FileHandlingError::Io)
+/// Reads at most `max` bytes of `path`, failing when the file is larger.
+///
+/// The metadata length is checked first so an obviously oversized file is
+/// rejected before it is touched, but the real bound is the `take(max + 1)`
+/// read: a file can grow (or be swapped for a stream) between the two, and the
+/// recheck catches that. Returns [`FileHandlingError::FileTooLarge`] either way
+/// and [`FileHandlingError::Io`] when `path` cannot be opened or read.
+pub(crate) fn read_capped(path: &Path, max: u64) -> Result<Vec<u8>, FileHandlingError> {
+    let file = atomic::open_for_read(path).map_err(FileHandlingError::Io)?;
+    let meta = file.metadata().map_err(FileHandlingError::Io)?;
+    if meta.len() > max {
+        return Err(FileHandlingError::FileTooLarge {
+            size: meta.len(),
+            max,
+        });
+    }
+
+    let mut data = Vec::new();
+    file.take(max + 1)
+        .read_to_end(&mut data)
+        .map_err(FileHandlingError::Io)?;
+
+    if data.len() as u64 > max {
+        return Err(FileHandlingError::FileTooLarge {
+            size: data.len() as u64,
+            max,
+        });
+    }
+
+    Ok(data)
+}
+
+/// Writes `data` to `path` atomically.
+///
+/// Every write goes through the same exclusive temp file + `fsync` + rename
+/// path as a vault save, so a crash mid-write can never leave a truncated file.
+/// When `path` already exists as a regular file its mode is preserved; a file
+/// this creates is owner-only on Unix.
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::PathNotWritable`] when the temp file cannot be
+/// created beside `path`, and [`FileHandlingError::Io`] when it cannot be
+/// written, `fsync`ed or renamed.
+pub fn write_file(path: impl AsRef<Path>, data: &[u8]) -> Result<(), FileHandlingError> {
+    atomic::write_atomic(path.as_ref(), data).map_err(FileHandlingError::from)
 }
 
 // ── Encrypted file operations ──
 
 /// Validates and reads an age-encrypted file.  Returns the full bytes.
-pub fn validate_encrypted_file(path: &str) -> Result<Vec<u8>, FileHandlingError> {
-    let meta = fs::metadata(path).map_err(FileHandlingError::Io)?;
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::FileTooLarge`] when the file exceeds the shared
+/// size cap, [`FileHandlingError::FileTooSmall`] when it is shorter than the
+/// magic header, [`FileHandlingError::NotAnAgeFile`] when the header does not
+/// match, and [`FileHandlingError::Io`] when the file cannot be opened or read.
+pub fn validate_encrypted_file(path: impl AsRef<Path>) -> Result<Vec<u8>, FileHandlingError> {
+    let data = read_capped(path.as_ref(), MAX_FILE_SIZE)?;
 
-    if meta.len() > MAX_FILE_SIZE {
-        return Err(FileHandlingError::FileTooLarge {
-            size: meta.len(),
-            max: MAX_FILE_SIZE,
-        });
-    }
-
-    if meta.len() < 11 {
+    if data.len() < AGE_MAGIC.len() {
         return Err(FileHandlingError::FileTooSmall);
     }
 
-    let mut file = fs::File::open(path).map_err(FileHandlingError::Io)?;
-
-    let mut header = [0u8; 11];
-    file.read_exact(&mut header)?;
-
-    if &header != AGE_MAGIC {
+    if !data.starts_with(AGE_MAGIC) {
         return Err(FileHandlingError::NotAnAgeFile);
     }
-
-    let mut data = header.to_vec();
-    file.read_to_end(&mut data)?;
 
     Ok(data)
 }
 
 /// Decrypts age-encrypted bytes with a passphrase and deserialises into a Node.
-pub fn decrypt_to_node(data: &[u8], passphrase: &str) -> Result<Node, FileHandlingError> {
-    let json = crypt::decrypt(data, passphrase)?;
-    json_to_node(&json).map_err(FileHandlingError::Serde)
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::InvalidPassphraseEncoding`] when `passphrase`
+/// is not UTF-8, [`FileHandlingError::Crypt`] when decryption fails and
+/// [`FileHandlingError::Serde`] when the plaintext is not a Node.
+pub fn decrypt_to_node<'a>(
+    data: &[u8],
+    passphrase: impl Into<Passphrase<'a>>,
+) -> Result<Node, FileHandlingError> {
+    // Keep the decrypted plaintext zeroized when it is dropped.
+    let json = Zeroizing::new(crypt::decrypt(data, passphrase.into().as_utf8()?)?);
+    json_to_node(&json).map_err(|source| FileHandlingError::Serde {
+        context: SerdeContext::Load,
+        source,
+    })
+}
+
+/// Serialises `node` to JSON (zeroizing the plaintext buffer afterwards) and
+/// encrypts it with `passphrase`.
+fn encrypt_node(node: &Node, passphrase: &str) -> Result<Vec<u8>, FileHandlingError> {
+    let json = node_to_json(node).map_err(|source| FileHandlingError::Serde {
+        context: SerdeContext::Save,
+        source,
+    })?;
+    Ok(crypt::encrypt(&json, passphrase)?)
 }
 
 /// Saves a Node tree to an age-encrypted file with an atomic write.
 ///
 /// The new ciphertext is written to a temporary file in the same directory,
-/// flushed and `sync`ed, then atomically renamed over the target path so a
-/// crash mid-write never leaves a truncated/corrupt vault. The previous file
-/// is temporarily preserved as `{path}.bak` during the write and removed
-/// again once the save succeeds; it only survives if the process is
-/// interrupted mid-save.
-pub fn save_tree(root: &Node, path: &str, passphrase: &[u8]) -> Result<(), FileHandlingError> {
-    let passphrase_str = std::str::from_utf8(passphrase)
-        .map_err(|_| FileHandlingError::InvalidPassphraseEncoding)?;
-
-    let json = node_to_json(root)?;
-    let encrypted = crypt::encrypt(&json, passphrase_str)?;
-
-    let target = Path::new(path);
-    let parent = target.parent().unwrap_or_else(|| Path::new("."));
-    let backup_path = format!("{}.bak", path);
-
-    // Write to a unique temp file in the same directory, then atomically
-    // rename over the target so a failed write never corrupts the vault.
-    let tmp_path = parent.join(format!(
-        ".{}.tmp",
-        target
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "vault".to_string())
-    ));
-    write_and_sync(&tmp_path, &encrypted)?;
-
-    // Preserve the current file as a backup before replacing it.
-    if target.exists() {
-        fs::copy(target, &backup_path).map_err(FileHandlingError::Io)?;
-    }
-
-    fs::rename(&tmp_path, target).map_err(|e| {
-        let _ = fs::remove_file(&tmp_path);
-        FileHandlingError::Io(e)
-    })?;
-
-    let _ = fs::remove_file(&backup_path);
-
-    Ok(())
+/// flushed and `sync`ed, then atomically renamed over the target path, and the
+/// containing directory is `sync`ed, so a crash mid-write never leaves a
+/// truncated or corrupt vault. The temp file is created exclusively (never
+/// following a planted symlink) at mode `0o600`; when the target already
+/// exists its previous mode is preserved.
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::InvalidPassphraseEncoding`] when `passphrase`
+/// is not UTF-8, [`FileHandlingError::Serde`] when `root` cannot be
+/// serialised, [`FileHandlingError::Crypt`] when encryption fails, and
+/// [`FileHandlingError::Io`] when the temp file cannot be written or renamed.
+pub fn save_tree<'a>(
+    root: &Node,
+    path: impl AsRef<Path>,
+    passphrase: impl Into<Passphrase<'a>>,
+) -> Result<(), FileHandlingError> {
+    save_tree_cancellable(root, path.as_ref(), passphrase.into(), None)
 }
 
-/// Writes `data` to `path`, flushing and syncing to disk before returning.
-fn write_and_sync(path: &Path, data: &[u8]) -> Result<(), FileHandlingError> {
-    use std::io::Write;
-    let mut file = fs::File::create(path).map_err(FileHandlingError::Io)?;
-    file.write_all(data).map_err(FileHandlingError::Io)?;
-    file.sync_all().map_err(FileHandlingError::Io)?;
-    Ok(())
+/// [`save_tree`], giving up before the commit when `cancel` is set.
+///
+/// Used by the autosave worker: a force-quit signals `cancel` while a save is
+/// stalled, and the write must then leave whatever is at `path` alone rather
+/// than replace a newer file.
+///
+/// # Errors
+///
+/// As [`save_tree`], plus [`FileHandlingError::WriteAbandoned`] when `cancel`
+/// was set by the time the rename would have happened.
+pub(crate) fn save_tree_guarded<'a>(
+    root: &Node,
+    path: impl AsRef<Path>,
+    passphrase: impl Into<Passphrase<'a>>,
+    cancel: &CancelToken,
+) -> Result<(), FileHandlingError> {
+    save_tree_cancellable(root, path.as_ref(), passphrase.into(), Some(cancel))
 }
 
-/// Creates a new encrypted secret file at the given path with a "Secrets" root node.
-pub fn create_secret_file(path: &str, passphrase: &str) -> Result<Node, FileHandlingError> {
-    let probe_path = format!("{}.tmp", path);
-    fs::write(&probe_path, b"probe")
-        .map_err(|_| FileHandlingError::PathNotWritable(path.to_string()))?;
-    let _ = fs::remove_file(&probe_path);
+fn save_tree_cancellable(
+    root: &Node,
+    path: &Path,
+    passphrase: Passphrase<'_>,
+    cancel: Option<&CancelToken>,
+) -> Result<(), FileHandlingError> {
+    let encrypted = encrypt_node(root, passphrase.as_utf8()?)?;
 
+    atomic::write_atomic_cancellable(path, &encrypted, cancel).map_err(FileHandlingError::from)
+}
+
+/// Creates a new encrypted secret file at `path` with a "Secrets" root node.
+///
+/// The file is created by a single no-clobber rename, so an existing file (or a
+/// symlink) is never overwritten, no pre-existing vault can be destroyed, and a
+/// crash at any point leaves either the previous file or nothing — never a
+/// zero-byte placeholder.
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::PathNotWritable`] when `path` cannot be
+/// created (for example a missing parent directory),
+/// [`FileHandlingError::AlreadyExists`] when it already exists, and
+/// [`FileHandlingError::InvalidPassphraseEncoding`] when `passphrase` is not
+/// UTF-8. Encryption and serialisation failures surface as
+/// [`FileHandlingError::Crypt`] / [`FileHandlingError::Serde`].
+pub fn create_secret_file<'a>(
+    path: impl AsRef<Path>,
+    passphrase: impl Into<Passphrase<'a>>,
+) -> Result<Node, FileHandlingError> {
+    let path = path.as_ref();
     let node = Node::new(texts::DEFAULT_ROOT_NAME);
-    let json = node_to_json(&node)?;
-    let encrypted = crypt::encrypt(&json, passphrase)?;
-    fs::write(path, &encrypted)?;
+    let data = encrypt_node(&node, passphrase.into().as_utf8()?)?;
+
+    // `write_atomic_new` has already classified its failure (encryption has
+    // succeeded): an occupied target is `AlreadyExists`; a temp file that could
+    // not be created beside it — a missing parent, no permission, a read-only
+    // or full filesystem — is `NotWritable`; anything else (the rename itself
+    // failing) stays `Io`. Each composes into the facade error unchanged.
+    atomic::write_atomic_new(path, &data).map_err(FileHandlingError::from)?;
+
     Ok(node)
 }
 
@@ -151,16 +274,18 @@ pub fn create_secret_file(path: &str, passphrase: &str) -> Result<Node, FileHand
 /// alphabetically.  Hidden (dot-prefixed) entries are skipped.
 ///
 /// Each regular file is scanned for the age-encryption magic header.
-pub fn list_dir(path: &Path) -> Result<Vec<FileEntry>, FileHandlingError> {
-    list_dir_impl(path, false)
+pub fn list_dir(path: impl AsRef<Path>) -> Result<Vec<FileEntry>, FileHandlingError> {
+    list_dir_impl(path.as_ref(), false)
 }
 
 /// Lists all entries in `path`, including hidden (dot-prefixed) entries,
 /// sorted directories-first then alphabetically.
 ///
 /// Each regular file is scanned for the age-encryption magic header.
-pub fn list_dir_including_hidden(path: &Path) -> Result<Vec<FileEntry>, FileHandlingError> {
-    list_dir_impl(path, true)
+pub fn list_dir_including_hidden(
+    path: impl AsRef<Path>,
+) -> Result<Vec<FileEntry>, FileHandlingError> {
+    list_dir_impl(path.as_ref(), true)
 }
 
 fn list_dir_impl(path: &Path, include_hidden: bool) -> Result<Vec<FileEntry>, FileHandlingError> {
@@ -170,18 +295,16 @@ fn list_dir_impl(path: &Path, include_hidden: bool) -> Result<Vec<FileEntry>, Fi
 
     for entry in read_dir {
         let entry = entry?;
-        let name = entry.file_name().into_string().unwrap_or_default();
+        let name = entry.file_name().to_string_lossy().into_owned();
         if !include_hidden && name.starts_with('.') {
             continue;
         }
 
         let path = entry.path();
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        let is_age_file = if is_dir {
-            false
-        } else {
-            path.is_file() && scan_age_header(&path)
-        };
+        // `is_file` follows symlinks and rejects special files (a FIFO open
+        // would otherwise block the event-loop thread): keep the guard.
+        let is_age_file = !is_dir && path.is_file() && scan_age_header(&path);
 
         entries.push(FileEntry {
             name,
@@ -191,19 +314,16 @@ fn list_dir_impl(path: &Path, include_hidden: bool) -> Result<Vec<FileEntry>, Fi
         });
     }
 
-    entries.sort_by(|a, b| {
-        if a.is_dir != b.is_dir {
-            b.is_dir.cmp(&a.is_dir)
-        } else {
-            a.name.to_lowercase().cmp(&b.name.to_lowercase())
-        }
-    });
+    // Directories first (false sorts before true), then case-insensitively by
+    // name, computing each lowercased key once.
+    entries.sort_by_cached_key(|entry| (!entry.is_dir, entry.name.to_lowercase()));
 
     Ok(entries)
 }
 
 /// Returns `true` if the file starts with the age-encryption magic header.
-pub fn is_age_file(path: &Path) -> bool {
+pub fn is_age_file(path: impl AsRef<Path>) -> bool {
+    let path = path.as_ref();
     if !path.is_file() {
         return false;
     }
@@ -211,38 +331,75 @@ pub fn is_age_file(path: &Path) -> bool {
 }
 
 fn scan_age_header(path: &Path) -> bool {
-    let mut file = match fs::File::open(path) {
+    let mut file = match atomic::open_for_read(path) {
         Ok(f) => f,
         Err(_) => return false,
     };
-    let mut header = [0u8; 11];
+    let mut header = [0u8; AGE_MAGIC.len()];
     if file.read_exact(&mut header).is_err() {
         return false;
     }
     &header == AGE_MAGIC
 }
 
-pub fn create_dir(path: &Path) -> Result<(), FileHandlingError> {
-    fs::create_dir_all(path)?;
+/// Creates `path` and any missing parents, for directories the user asked to
+/// create (for example the File Browser's "New Folder").
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::Io`] when a directory cannot be created.
+pub fn create_dir(path: impl AsRef<Path>) -> Result<(), FileHandlingError> {
+    fs::create_dir_all(path.as_ref()).map_err(FileHandlingError::Io)
+}
+
+/// Creates `path` and any missing parents with owner-only permissions on Unix,
+/// for directories that hold secrets (share bundles, the config directory).
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::Io`] when a directory cannot be created.
+pub(crate) fn create_private_dir(path: impl AsRef<Path>) -> Result<(), FileHandlingError> {
+    let path = path.as_ref();
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(SECRET_DIR_MODE);
+    }
+    builder.create(path).map_err(FileHandlingError::Io)
+}
+
+/// Deletes the file at `path`.
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::Io`] when `path` cannot be removed.
+pub fn delete_file(path: impl AsRef<Path>) -> Result<(), FileHandlingError> {
+    fs::remove_file(path.as_ref())?;
     Ok(())
 }
 
-pub fn delete_file(path: &Path) -> Result<(), FileHandlingError> {
-    fs::remove_file(path)?;
+/// Renames `from` to `to`, replacing `to` if it exists.
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::Io`] when the rename fails.
+pub fn rename_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<(), FileHandlingError> {
+    fs::rename(from.as_ref(), to.as_ref())?;
     Ok(())
 }
 
-pub fn rename_file(from: &Path, to: &Path) -> Result<(), FileHandlingError> {
-    fs::rename(from, to)?;
-    Ok(())
-}
-
-/// Checks whether a path is writable by creating and removing a temp file.
-pub fn probe_path_writable(path: &str) -> Result<(), FileHandlingError> {
-    let probe = format!("{}.tmp", path);
-    fs::write(&probe, b"").map_err(|_| FileHandlingError::PathNotWritable(path.to_string()))?;
-    let _ = fs::remove_file(&probe);
-    Ok(())
+/// Checks whether a path is writable by creating and removing an exclusive
+/// temp file in its directory (never following a planted symlink).
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::PathNotWritable`] when no temp file can be
+/// created beside `path`.
+pub fn probe_path_writable(path: impl AsRef<Path>) -> Result<(), FileHandlingError> {
+    let path = path.as_ref();
+    atomic::probe_writable(path).map_err(|_| FileHandlingError::PathNotWritable(path.to_path_buf()))
 }
 
 /// Returns `true` when `path` is a directory with no entries at all, including
@@ -251,8 +408,8 @@ pub fn probe_path_writable(path: &str) -> Result<(), FileHandlingError> {
 /// # Errors
 ///
 /// Returns [`FileHandlingError::Io`] when the directory cannot be read.
-pub fn is_dir_empty(path: &Path) -> Result<bool, FileHandlingError> {
-    let mut entries = fs::read_dir(path)?;
+pub fn is_dir_empty(path: impl AsRef<Path>) -> Result<bool, FileHandlingError> {
+    let mut entries = fs::read_dir(path.as_ref())?;
     Ok(entries.next().is_none())
 }
 
@@ -260,9 +417,11 @@ pub fn is_dir_empty(path: &Path) -> Result<bool, FileHandlingError> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
+    use super::FileHandlingError;
     use super::*;
     use crate::crypt::CryptError;
-    use crate::file_handling::FileHandlingError;
     use crate::tree::node::{ExtraField, FieldType};
 
     // ── JSON roundtrip tests (original) ──
@@ -427,6 +586,14 @@ mod tests {
             FileHandlingError::FileTooSmall
         ));
 
+        // The read length is authoritative, so an empty file is "too small"
+        // too, whatever the metadata says.
+        fs::write(&path, b"").unwrap();
+        assert!(matches!(
+            validate_encrypted_file(&path).unwrap_err(),
+            FileHandlingError::FileTooSmall
+        ));
+
         let _ = fs::remove_file(&path);
     }
 
@@ -471,15 +638,20 @@ mod tests {
 
         let data = fs::read(&path).unwrap();
         let result = decrypt_to_node(&data, "my-pass");
-        assert!(matches!(result, Err(FileHandlingError::Serde(_))));
+        assert!(matches!(
+            result,
+            Err(FileHandlingError::Serde {
+                context: SerdeContext::Load,
+                ..
+            })
+        ));
 
         let _ = fs::remove_file(&path);
     }
 
     #[test]
-    fn test_save_tree_backup_and_write() {
+    fn test_save_tree_writes_over_the_previous_file() {
         let path = format!("/tmp/test_save_{}.age", uuid::Uuid::new_v4());
-        let backup_path = format!("{}.bak", path);
         let passphrase = b"save-test-pass";
         let passphrase_str = "save-test-pass";
 
@@ -489,8 +661,8 @@ mod tests {
         let mutated = Node::with_children("Updated Root", vec![Node::new("New Child")]);
         save_tree(&mutated, &path, passphrase).unwrap();
 
-        // After a successful save the temporary backup is removed again.
-        assert!(fs::metadata(&backup_path).is_err());
+        // The atomic save leaves no transient artifact behind.
+        assert!(fs::metadata(format!("{path}.bak")).is_err());
 
         let data = fs::read(&path).unwrap();
         let decoded = decrypt_to_node(&data, passphrase_str).unwrap();
@@ -499,7 +671,6 @@ mod tests {
         assert_eq!(decoded.children[0].name, "New Child");
 
         let _ = fs::remove_file(&path);
-        let _ = fs::remove_file(&backup_path);
     }
 
     #[test]
@@ -529,14 +700,12 @@ mod tests {
         assert_eq!(decoded.extra_fields[1].value, "admin");
 
         let _ = fs::remove_file(&path);
-        let _ = fs::remove_file(format!("{}.bak", path));
     }
 
     #[test]
-    fn test_save_tree_empty_backup() {
+    fn test_save_tree_creates_a_new_file() {
         let path = format!("/tmp/test_no_backup_{}.age", uuid::Uuid::new_v4());
         let _ = fs::remove_file(&path);
-        let _ = fs::remove_file(format!("{}.bak", path));
 
         let node = Node::new("New");
         save_tree(&node, &path, b"pass").unwrap();
@@ -544,7 +713,6 @@ mod tests {
         assert!(fs::metadata(&path).is_ok());
 
         let _ = fs::remove_file(&path);
-        let _ = fs::remove_file(format!("{}.bak", path));
     }
 
     #[test]
@@ -574,7 +742,150 @@ mod tests {
     fn test_create_secret_file_invalid_path() {
         let path = "/nonexistent_dir_12345/test.age".to_string();
         let result = create_secret_file(&path, "pass");
-        assert!(result.is_err());
+        assert!(matches!(result, Err(FileHandlingError::PathNotWritable(_))));
+    }
+
+    #[test]
+    fn create_secret_file_refuses_to_overwrite_an_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.age");
+        let path = path.to_string_lossy().to_string();
+
+        let node = create_secret_file(&path, "pw").unwrap();
+        assert_eq!(node.name, "Secrets");
+
+        let result = create_secret_file(&path, "other");
+
+        assert!(
+            matches!(result, Err(FileHandlingError::AlreadyExists { .. })),
+            "a second create must refuse to clobber the first"
+        );
+        // The vault it refused to clobber still opens with its password.
+        let data = validate_encrypted_file(&path).unwrap();
+        assert!(decrypt_to_node(&data, "pw").is_ok());
+    }
+
+    #[test]
+    fn create_secret_file_refuses_to_follow_a_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("victim.txt");
+        fs::write(&victim, b"do not touch").unwrap();
+        let link = dir.path().join("vault.age");
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&victim, &link).unwrap();
+
+            let result = create_secret_file(&link, "pw");
+
+            assert!(result.is_err(), "a planted symlink is not a free name");
+            assert_eq!(fs::read(&victim).unwrap(), b"do not touch");
+        }
+        #[cfg(not(unix))]
+        let _ = (victim, link);
+    }
+
+    #[test]
+    fn save_tree_ignores_a_predictable_temp_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("vault.age");
+        let target_str = target.to_string_lossy().to_string();
+        let victim = dir.path().join("victim.txt");
+        fs::write(&victim, b"do not touch").unwrap();
+
+        // The old code wrote to `.{name}.tmp`; a planted symlink there was
+        // followed and truncated the link's target.
+        #[cfg(unix)]
+        {
+            let old_temp = dir.path().join(".vault.age.tmp");
+            std::os::unix::fs::symlink(&victim, &old_temp).unwrap();
+        }
+
+        save_tree(&Node::new("Root"), &target_str, b"pw").unwrap();
+
+        assert_eq!(fs::read(&victim).unwrap(), b"do not touch");
+        let data = validate_encrypted_file(&target_str).unwrap();
+        assert!(decrypt_to_node(&data, "pw").is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_created_vault_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.age");
+        create_secret_file(&path, "pw").unwrap();
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode,
+            atomic::SECRET_FILE_MODE,
+            "the vault must be owner-only"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_tree_preserves_the_existing_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.age");
+        let path_str = path.to_string_lossy().to_string();
+
+        save_tree(&Node::new("First"), &path_str, b"pw").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+        save_tree(&Node::new("Second"), &path_str, b"pw").unwrap();
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o640, "a replacement keeps the file's mode");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_created_private_directory_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("a").join("b");
+        create_private_dir(&nested).unwrap();
+
+        let mode = fs::metadata(&nested).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, SECRET_DIR_MODE, "the directory must be owner-only");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_tree_does_not_inherit_a_link_targets_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("victim");
+        fs::write(&victim, b"victim").unwrap();
+        fs::set_permissions(&victim, fs::Permissions::from_mode(0o666)).unwrap();
+        let link = dir.path().join("vault.age");
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
+
+        save_tree(&Node::new("Root"), &link, b"pw").unwrap();
+
+        // The vault replaces the link, so its mode must be owner-only, never
+        // the target's 0666.
+        let mode = fs::metadata(&link).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, atomic::SECRET_FILE_MODE);
+        assert_eq!(fs::read(&victim).unwrap(), b"victim");
+    }
+
+    #[test]
+    fn validate_encrypted_file_errors_on_a_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("nope.age");
+
+        assert!(matches!(
+            validate_encrypted_file(&missing),
+            Err(FileHandlingError::Io(_))
+        ));
     }
 
     // ── Filesystem operation tests ──
@@ -770,51 +1081,172 @@ mod tests {
     }
 
     #[test]
-    fn test_create_file_timing() {
-        let path = format!("/tmp/test_create_time_{}.age", uuid::Uuid::new_v4());
-        let passphrase = "test-passphrase";
+    fn create_secret_file_writes_an_openable_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.age");
+        let path = path.to_string_lossy().to_string();
 
-        let start = std::time::Instant::now();
-        let result = create_secret_file(&path, passphrase);
-        let elapsed = start.elapsed();
+        let node = create_secret_file(&path, "test-passphrase").unwrap();
 
-        assert!(result.is_ok());
-        assert!(Path::new(&path).exists());
-
-        println!(
-            "create_secret_file took {:?} ({}.{:03} ms)",
-            elapsed,
-            elapsed.as_millis(),
-            elapsed.subsec_millis(),
-        );
-
-        let _ = fs::remove_file(&path);
+        assert_eq!(node.name, texts::DEFAULT_ROOT_NAME);
+        let data = validate_encrypted_file(&path).unwrap();
+        assert!(decrypt_to_node(&data, "test-passphrase").is_ok());
     }
 
     #[test]
-    fn test_open_file_timing() {
-        let path = format!("/tmp/test_open_time_{}.age", uuid::Uuid::new_v4());
-        let passphrase = "test-passphrase";
+    fn decrypt_to_node_opens_a_written_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.age");
+        let path = path.to_string_lossy().to_string();
 
-        let root = Node::new("Secrets");
-        create_test_encrypted_file(&path, passphrase, &root);
+        create_test_encrypted_file(&path, "test-passphrase", &Node::new("Secrets"));
 
         let data = validate_encrypted_file(&path).expect("validation should succeed");
+        let node = decrypt_to_node(&data, "test-passphrase").expect("decryption should succeed");
 
-        let start = std::time::Instant::now();
-        let node = decrypt_to_node(&data, passphrase);
-        let elapsed = start.elapsed();
+        assert_eq!(node.name, "Secrets");
+    }
 
-        assert!(node.is_ok());
-        assert_eq!(node.unwrap().name, "Secrets");
+    #[test]
+    fn save_tree_rejects_a_non_utf8_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.age");
+        let path = path.to_string_lossy().to_string();
 
-        println!(
-            "decrypt_to_node took {:?} ({}.{:03} ms)",
-            elapsed,
-            elapsed.as_millis(),
-            elapsed.subsec_millis(),
+        let result = save_tree(&Node::new("X"), &path, &[0xff, 0xfe]);
+
+        assert!(matches!(
+            result,
+            Err(FileHandlingError::InvalidPassphraseEncoding)
+        ));
+        assert!(!Path::new(&path).exists());
+    }
+
+    #[test]
+    fn a_failed_rename_leaves_no_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory at the target path makes `rename` fail.
+        let target = dir.path().join("vault.age");
+        fs::create_dir(&target).unwrap();
+
+        let result = save_tree(&Node::new("X"), &target, b"pw");
+
+        assert!(result.is_err());
+        assert!(target.is_dir(), "the directory is untouched");
+        let leftovers: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".tmp"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "no temp file may survive: {leftovers:?}"
         );
+    }
 
-        let _ = fs::remove_file(&path);
+    #[test]
+    fn validate_rejects_a_file_one_byte_over_the_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.age");
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(MAX_FILE_SIZE + 1).unwrap();
+        drop(file);
+
+        assert!(matches!(
+            validate_encrypted_file(&path),
+            Err(FileHandlingError::FileTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_accepts_a_file_exactly_at_the_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.age");
+        let mut file = fs::File::create(&path).unwrap();
+        file.write_all(AGE_MAGIC).unwrap();
+        file.set_len(MAX_FILE_SIZE).unwrap();
+        drop(file);
+
+        let data = validate_encrypted_file(&path).unwrap();
+        assert_eq!(data.len() as u64, MAX_FILE_SIZE);
+    }
+
+    #[test]
+    fn probe_path_writable_accepts_a_writable_directory_and_cleans_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("vault.age");
+
+        assert!(probe_path_writable(&target).is_ok());
+        assert_eq!(
+            fs::read_dir(dir.path()).unwrap().count(),
+            0,
+            "the probe must not leave its temp file behind"
+        );
+    }
+
+    #[test]
+    fn probe_path_writable_rejects_a_missing_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing").join("vault.age");
+
+        assert!(matches!(
+            probe_path_writable(&missing),
+            Err(FileHandlingError::PathNotWritable(_))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_dir_does_not_block_on_a_fifo() {
+        use std::process::Command;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("pipe");
+        // Opening a FIFO for reading blocks until a writer appears; `list_dir`
+        // must skip it rather than hang the event-loop thread.
+        let created = Command::new("mkfifo").arg(&fifo).status();
+        if !matches!(created, Ok(status) if status.success()) {
+            return; // `mkfifo` is unavailable here.
+        }
+
+        let (tx, rx) = mpsc::channel();
+        let scan_dir = dir.path().to_path_buf();
+        std::thread::spawn(move || {
+            let _ = tx.send(list_dir(&scan_dir));
+        });
+
+        let entries = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("list_dir must not block on a FIFO")
+            .unwrap();
+        let entry = entries.iter().find(|e| e.name == "pipe").unwrap();
+        assert!(!entry.is_age_file, "a FIFO must never be scanned");
+    }
+
+    #[test]
+    fn read_file_and_write_file_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.bin");
+        let path = path.to_string_lossy().to_string();
+
+        write_file(&path, b"hello").unwrap();
+
+        assert_eq!(read_file(&path).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn read_file_refuses_a_file_over_its_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.pwd");
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(MAX_CONFIG_SIZE + 1).unwrap();
+        drop(file);
+
+        assert!(matches!(
+            read_file(&path),
+            Err(FileHandlingError::FileTooLarge { .. })
+        ));
     }
 }

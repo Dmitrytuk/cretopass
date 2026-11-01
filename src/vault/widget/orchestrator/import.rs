@@ -1,7 +1,8 @@
 //! Importing a plain-text tree into the open vault.
 //!
-//! The imported tree is filed under a timestamped wrapper inside the open Root, so
-//! one import never collides with the next.
+//! The file is read and parsed off the UI thread, then filed under a
+//! timestamped wrapper inside the open Root, so one import never collides with
+//! the next.
 
 use std::io;
 
@@ -25,7 +26,15 @@ pub(super) fn import<B: Backend>(
     terminal: &mut Terminal<B>,
     import_path: String,
 ) -> io::Result<()> {
-    let imported = match file_handling::import::import_tree(&import_path) {
+    // Read and parse on the worker: an import may be as large as the file cap
+    // and its parse is not cheap, so the event thread must not do it. The
+    // spinner drains input, so a stray key cannot start a second import.
+    let path_to_read = import_path.clone();
+    let imported = run_with_spinner(terminal, state, Status::Loading, move || {
+        file_handling::import_tree(&path_to_read)
+    })?;
+
+    let imported = match imported {
         Ok(node) => node,
         Err(e) => {
             state.modal = Some(Modal::error(errors::message(&e)));

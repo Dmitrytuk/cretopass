@@ -17,7 +17,7 @@ use super::HomeAction;
 use crate::file_browser::{
     self, FileBrowserAction, FileBrowserMode, FileBrowserSession, FileBrowserState,
 };
-use crate::file_handling::export::ExportFormat;
+use crate::file_handling::ExportFormat;
 use crate::theming::ElementStyle;
 
 /// The directory browser overlay, as one of the Home modals.

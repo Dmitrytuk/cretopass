@@ -5,7 +5,7 @@
 //! presentation-free and `theming` stays a dependency-free leaf.
 
 use crate::crypt::CryptError;
-use crate::file_handling::FileHandlingError;
+use crate::file_handling::{FileHandlingError, SerdeContext};
 use crate::theming::texts;
 
 /// The text a Home modal shows for `error`.
@@ -20,10 +20,13 @@ pub(super) fn message(error: &FileHandlingError) -> String {
             texts::MSG_WRONG_MASTER_PW.to_string()
         }
         // A file that decrypts but does not hold a Node is as unreadable to the
-        // user as one whose header is damaged.
-        FileHandlingError::Crypt(CryptError::CorruptFile { .. }) | FileHandlingError::Serde(_) => {
-            texts::MSG_DAMAGED_SECRET.to_string()
-        }
+        // user as one whose header is damaged. Only a *load* failure means the
+        // vault is damaged; a save/export serialisation failure is not.
+        FileHandlingError::Crypt(CryptError::CorruptFile { .. })
+        | FileHandlingError::Serde {
+            context: SerdeContext::Load,
+            ..
+        } => texts::MSG_DAMAGED_SECRET.to_string(),
         FileHandlingError::Crypt(CryptError::WorkFactorTooHigh { .. }) => {
             texts::MSG_WORK_FACTOR_TOO_HIGH.to_string()
         }
@@ -34,6 +37,9 @@ pub(super) fn message(error: &FileHandlingError) -> String {
             format!("{}{error}", texts::MSG_SAVE_FAILED)
         }
         FileHandlingError::PathNotWritable(_) => texts::MSG_CANNOT_WRITE.to_string(),
+        // `create_secret_file` finishes with a no-clobber rename, so a lost race
+        // surfaces here instead of the caller-side `Path::exists()` check.
+        FileHandlingError::AlreadyExists { .. } => texts::MSG_FILE_EXISTS.to_string(),
         other => format!("{}{other}", texts::MSG_FILE_ERROR),
     }
 }
@@ -78,9 +84,31 @@ mod tests {
 
     #[test]
     fn a_decrypted_payload_that_is_not_a_node_is_reported_as_damaged() {
-        let error =
-            FileHandlingError::Serde(serde_json::from_str::<serde_json::Value>("{").unwrap_err());
+        let error = FileHandlingError::Serde {
+            context: SerdeContext::Load,
+            source: serde_json::from_str::<serde_json::Value>("{").unwrap_err(),
+        };
         assert_eq!(message_for(error), texts::MSG_DAMAGED_SECRET);
+    }
+
+    #[test]
+    fn a_save_or_export_serialisation_failure_is_not_a_damaged_secret() {
+        // Only a *load* failure means the vault is unreadable; a failure to
+        // encode the tree for a save or an export must not claim damage.
+        for context in [SerdeContext::Save, SerdeContext::Export] {
+            let error = FileHandlingError::Serde {
+                context,
+                source: serde_json::from_str::<serde_json::Value>("{").unwrap_err(),
+            };
+
+            let shown = message(&error);
+
+            assert!(
+                shown.starts_with(texts::MSG_FILE_ERROR),
+                "{context:?} must keep the generic prefix: {shown}"
+            );
+            assert_ne!(shown, texts::MSG_DAMAGED_SECRET, "{context:?}");
+        }
     }
 
     #[test]
@@ -107,8 +135,28 @@ mod tests {
 
     #[test]
     fn a_path_that_cannot_be_written_is_reported_as_such() {
-        let error = FileHandlingError::PathNotWritable("/root/vault.age".to_string());
+        let error = FileHandlingError::PathNotWritable(std::path::PathBuf::from("/root/vault.age"));
         assert_eq!(message_for(error), texts::MSG_CANNOT_WRITE);
+    }
+
+    #[test]
+    fn an_already_existing_target_is_reported_as_existing() {
+        let error = FileHandlingError::AlreadyExists {
+            path: std::path::PathBuf::from("/tmp/vault.age"),
+        };
+        assert_eq!(message_for(error), texts::MSG_FILE_EXISTS);
+    }
+
+    #[test]
+    fn a_malformed_import_is_not_shown_as_a_damaged_secret() {
+        // A bad import file is a syntax problem; only a vault that fails to
+        // deserialise after decryption is "damaged".
+        let error = FileHandlingError::Import(crate::file_handling::ParseError::InvalidJson);
+
+        let shown = message(&error);
+
+        assert_eq!(shown, format!("{}{}", texts::MSG_FILE_ERROR, error));
+        assert_ne!(shown, texts::MSG_DAMAGED_SECRET);
     }
 
     #[test]

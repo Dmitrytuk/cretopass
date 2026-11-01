@@ -40,7 +40,7 @@ pub(crate) use detail::{
 use crossterm::event::KeyEvent;
 
 use super::TreeState;
-use crate::file_handling::export::ExportFormat;
+use crate::file_handling::ExportFormat;
 use crate::share::SharePassword;
 use crate::tree::node::Node;
 

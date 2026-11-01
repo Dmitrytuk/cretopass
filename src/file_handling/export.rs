@@ -1,6 +1,6 @@
 //! Exporting a Node tree to plain text — JSON, XML, or CSV.
 //!
-//! The destination is named by the user in the File Browser. [`suggest_name`] and
+//! The destination is named by the user in the File Browser. [`suggest_export_name`] and
 //! [`output_path`] are the single source of truth for the file name, and
 //! [`export_tree`] refuses to overwrite a secret file (see
 //! [ADR 0022](../../docs/adr/0022-user-chosen-export-destination.md)).
@@ -8,45 +8,34 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use crate::file_handling::{FileHandlingError, is_age_file, node_to_json};
+use super::error::SerdeContext;
+use super::format::Format;
+use super::{FileHandlingError, csv, is_age_file, node_to_json, xml};
 use crate::tree::node::Node;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ExportFormat {
-    Json,
-    Xml,
-    Csv,
-}
-
-impl ExportFormat {
-    /// The extension an export of this format is written with.
-    pub fn extension(self) -> &'static str {
-        match self {
-            Self::Json => "json",
-            Self::Xml => "xml",
-            Self::Csv => "csv",
-        }
-    }
-}
+/// The formats an exported document may use.
+pub type ExportFormat = Format;
 
 /// The name an export is suggested with: the stem of the secret file being
 /// exported, the Node's name when a single Node is exported, and the format's
 /// extension.
 ///
-/// Every character in `node_name` that is not alphanumeric or `-`/`_` becomes
-/// `_`, so the suggestion is always a usable file name.
-pub fn suggest_name(
+/// Every character in the stem and in `node_name` that is not alphanumeric or
+/// `-`/`_` becomes `_`, so the suggestion is always a usable file name.
+pub fn suggest_export_name(
     base_path: Option<&Path>,
     node_name: Option<&str>,
     format: ExportFormat,
 ) -> String {
-    let stem = base_path
-        .and_then(Path::file_stem)
-        .and_then(OsStr::to_str)
-        .unwrap_or("export");
+    let stem = sanitize(
+        base_path
+            .and_then(Path::file_stem)
+            .and_then(OsStr::to_str)
+            .unwrap_or("export"),
+    );
     let name = match node_name {
         Some(node_name) => format!("{stem}_{}", sanitize(node_name)),
-        None => stem.to_string(),
+        None => stem,
     };
     format!("{name}.{}", format.extension())
 }
@@ -84,123 +73,36 @@ pub fn output_path(path: &Path, format: ExportFormat) -> PathBuf {
 ///
 /// # Errors
 ///
-/// Returns [`FileHandlingError::ExportError`] when `node` cannot be
-/// serialised, or when the destination is a secret file — an export is plain
-/// text, so writing it over an encrypted file would destroy the vault.
-/// Returns [`FileHandlingError::Io`] when the write fails.
+/// Returns [`FileHandlingError::Serde`] (context `Export`) when `node` cannot
+/// be serialised, or [`FileHandlingError::ExportOverwritesSecret`] when the
+/// destination is a secret file — an export is plain text, so writing it over
+/// an encrypted file would destroy the vault. Returns
+/// [`FileHandlingError::Io`] (or [`FileHandlingError::PathNotWritable`]) when
+/// the write fails.
 pub fn export_tree(
     node: &Node,
-    file_path: &str,
+    file_path: impl AsRef<Path>,
     format: ExportFormat,
 ) -> Result<String, FileHandlingError> {
-    let out_path = output_path(Path::new(file_path), format);
+    let out_path = output_path(file_path.as_ref(), format);
     if is_age_file(&out_path) {
-        return Err(FileHandlingError::ExportError(format!(
-            "refusing to overwrite the secret file {}",
-            out_path.display()
-        )));
+        return Err(FileHandlingError::ExportOverwritesSecret { path: out_path });
     }
 
     let data = match format {
-        ExportFormat::Json => node_to_json(node).map_err(|e| {
-            FileHandlingError::ExportError(format!("json serialisation failed: {e}"))
+        ExportFormat::Json => node_to_json(node).map_err(|source| FileHandlingError::Serde {
+            context: SerdeContext::Export,
+            source,
         })?,
-        ExportFormat::Xml => node_to_xml(node),
-        ExportFormat::Csv => node_to_csv(node),
+        ExportFormat::Xml => xml::node_to_xml(node),
+        ExportFormat::Csv => csv::node_to_csv(node),
     };
 
-    std::fs::write(&out_path, &data).map_err(FileHandlingError::Io)?;
+    // Write the plaintext export atomically, at owner-only permissions: it
+    // holds decrypted secrets, so it must not be world-readable.
+    super::atomic::write_atomic_private(&out_path, data.as_bytes())?;
 
     Ok(out_path.to_string_lossy().to_string())
-}
-
-fn node_to_xml(node: &Node) -> String {
-    let mut buf = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    write_xml_node(&mut buf, node, 0);
-    buf
-}
-
-fn write_xml_node(buf: &mut String, node: &Node, depth: usize) {
-    let indent = "  ".repeat(depth);
-    let name_esc = escape_xml(&node.name);
-
-    buf.push_str(&format!("{indent}<node name=\"{name_esc}\">\n"));
-
-    buf.push_str(&format!("{}  <extra_fields>\n", indent));
-    for ef in &node.extra_fields {
-        let ft = escape_xml(&ef.field_type.wire_label());
-        let val = escape_xml(&ef.value);
-        buf.push_str(&format!(
-            "{}    <field type=\"{ft}\" value=\"{val}\"/>\n",
-            indent
-        ));
-    }
-    buf.push_str(&format!("{}  </extra_fields>\n", indent));
-
-    if !node.children.is_empty() {
-        buf.push_str(&format!("{}  <children>\n", indent));
-        for child in &node.children {
-            write_xml_node(buf, child, depth + 2);
-        }
-        buf.push_str(&format!("{}  </children>\n", indent));
-    }
-
-    buf.push_str(&format!("{indent}</node>\n"));
-}
-
-fn escape_xml(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-}
-
-fn node_to_csv(node: &Node) -> String {
-    let mut buf = String::from("path,name,field_type,field_value\n");
-    write_csv_rows(&mut buf, node, String::new());
-    buf
-}
-
-fn write_csv_rows(buf: &mut String, node: &Node, parent_path: String) {
-    let current_name = csv_escape(&node.name);
-    let current_path = if parent_path.is_empty() {
-        current_name.clone()
-    } else {
-        format!("{} > {}", parent_path, current_name)
-    };
-
-    if node.extra_fields.is_empty() {
-        buf.push_str(&format!(
-            "{},{},,\n",
-            csv_escape(&current_path),
-            current_name,
-        ));
-    } else {
-        for ef in &node.extra_fields {
-            let ft = csv_escape(&ef.field_type.wire_label());
-            let val = csv_escape(&ef.value);
-            buf.push_str(&format!(
-                "{},{},{},{}\n",
-                csv_escape(&current_path),
-                current_name,
-                ft,
-                val,
-            ));
-        }
-    }
-
-    for child in &node.children {
-        write_csv_rows(buf, child, current_path.clone());
-    }
-}
-
-fn csv_escape(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
 }
 
 #[cfg(test)]
@@ -308,25 +210,27 @@ mod tests {
 
     #[test]
     fn test_export_extension_stripped() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("my_vault.age");
         let node = Node::new("X");
-        let result = export_tree(&node, "/tmp/my_vault.age", ExportFormat::Json);
+        let result = export_tree(&node, &vault, ExportFormat::Json);
         assert!(result.is_ok());
         let path = result.unwrap();
         assert_eq!(
             std::path::Path::new(&path).file_name().unwrap(),
             "my_vault.json"
         );
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn test_export_no_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("my_vault");
         let node = Node::new("X");
-        let result = export_tree(&node, "/tmp/my_vault", ExportFormat::Json);
+        let result = export_tree(&node, &vault, ExportFormat::Json);
         assert!(result.is_ok());
         let path = result.unwrap();
         assert!(path.contains("my_vault.json"));
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -338,24 +242,31 @@ mod tests {
             ExportFormat::Json,
         );
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), FileHandlingError::Io(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            FileHandlingError::PathNotWritable(_)
+        ));
     }
 
+    #[cfg(unix)]
     #[test]
-    fn test_csv_escape() {
-        assert_eq!(csv_escape("plain"), "plain");
-        assert_eq!(csv_escape("has,comma"), "\"has,comma\"");
-        assert_eq!(csv_escape("has\"quote"), "\"has\"\"quote\"");
-        assert_eq!(csv_escape("has\nnewline"), "\"has\nnewline\"");
-    }
+    fn export_is_owner_only_even_over_a_permissive_file() {
+        use std::os::unix::fs::PermissionsExt;
 
-    #[test]
-    fn test_xml_escape() {
-        assert_eq!(
-            escape_xml("a&b<c>d\"e'f"),
-            "a&amp;b&lt;c&gt;d&quot;e&apos;f"
-        );
-        assert_eq!(escape_xml("plain"), "plain");
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.age");
+        let vault = vault.to_string_lossy().to_string();
+        export_tree(&Node::new("X"), &vault, ExportFormat::Json).unwrap();
+
+        // Pre-existing exports may carry a group/world-readable mode; the next
+        // export must not inherit it, because it holds decrypted secrets.
+        let out = dir.path().join("vault.json");
+        std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        export_tree(&sample_node(), &vault, ExportFormat::Json).unwrap();
+
+        let mode = std::fs::metadata(&out).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "a plaintext export must be owner-only");
     }
 
     #[test]
@@ -382,17 +293,17 @@ mod tests {
     }
 
     #[test]
-    fn suggest_name_uses_the_secret_file_stem() {
+    fn suggest_export_name_uses_the_secret_file_stem() {
         assert_eq!(
-            suggest_name(Some(Path::new("/tmp/vault.age")), None, ExportFormat::Json),
+            suggest_export_name(Some(Path::new("/tmp/vault.age")), None, ExportFormat::Json),
             "vault.json"
         );
     }
 
     #[test]
-    fn suggest_name_appends_a_sanitised_node_name() {
+    fn suggest_export_name_appends_a_sanitised_node_name() {
         assert_eq!(
-            suggest_name(
+            suggest_export_name(
                 Some(Path::new("/tmp/vault.age")),
                 Some("My Email/Work"),
                 ExportFormat::Csv
@@ -402,9 +313,21 @@ mod tests {
     }
 
     #[test]
-    fn suggest_name_falls_back_without_a_secret_file() {
+    fn suggest_export_name_sanitises_a_newline_in_the_secret_file_stem() {
         assert_eq!(
-            suggest_name(None, Some("Login"), ExportFormat::Json),
+            suggest_export_name(
+                Some(Path::new("/tmp/va\nult.age")),
+                None,
+                ExportFormat::Json
+            ),
+            "va_ult.json"
+        );
+    }
+
+    #[test]
+    fn suggest_export_name_falls_back_without_a_secret_file() {
+        assert_eq!(
+            suggest_export_name(None, Some("Login"), ExportFormat::Json),
             "export_Login.json"
         );
     }
@@ -420,7 +343,10 @@ mod tests {
 
         let result = export_tree(&Node::new("X"), &vault_path, ExportFormat::Json);
 
-        assert!(matches!(result, Err(FileHandlingError::ExportError(_))));
+        assert!(matches!(
+            result,
+            Err(FileHandlingError::ExportOverwritesSecret { .. })
+        ));
         // Untouched: it still decrypts with its master password.
         let data = crate::file_handling::validate_encrypted_file(&vault_path).unwrap();
         assert!(crate::file_handling::decrypt_to_node(&data, "pw").is_ok());
