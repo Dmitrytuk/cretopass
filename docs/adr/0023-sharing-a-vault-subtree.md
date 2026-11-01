@@ -19,9 +19,11 @@ A bundle is:
     HOW-TO-OPEN.txt
 ```
 
-`<stem>` is the source secret file's stem, plus the sanitised Node name when a
-single branch is shared (`vault_Work.cretopass`) — the same rule as
-`file_handling::suggest_export_name` (`file_handling::suggest_share_name`).
+`<stem>` is the source secret file's **sanitised** stem, plus the sanitised Node
+name when a single branch is shared (`vault_Work.cretopass`) — the same rule as
+`file_handling::suggest_export_name` (`file_handling::suggest_share_name`). The
+stem is sanitised because it also names the generated instruction, so a source
+named `my vault.age` suggests `my_vault.cretopass`.
 
 Rules that follow from it:
 

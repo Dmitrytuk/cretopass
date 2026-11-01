@@ -17,7 +17,7 @@ entire duration makes "working" visibly different from "stuck".
 | 5 | **Home: work on a `std::thread`, UI thread busy-loops the redraw.** `run_with_spinner` spawns the closure, then `{ advance; draw; poll(SPINNER_TICK); drain }` until the worker finishes. | Home's outer loop is a blocking `event::read()`; the smallest change that animates is to move the one blocking call off-thread while the UI thread keeps drawing. A full async rework of Home is far larger for the same effect. |
 | 6 | **Input during the Home wait is read and fully drained, then discarded.** | A stray Enter must not trigger a second action once the wait ends. Esc / Ctrl+C cannot cancel the scrypt work, so swallowing them is the honest behavior. |
 | 7 | **Tree: a guarded `tokio::time::interval` tick.** `MissedTickBehavior::Delay`; the tick branch and the flush tick are both guarded by `save_state.spins()`. | `interval`'s first tick is immediate, but the guard is false while idle, so the app does not redraw at 12.5 fps when nothing is happening. The Tree draws once per 80 ms only while a save is outstanding. |
-| 8 | **Tree: a blocking helper for the share write.** `run_with_busy` mirrors Home's `run_with_spinner` for the one Tree operation that blocks outside autosave: a transient `operation_status` on `TreeState` takes title-bar precedence over `save_state`, and the helper advances the spinner and redraws until the worker finishes. | The share write (age scrypt + fsync, [0023](0023-sharing-a-vault-subtree.md)) is as slow as a save and would otherwise freeze the UI. Mid-wait input is left to the `EventStream` rather than drained: polling crossterm would race its reader thread. |
+| 8 | **Tree: a blocking helper for the blocking writes.** `run_with_busy` mirrors Home's `run_with_spinner` for the Tree operations that block outside autosave — the share write and the export: a transient `operation_status` on `TreeState` takes title-bar precedence over `save_state`, and the helper advances the spinner and redraws until the worker finishes. | The share write (age scrypt + fsync, [0023](0023-sharing-a-vault-subtree.md)) and the export (full-tree serialisation plus file and directory `fsync`, [0022](0022-user-chosen-export-destination.md)) are as slow as a save and would otherwise freeze the UI. Mid-wait input is left to the `EventStream` rather than drained: polling crossterm would race its reader thread. |
 
 ## Home busy helper
 
@@ -37,6 +37,10 @@ The decrypt site moves the modal's owned `file_data` / `passphrase` into the
 closure and returns them alongside the outcome, so the error path can rebuild the
 passphrase prompt without a second copy of the secret.
 
+Home's export uses the same helper with `Status::Saving`: serialising the whole
+tree and `fsync`ing the file and its directory block, so they run on the worker
+under the spinner, exactly as the Tree's share and export writes do.
+
 **If `terminal.draw` fails mid-wait**, the worker is already running and the
 save/decrypt is **not** cancelled. This is intended: the operation is
 non-cancellable scrypt work, and abandoning it would risk a partially written
@@ -45,7 +49,7 @@ file. The `io::Error` propagates once the wait ends.
 ## Tree busy helper
 
 `run_with_busy(terminal, state, status, draw, work)` mirrors the Home helper for
-the Tree's blocking share write:
+the Tree's blocking writes — the share write and the export:
 
 - sets `state.operation_status` (a `TreeState` field the title bar prefers over
   `save_state`) and draws once;

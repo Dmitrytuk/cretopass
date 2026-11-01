@@ -25,17 +25,22 @@ audit I/O patterns.
 | `autosave.rs` | `Autosave`: one background writer thread with a latest-wins snapshot slot, generation numbers, `SaveEvent` notifications, panic containment, and flush-on-drop ([ADR 0010](../../../../docs/adr/0010-async-tree-autosave.md)) |
 | `disks.rs` | `DiskInfo` + `list_disks()`: cross-platform mounted-volume enumeration via `sysinfo`, with loop/squashfs filtering |
 | `error.rs` | `FileHandlingError` enum (+ `crypt::CryptError` for typed encryption/decryption failures) wrapping Io / Serde / typed crypt errors + structured domain errors; `#[non_exhaustive]` and free of any imported-value payload |
-| `export.rs` | `ExportFormat` (an alias of `format::Format`), recursive XML serialization, flattened CSV export |
+| `export.rs` | `ExportFormat` (an alias of `format::Format`), the naming policy (`suggest_export_name` / `output_path`, and the `sanitize` rule `suggest_export_name` shares with the share flow), recursive XML serialization, flattened CSV export |
 | `format.rs` | the shared `Format` enum behind the `ImportFormat` / `ExportFormat` aliases: one extension table for detection and serialisation |
 | `import.rs` | `ImportFormat` detection (an alias of `format::Format`), JSON/XML/CSV import with custom parsers, `build_tree_from_paths()` |
 | `share.rs` | `suggest_share_name` (the bundle-folder name) and `share_tree`: writes a share bundle — a re-encrypted secret file via `save_tree`, then a `HOW-TO-OPEN.txt` instruction ([0023](../../../../docs/adr/0023-sharing-a-vault-subtree.md)) |
 
 ## Facade
 
-The submodules are `pub(crate)`. Every caller imports the symbols it needs from
-`file_handling::…` directly; the `pub use` list in `src/file_handling.rs` is the
-single facade, so a submodule can be renamed or split without touching any call
-site outside this module.
+The submodules are `pub(crate)`. Callers outside this module import the symbols
+they need from `file_handling::…`; the `pub use` list in `src/file_handling.rs`
+is the single facade, so a submodule can be renamed or split without touching any
+call site outside this module. A symbol no caller anywhere needs is not
+re-exported; one that only other in-crate modules use is a `pub(crate) use` (for
+example `node_to_json`, which `export.rs` reaches through the facade). Inside the
+module a submodule may still reach a sibling directly through `super::` (for
+example `share.rs` taking `sanitize` from `export.rs`), so "one facade" governs
+the module's callers, not its siblings' own imports.
 
 ## Contracts
 
@@ -51,9 +56,10 @@ site outside this module.
   secrets are `0600` and secret directories are `0700` on Unix. A plaintext
   export is always written `0600`, never inheriting a more permissive mode.
 - `create_secret_file()` creates the vault with a single **no-clobber rename**
-  (`renameat2(RENAME_NOREPLACE)` / `renamex_np`, falling back to `link` +
-  `unlink`), so an existing file (or a symlink) is never overwritten and no
-  hard kill can leave a zero-byte placeholder.
+  (`tempfile`'s `persist_noclobber`: `renameat_with(RENAME_NOREPLACE)` where the
+  OS and filesystem support it, a `hard_link` + `unlink` fallback otherwise), so
+  an existing file (or a symlink) is never overwritten and no hard kill can leave
+  a zero-byte placeholder.
 - Reads are symlink-safe: `validate_encrypted_file()`, `import_tree()`,
   `read_file()` and the age-header scan open the file with `O_NOFOLLOW`
   (Linux/macOS) and reject anything that is not a regular file, so a planted

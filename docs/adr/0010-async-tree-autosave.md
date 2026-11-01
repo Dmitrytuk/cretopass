@@ -76,6 +76,17 @@ cryptography work.
   best-effort bounded join (also `SAVE_TIMEOUT`) for callers that forget. On
   timeout or detach the thread is left to be reaped at process exit.
 - A snapshot still waiting in the slot is written before the thread exits.
+- The superseded snapshot is wiped. `submit` zeroizes a replaced still-waiting
+  snapshot, and the worker zeroizes each snapshot after `save` returns — on
+  success, failure, or a caught panic — so plaintext does not outlive its job.
+- Cancelling is separate from stopping the worker. `Autosave` owns a
+  `file_handling::CancelToken` and hands a clone to the save function, which
+  checks it immediately **before** the rename
+  (`atomic::write_atomic_cancellable`). `detach()`, and a `shutdown(timeout)` or
+  `Drop` join that times out, cancel the token, so a writer stalled across a
+  force-quit cannot replace a newer file. A cancelled write reports
+  `FileHandlingError::WriteAbandoned` and leaves the target byte-identical; the
+  only residual window is the rename itself.
 - Notifications use `tokio::sync::mpsc::unbounded_channel`. There is exactly one
   producer (the save thread) and one consumer (the event loop), and the slowest
   producer is one event per save, so unbounded buffering cannot grow.
@@ -126,9 +137,10 @@ cryptography work.
 The home screen keeps its blocking `event::read()` loop. Only the tree uses
 `EventStream`, and the two loops never run concurrently: switching screens
 replaces one with the other. Explicit home actions (import, change password,
-create) run their scrypt work on a `std::thread` while the UI thread redraws the
-animated status at `SPINNER_TICK` and discards input until the work finishes
-(see [0011](0011-animated-status-spinner.md)).
+create) run all of their blocking work on a `std::thread` — the import's file
+read and parse (under `Status::Loading`) as well as the scrypt — while the UI
+thread redraws the animated status at `SPINNER_TICK` and discards input until
+the work finishes (see [0011](0011-animated-status-spinner.md)).
 
 `run_tree` maps the tree result back onto `HomeState`:
 
