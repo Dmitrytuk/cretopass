@@ -105,7 +105,7 @@ pub(super) fn render_input_popup(
     let inner = block.inner(popup_area);
     let lines = vec![
         Line::from(""),
-        Line::from(cursor_field_spans(label, text, cursor, true)),
+        Line::from(cursor_field_spans(label, text, cursor)),
     ];
 
     frame.render_widget(Clear, popup_area);

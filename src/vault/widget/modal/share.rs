@@ -20,6 +20,12 @@ use crate::share::{Passphrase, PassphraseSubmit};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{display_path, make_overlay, paint_overlay};
 
+/// The labels of the two fields, in focus order.
+const LABELS: [&str; 2] = [
+    texts::LABEL_PASSPHRASE_FIELD,
+    texts::LABEL_PASSPHRASE_CONFIRM,
+];
+
 /// The dialog that types the password a share bundle is encrypted with.
 pub struct SharePassphrase {
     /// The bundle folder, shown so the user knows what is about to be written.
@@ -80,16 +86,14 @@ impl SharePassphrase {
         )));
         lines.push(Line::from(""));
 
-        for (index, label) in [
-            texts::LABEL_PASSPHRASE_FIELD,
-            texts::LABEL_PASSPHRASE_CONFIRM,
-        ]
-        .iter()
-        .enumerate()
+        for (index, (label, field)) in LABELS
+            .iter()
+            .zip(self.passphrase.fields().fields())
+            .enumerate()
         {
             lines.push(Line::from(password_field_spans(
                 label,
-                self.passphrase.fields().field(index),
+                field,
                 index == self.passphrase.fields().focused_index(),
                 self.passphrase.fields().show(),
             )));

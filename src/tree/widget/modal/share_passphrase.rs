@@ -19,6 +19,12 @@ use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::TreeState;
 
+/// The labels of the two fields, in focus order.
+const LABELS: [&str; 2] = [
+    texts::LABEL_PASSPHRASE_FIELD,
+    texts::LABEL_PASSPHRASE_CONFIRM,
+];
+
 /// The Share modal's password step.
 #[derive(Debug)]
 pub(crate) struct SharePassphrase {
@@ -122,16 +128,14 @@ impl SharePassphrase {
             Line::from(""),
         ];
 
-        for (index, label) in [
-            texts::LABEL_PASSPHRASE_FIELD,
-            texts::LABEL_PASSPHRASE_CONFIRM,
-        ]
-        .iter()
-        .enumerate()
+        for (index, (label, field)) in LABELS
+            .iter()
+            .zip(self.passphrase.fields().fields())
+            .enumerate()
         {
             lines.push(Line::from(password_field_spans(
                 label,
-                self.passphrase.fields().field(index),
+                field,
                 index == self.passphrase.fields().focused_index(),
                 self.passphrase.fields().show(),
             )));

@@ -136,7 +136,7 @@ pub(super) fn create_secret<B: Backend>(
             Ok(())
         }
         Ok(node) => {
-            let passphrase = Zeroizing::new(passphrase.into_bytes());
+            let passphrase = Zeroizing::new(passphrase.as_bytes().to_vec());
             state.active_vault = Some(ActiveVaultState {
                 path: Some(file_path.clone()),
                 passphrase: passphrase.clone(),
@@ -297,7 +297,7 @@ pub(super) fn unlock<B: Backend>(
         }
         Ok(node) => {
             let file_path = prompt.file_path().to_string();
-            let passphrase = Zeroizing::new(passphrase.into_bytes());
+            let passphrase = Zeroizing::new(passphrase.as_bytes().to_vec());
             state.active_vault = Some(ActiveVaultState {
                 path: Some(file_path.clone()),
                 passphrase: passphrase.clone(),

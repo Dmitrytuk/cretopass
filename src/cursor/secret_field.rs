@@ -2,14 +2,16 @@
 //!
 //! The unlock, create-secret and change-password prompts all edit N masked text
 //! fields with one focused field and a shared "reveal plaintext" flag. This
-//! module owns that behaviour on top of the [`super::core`] editing primitives,
-//! so every prompt stops re-implementing the same editing and span-building
-//! code.
+//! module owns that behaviour on top of the [`super::editing`] editing
+//! primitives, so every prompt stops re-implementing the same editing and
+//! span-building code.
 
 use ratatui::text::Span;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
-use super::core::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
+use super::editing::{
+    backspace_at, cursor_left, cursor_right, delete_at, insert_char_at, split_at_cursor,
+};
 use crate::theming::{Action, ElementStyle};
 
 /// A single masked text field: its text and a byte-offset cursor
@@ -49,36 +51,44 @@ impl SecretField {
         self.cursor
     }
 
+    /// Inserts `c` at the cursor and advances past it.
     pub fn insert(&mut self, c: char) {
         insert_char_at(&mut self.text, &mut self.cursor, c);
     }
 
+    /// Removes the character before the cursor; a no-op at the start.
     pub fn backspace(&mut self) {
         self.cursor = backspace_at(&mut self.text, self.cursor);
     }
 
+    /// Removes the character under the cursor; a no-op at the end.
     pub fn delete(&mut self) {
         delete_at(&mut self.text, self.cursor);
     }
 
+    /// Moves the cursor one character to the left.
     pub fn move_left(&mut self) {
         self.cursor = cursor_left(&self.text, self.cursor);
     }
 
+    /// Moves the cursor one character to the right.
     pub fn move_right(&mut self) {
         self.cursor = cursor_right(&self.text, self.cursor);
     }
 
+    /// Moves the cursor to the start of the text.
     pub fn move_home(&mut self) {
         self.cursor = 0;
     }
 
+    /// Moves the cursor to the end of the text.
     pub fn move_end(&mut self) {
         self.cursor = self.text.len();
     }
 
+    /// Empties the field, wiping the text from the heap immediately.
     fn clear(&mut self) {
-        self.text.clear();
+        self.text.zeroize();
         self.cursor = 0;
     }
 }
@@ -116,8 +126,8 @@ pub enum PairVerdict {
 ///
 /// The prompts differ only in how many fields they hold: one for unlocking, two
 /// for creating a secret file or a share bundle, three for changing the master
-/// password.
-#[derive(Default, Clone)]
+/// password. Built with [`SecretFieldGroup::with_fields`]; it deliberately has
+/// no `Default`, so an empty group cannot be conjured by accident.
 pub struct SecretFieldGroup {
     fields: Vec<SecretField>,
     focused: usize,
@@ -156,14 +166,23 @@ impl SecretFieldGroup {
         &self.fields[index]
     }
 
+    /// Every field, in focus order, for a renderer that zips them with its
+    /// labels instead of indexing each one (see the prompt renderers).
+    pub fn fields(&self) -> &[SecretField] {
+        &self.fields
+    }
+
+    /// The index of the focused field.
     pub fn focused_index(&self) -> usize {
         self.focused
     }
 
+    /// Whether the plaintext is currently revealed.
     pub fn show(&self) -> bool {
         self.show
     }
 
+    /// Flips the reveal flag.
     pub fn toggle_show(&mut self) {
         self.show = !self.show;
     }
@@ -240,19 +259,32 @@ impl SecretFieldGroup {
         }
     }
 
-    /// Validates the two-field passphrase pair (fields 0 and 1) with the rule
-    /// the create-secret and share prompts share: both fields empty is the
+    /// Validates the two-field passphrase pair (the first two fields) with the
+    /// rule the create-secret and share prompts share: both fields empty is the
     /// passwordless case, a mismatch resets the cursors to be corrected, and a
     /// matching non-empty pair is usable.
-    pub fn pair_verdict(&mut self) -> PairVerdict {
-        if self.field(0).text().is_empty() && self.field(1).text().is_empty() {
-            return PairVerdict::Empty;
+    ///
+    /// Returns `None` when the group does not hold a pair (fewer than two
+    /// fields). Every caller builds a pair with
+    /// [`with_fields(2)`](SecretFieldGroup::with_fields), so `None` is not
+    /// reachable in practice; a debug assertion catches a regression.
+    pub fn pair_verdict(&mut self) -> Option<PairVerdict> {
+        debug_assert!(
+            self.fields.len() >= 2,
+            "pair_verdict needs a two-field group, got {} fields",
+            self.fields.len()
+        );
+
+        let first = self.fields.first()?;
+        let second = self.fields.get(1)?;
+        if first.text().is_empty() && second.text().is_empty() {
+            return Some(PairVerdict::Empty);
         }
-        if self.field(0).text() != self.field(1).text() {
+        if first.text() != second.text() {
             self.reset_cursors();
-            return PairVerdict::Mismatch;
+            return Some(PairVerdict::Mismatch);
         }
-        PairVerdict::Match
+        Some(PairVerdict::Match)
     }
 
     /// Moves every cursor to the start and focuses the first field, keeping the
@@ -277,28 +309,35 @@ impl SecretFieldGroup {
 
 /// Spans for the value of `field`: masked unless `show`, with an inverted cursor
 /// cell while the field is focused.
+///
+/// The mask is one `*` per **byte** of text, not per character
+/// (`"*".repeat(field.text().len())`). That is deliberate: the cursor is a byte
+/// offset, so a per-byte mask keeps the inverted cell aligned with the cursor
+/// for multibyte input too — masking by character count would silently misplace
+/// it. While `show` is set, the plaintext display copy is held in a
+/// [`Zeroizing`] buffer so it is wiped when this function returns.
 pub fn secret_field_spans(field: &SecretField, focused: bool, show: bool) -> Vec<Span<'static>> {
-    let display = if show {
+    let display = Zeroizing::new(if show {
         field.text().to_string()
     } else {
         "*".repeat(field.text().len())
-    };
+    });
 
     if !focused {
-        return vec![Span::styled(display, ElementStyle::HomeFieldLabel.style())];
+        return vec![Span::styled(
+            display.to_string(),
+            ElementStyle::HomeFieldLabel.style(),
+        )];
     }
 
-    let pos = field.cursor().min(display.len());
-    let (before, rest) = display.split_at(pos);
-    let ch = rest.chars().next();
-    let after = &rest[ch.map(|c| c.len_utf8()).unwrap_or(0)..];
+    let (before, ch, after) = split_at_cursor(&display, field.cursor());
 
-    let mut spans = Vec::new();
+    let mut spans = Vec::with_capacity(3);
     if !before.is_empty() {
         spans.push(Span::raw(before.to_string()));
     }
     spans.push(Span::styled(
-        ch.map(|c| c.to_string()).unwrap_or_else(|| " ".to_string()),
+        ch.map_or_else(|| " ".to_string(), |c| c.to_string()),
         ElementStyle::InvertedCursor.style(),
     ));
     if !after.is_empty() {
@@ -406,19 +445,89 @@ mod tests {
     fn pair_verdict_matches_the_two_field_rule() {
         let mut group = SecretFieldGroup::with_fields(2);
 
-        assert_eq!(group.pair_verdict(), PairVerdict::Empty);
+        assert_eq!(group.pair_verdict(), Some(PairVerdict::Empty));
 
         group.apply(|f| f.insert('a'));
         group.next_field();
         group.apply(|f| f.insert('b'));
-        assert_eq!(group.pair_verdict(), PairVerdict::Mismatch);
+        assert_eq!(group.pair_verdict(), Some(PairVerdict::Mismatch));
         assert_eq!(group.focused_index(), 0, "a mismatch resets the focus");
 
         group.clear();
         group.apply(|f| f.insert('b'));
         group.next_field();
         group.apply(|f| f.insert('b'));
-        assert_eq!(group.pair_verdict(), PairVerdict::Match);
+        assert_eq!(group.pair_verdict(), Some(PairVerdict::Match));
+    }
+
+    #[test]
+    fn a_one_sided_empty_pair_is_a_mismatch() {
+        let mut group = SecretFieldGroup::with_fields(2);
+        group.apply(|f| f.insert('a'));
+        group.apply(|f| f.move_end());
+        group.next_field();
+        group.apply(|f| f.insert('b'));
+        group.apply(|f| f.move_end());
+
+        assert_eq!(group.pair_verdict(), Some(PairVerdict::Mismatch));
+        assert_eq!(group.focused_index(), 0, "a mismatch resets the focus");
+        assert_eq!(group.field(0).cursor(), 0);
+        assert_eq!(group.field(1).cursor(), 0);
+    }
+
+    #[test]
+    fn apply_action_reports_delete_char() {
+        let mut group = SecretFieldGroup::with_fields(2);
+        group.apply(|f| f.insert('x'));
+        group.apply(|f| f.move_home());
+
+        assert_eq!(group.apply_action(Action::DeleteChar), FieldEdit::Deleted);
+        assert_eq!(group.field(0).text(), "");
+    }
+
+    #[test]
+    fn apply_action_moves_the_cursor_and_the_focus() {
+        let mut group = SecretFieldGroup::with_fields(2);
+        group.apply(|f| f.insert('a'));
+        group.apply(|f| f.insert('b'));
+
+        assert_eq!(group.apply_action(Action::CursorHome), FieldEdit::Moved);
+        assert_eq!(group.field(0).cursor(), 0);
+        assert_eq!(group.apply_action(Action::CursorRight), FieldEdit::Moved);
+        assert_eq!(group.field(0).cursor(), 1);
+        assert_eq!(group.apply_action(Action::CursorEnd), FieldEdit::Moved);
+        assert_eq!(group.field(0).cursor(), 2);
+
+        assert_eq!(group.apply_action(Action::NextField), FieldEdit::Moved);
+        assert_eq!(group.focused_index(), 1);
+        assert_eq!(group.apply_action(Action::PrevField), FieldEdit::Moved);
+        assert_eq!(group.focused_index(), 0);
+    }
+
+    #[test]
+    fn edits_at_the_edges_are_no_ops() {
+        let mut field = typed("ab");
+        field.move_home();
+        field.backspace();
+        assert_eq!(field.text(), "ab", "backspace at the start changes nothing");
+
+        field.move_end();
+        field.delete();
+        assert_eq!(field.text(), "ab", "delete at the end changes nothing");
+    }
+
+    #[test]
+    fn an_empty_group_tolerates_every_operation() {
+        let mut group = SecretFieldGroup::with_fields(0);
+
+        group.next_field();
+        group.prev_field();
+        group.toggle_show();
+        group.apply(|f| f.insert('x'));
+        group.reset_cursors();
+        group.clear();
+        assert_eq!(group.focused_index(), 0);
+        assert!(!group.show());
     }
 
     #[test]
@@ -468,5 +577,54 @@ mod tests {
             "the cell under the cursor is the next char"
         );
         assert_eq!(spans[1].style, ElementStyle::InvertedCursor.style());
+    }
+
+    #[test]
+    fn password_field_spans_prefix_the_padded_label() {
+        let field = typed("ab");
+        let spans = password_field_spans("Pass", &field, false, false);
+
+        assert_eq!(spans[0].content, "  Pass: ");
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "  Pass: **");
+    }
+
+    #[test]
+    fn a_focused_empty_masked_field_renders_a_cursor_space() {
+        let field = typed("");
+        let spans = secret_field_spans(&field, true, false);
+
+        assert_eq!(spans.len(), 1, "just the inverted cursor cell");
+        assert_eq!(spans[0].content, " ");
+        assert_eq!(spans[0].style, ElementStyle::InvertedCursor.style());
+    }
+
+    #[test]
+    fn a_cursor_at_the_end_of_masked_text_wraps_the_trailing_space() {
+        let field = typed("ab");
+        let spans = secret_field_spans(&field, true, false);
+
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "** ");
+        assert_eq!(spans.len(), 2, "mask before, cursor space after");
+        assert_eq!(spans[1].style, ElementStyle::InvertedCursor.style());
+    }
+
+    #[test]
+    fn a_focused_masked_multibyte_field_keeps_the_cursor_on_a_star() {
+        // `й` is two bytes, so the mask is two stars and the byte-offset cursor
+        // maps onto a mask cell instead of a plaintext byte.
+        let mut field = typed("й");
+        field.move_home();
+
+        let spans = secret_field_spans(&field, true, false);
+        assert_eq!(
+            spans[0].content, "*",
+            "the cursor cell is the first mask star"
+        );
+        assert_eq!(spans[0].style, ElementStyle::InvertedCursor.style());
+
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "**", "one star per byte");
     }
 }

@@ -34,7 +34,7 @@ impl ChangePasswordPrompt {
     /// A dialog with the three fields empty, the current one focused.
     pub fn new() -> Self {
         Self {
-            fields: SecretFieldGroup::with_fields(3),
+            fields: SecretFieldGroup::with_fields(LABELS.len()),
             error: None,
         }
     }
@@ -93,10 +93,10 @@ impl ChangePasswordPrompt {
         let mut lines: Vec<Line> = Vec::new();
         lines.push(Line::from(""));
 
-        for (index, label) in LABELS.iter().enumerate() {
+        for (index, (label, field)) in LABELS.iter().zip(self.fields.fields()).enumerate() {
             lines.push(Line::from(password_field_spans(
                 label,
-                self.fields.field(index),
+                field,
                 index == self.fields.focused_index(),
                 self.fields.show(),
             )));
