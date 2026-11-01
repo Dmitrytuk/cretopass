@@ -9,6 +9,7 @@
 /test_secrets
 /.tmp
 /config_dev/
+/.*
 
 # editors / OS
 .vscode
