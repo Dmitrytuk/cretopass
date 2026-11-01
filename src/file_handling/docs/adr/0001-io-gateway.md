@@ -58,7 +58,13 @@ site outside this module.
   `read_file()` and the age-header scan open the file with `O_NOFOLLOW`
   (Linux/macOS) and reject anything that is not a regular file, so a planted
   symlink is never followed. A vault kept *behind* a symlink is therefore
-  deliberately refused rather than followed.
+  deliberately refused rather than followed. This applies to the Home config
+  too: `read_file()` is how `vault/utils.rs` loads `config.pwd`, so a
+  dotfiles-style symlink there does not load: the config layer substitutes
+  defaults and writes them back at once, replacing the link with a regular
+  file. That consequence is intentional — one symlink policy for every
+  file-content read through the gateway — and is noted in
+  [0006](../../../vault/docs/adr/0006-vault-module.md).
 - Durability is stated per platform in
   [`atomic.rs`](../../atomic.rs): Linux/macOS `fsync` both the
   file and its directory; Windows cannot `fsync` a directory with `std`, so the

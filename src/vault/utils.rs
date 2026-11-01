@@ -212,8 +212,10 @@ pub fn save_config(config: &Configuration) -> Result<(), ConfigError> {
 
 /// Loads app configuration from the config directory.
 ///
-/// If the file does not exist, is corrupt, or has an incompatible format
-/// (e.g. from an older version), it is recreated with default values.
+/// If the file does not exist, cannot be opened (for example a symlinked
+/// `config.pwd`, which the gateway's symlink-safe read refuses and then
+/// replaces), is corrupt, or has an incompatible format (e.g. from an older
+/// version), it is recreated with default values.
 pub fn load_config() -> Configuration {
     load_config_from(&config_dir())
 }
@@ -309,6 +311,48 @@ mod tests {
         assert!(loaded.open_last_opened_file_on_startup);
 
         assert!(dir.path().join(CONFIG_FILE_NAME).exists());
+    }
+
+    /// A symlinked `config.pwd` is not followed: the gateway's `O_NOFOLLOW`
+    /// read refuses it, defaults are substituted, and the write-back replaces
+    /// the link with a regular file (see ADR 0001 / ADR 0006).
+    #[test]
+    #[cfg(unix)]
+    fn test_config_behind_a_symlink_is_refused_and_replaced() {
+        use std::os::unix::fs::symlink;
+
+        let dir = temp_config_dir();
+        let elsewhere = temp_config_dir();
+
+        // A real config with non-default content, reached through a symlink.
+        let target_config = Configuration {
+            recent_files: vec!["/secret/vault.age".to_string()],
+            ..Configuration::default()
+        };
+        save_config_to(elsewhere.path(), &target_config).unwrap();
+        let target = elsewhere.path().join(CONFIG_FILE_NAME);
+        let link = dir.path().join(CONFIG_FILE_NAME);
+        symlink(&target, &link).unwrap();
+
+        let loaded = load_config_from(dir.path());
+
+        // The symlinked content is not read: defaults come back instead.
+        assert!(
+            loaded.recent_files.is_empty(),
+            "a symlinked config must not load: {:?}",
+            loaded.recent_files
+        );
+        // The failed load writes defaults back over the link, replacing it.
+        assert!(
+            !std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the write-back must replace the symlink with a regular file"
+        );
+        // The original target is untouched.
+        let still = load_config_from(elsewhere.path());
+        assert_eq!(still.recent_files, vec!["/secret/vault.age".to_string()]);
     }
 
     #[test]

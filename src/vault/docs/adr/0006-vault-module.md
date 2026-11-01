@@ -63,6 +63,7 @@ launching the tree, so returning to home does not re-show the dialog.
 - Serialized with `rkyv` (zero-copy binary format). Different strategy from JSON+age used for vault data — config is local-only, never encrypted, never exported.
 - `Configuration` fields: `recent_files: Vec<String>`, `last_opened_file: Option<String>`, `display_full_path: bool`, `open_last_opened_file_on_startup: bool`, `palette_name: String` (active colour scheme, applied on startup; see [0019](../../../docs/adr/0019-runtime-colour-scheme-switching.md)).
 - Legacy migration: reads old `settings.pwd` format, writes config in new format.
+- The config is read and written through `file_handling`, so it inherits the gateway's symlink-refusing reads ([0001](../../../file_handling/docs/adr/0001-io-gateway.md)): a `config.pwd` kept behind a symlink (a dotfiles-manager pattern) does not load. `load_config_from` then substitutes defaults and writes them straight back, so — when that best-effort write-back succeeds — the link is replaced by a regular file and the settings are silently lost.
 
 ## Quirks & edge cases
 
