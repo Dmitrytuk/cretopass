@@ -5,6 +5,8 @@
 
 use std::borrow::Cow;
 
+use zeroize::Zeroizing;
+
 use super::HomeAction;
 use crate::cursor::{FieldEdit, SecretFieldGroup, secret_field_spans};
 use crate::theming::{Action, ElementStyle, texts};
@@ -44,9 +46,9 @@ impl UnlockPrompt {
         &self.file_data
     }
 
-    /// The typed master password.
-    pub fn typed(&self) -> String {
-        self.fields.field(0).text().to_string()
+    /// The typed master password, in a buffer that wipes itself when dropped.
+    pub fn typed(&self) -> Zeroizing<String> {
+        Zeroizing::new(self.fields.field(0).text().to_string())
     }
 
     /// Shows `message` and puts the cursor back at the start of the field,
@@ -148,7 +150,7 @@ mod tests {
             prompt.handle_key(key(KeyCode::Enter)),
             Some(HomeAction::Unlock)
         ));
-        assert_eq!(prompt.typed(), "secret");
+        assert_eq!(prompt.typed().as_str(), "secret");
     }
 
     #[test]
@@ -159,7 +161,7 @@ mod tests {
         }
         prompt.reject("wrong".to_string());
 
-        assert_eq!(prompt.typed(), "secret");
+        assert_eq!(prompt.typed().as_str(), "secret");
         assert_eq!(prompt.fields.field(0).cursor(), 0);
     }
 

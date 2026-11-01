@@ -5,6 +5,8 @@
 
 use std::borrow::Cow;
 
+use zeroize::Zeroizing;
+
 use super::HomeAction;
 use crate::cursor::{FieldEdit, PairVerdict, SecretFieldGroup, password_field_spans};
 use crate::theming::{Action, ElementStyle, texts};
@@ -14,6 +16,12 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
+
+/// The labels of the two fields, in focus order.
+const LABELS: [&str; 2] = [
+    texts::LABEL_PASSPHRASE_FIELD,
+    texts::LABEL_PASSPHRASE_CONFIRM,
+];
 
 /// The dialog that types the master password for a file that is about to exist.
 pub struct CreateSecretPrompt {
@@ -27,7 +35,7 @@ impl CreateSecretPrompt {
     pub fn new(file_path: String) -> Self {
         Self {
             file_path,
-            fields: SecretFieldGroup::with_fields(2),
+            fields: SecretFieldGroup::with_fields(LABELS.len()),
             error: None,
         }
     }
@@ -37,9 +45,9 @@ impl CreateSecretPrompt {
         &self.file_path
     }
 
-    /// The typed master password.
-    pub fn typed(&self) -> String {
-        self.fields.field(0).text().to_string()
+    /// The typed master password, in a buffer that wipes itself when dropped.
+    pub fn typed(&self) -> Zeroizing<String> {
+        Zeroizing::new(self.fields.field(0).text().to_string())
     }
 
     /// Shows `message`, puts every cursor back at the start and keeps the text and
@@ -70,14 +78,15 @@ impl CreateSecretPrompt {
     /// mismatched re-shows the dialog, anything else can be created.
     fn confirm(&mut self) -> Option<HomeAction> {
         match self.fields.pair_verdict() {
-            PairVerdict::Empty => Some(HomeAction::ConfirmNoPassphrase {
+            Some(PairVerdict::Empty) => Some(HomeAction::ConfirmNoPassphrase {
                 file_path: self.file_path.clone(),
             }),
-            PairVerdict::Mismatch => {
+            // `None` means the group is not a pair; rejecting is the safe fallback.
+            Some(PairVerdict::Mismatch) | None => {
                 self.reject(texts::MSG_PW_MISMATCH.to_string());
                 None
             }
-            PairVerdict::Match => Some(HomeAction::CreateSecret),
+            Some(PairVerdict::Match) => Some(HomeAction::CreateSecret),
         }
     }
 
@@ -98,16 +107,10 @@ impl CreateSecretPrompt {
         )));
         lines.push(Line::from(""));
 
-        for (index, label) in [
-            texts::LABEL_PASSPHRASE_FIELD,
-            texts::LABEL_PASSPHRASE_CONFIRM,
-        ]
-        .iter()
-        .enumerate()
-        {
+        for (index, (label, field)) in LABELS.iter().zip(self.fields.fields()).enumerate() {
             lines.push(Line::from(password_field_spans(
                 label,
-                self.fields.field(index),
+                field,
                 index == self.fields.focused_index(),
                 self.fields.show(),
             )));
@@ -167,7 +170,7 @@ mod tests {
             prompt.handle_key(key(KeyCode::Enter)),
             Some(HomeAction::CreateSecret)
         ));
-        assert_eq!(prompt.typed(), "pw");
+        assert_eq!(prompt.typed().as_str(), "pw");
     }
 
     #[test]

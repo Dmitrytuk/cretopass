@@ -841,12 +841,7 @@ impl Detail {
 
         let inner = block.inner(overlay_area);
         let lines = vec![
-            Line::from(cursor_field_spans(
-                texts::LABEL_NAME,
-                input,
-                input.len(),
-                true,
-            )),
+            Line::from(cursor_field_spans(texts::LABEL_NAME, input, input.len())),
             Line::from(""),
         ];
 
@@ -1159,7 +1154,7 @@ fn form_row_line(
 
     if is_focused && is_editing {
         let mut spans = vec![Span::raw(prefix.to_string())];
-        spans.extend(cursor_field_spans(label, text, cursor, true));
+        spans.extend(cursor_field_spans(label, text, cursor));
         return Line::from(spans);
     }
 
@@ -1328,7 +1323,6 @@ fn render_generate_password_overlay(frame: &mut Frame, area: Rect, modal: &Gener
             texts::LABEL_GENERATOR_LENGTH,
             &modal.length_input,
             modal.length_cursor,
-            true,
         ));
         lines.push(Line::from(spans));
     } else {

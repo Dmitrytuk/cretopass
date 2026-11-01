@@ -1,6 +1,6 @@
 //! The password pair a share bundle is encrypted with.
 //!
-//! Two masked fields over the shared [`cursor`] widget, with the same
+//! Two masked fields over the shared [`crate::cursor`] widget, with the same
 //! validation the create-secret prompt uses: an empty pair means a passwordless
 //! bundle (which the screen must confirm), a mismatched pair is rejected, and
 //! anything else is usable. The screen drives the keys and renders the fields;
@@ -117,12 +117,13 @@ impl Passphrase {
     /// corrected); anything else is [`PassphraseSubmit::Password`].
     pub fn submit(&mut self) -> PassphraseSubmit {
         match self.fields.pair_verdict() {
-            PairVerdict::Empty => PassphraseSubmit::Empty,
-            PairVerdict::Mismatch => {
+            Some(PairVerdict::Empty) => PassphraseSubmit::Empty,
+            // `None` means the group is not a pair; rejecting is the safe fallback.
+            Some(PairVerdict::Mismatch) | None => {
                 self.error = Some(texts::MSG_PW_MISMATCH.to_string());
                 PassphraseSubmit::Mismatch
             }
-            PairVerdict::Match => PassphraseSubmit::Password,
+            Some(PairVerdict::Match) => PassphraseSubmit::Password,
         }
     }
 }

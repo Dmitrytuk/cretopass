@@ -56,6 +56,8 @@ pub fn insert_char_at(text: &mut String, cursor: &mut usize, c: char) {
     *cursor = pos + c.len_utf8();
 }
 
+/// The style for a list row: the selection background when `is_selected`, the
+/// plain tree-row style otherwise.
 pub fn selected_style(is_selected: bool) -> Style {
     if is_selected {
         ElementStyle::ListRowSelected.style()
@@ -64,6 +66,8 @@ pub fn selected_style(is_selected: bool) -> Style {
     }
 }
 
+/// A list-row span: `text` prefixed by the selection arrow (or its pad) and
+/// styled by [`selected_style`].
 pub fn selected_span(text: &str, is_selected: bool) -> Span<'static> {
     let prefix = if is_selected {
         Icon::SelectionArrow.as_str()
@@ -73,47 +77,41 @@ pub fn selected_span(text: &str, is_selected: bool) -> Span<'static> {
     Span::styled(format!("{}{}", prefix, text), selected_style(is_selected))
 }
 
-pub fn cursor_field_spans(
-    label: &str,
-    text: &str,
-    cursor: usize,
-    is_active: bool,
-) -> Vec<Span<'static>> {
-    if !is_active {
-        return vec![
-            Span::styled(label.to_string(), ElementStyle::CursorLabel.style()),
-            Span::styled(text.to_string(), ElementStyle::CursorDimmed.style()),
-        ];
-    }
-
+/// Splits `text` at the byte offset `cursor` into the slice before the cursor,
+/// the character under it (if any), and the slice after it. The offset is
+/// clamped to the text length, so a cursor past the end yields an empty `after`
+/// and no character under the cursor.
+///
+/// The shared cursor-cell decomposition behind [`cursor_field_spans`] and
+/// [`crate::cursor::secret_field_spans`]; each caller applies its own styles.
+pub(crate) fn split_at_cursor(text: &str, cursor: usize) -> (&str, Option<char>, &str) {
     let pos = cursor.min(text.len());
     let (before, rest) = text.split_at(pos);
     let ch = rest.chars().next();
-    let after = &rest[ch.map(|c| c.len_utf8()).unwrap_or(0)..];
+    let after = &rest[ch.map_or(0, char::len_utf8)..];
+    (before, ch, after)
+}
 
-    let mut spans = vec![Span::styled(
+/// Spans for `text` prefixed by `label`, with the character under `cursor`
+/// rendered as an inverted cursor cell.
+pub fn cursor_field_spans(label: &str, text: &str, cursor: usize) -> Vec<Span<'static>> {
+    let (before, ch, after) = split_at_cursor(text, cursor);
+
+    let mut spans = Vec::with_capacity(4);
+    spans.push(Span::styled(
         label.to_string(),
         ElementStyle::CursorLabel.style(),
-    )];
+    ));
     if !before.is_empty() {
         spans.push(Span::styled(
             before.to_string(),
             ElementStyle::CursorNormalText.style(),
         ));
     }
-    match ch {
-        Some(c) => {
-            let mut s = String::new();
-            s.push(c);
-            spans.push(Span::styled(s, ElementStyle::InvertedCursor.style()));
-        }
-        None => {
-            spans.push(Span::styled(
-                " ".to_string(),
-                ElementStyle::InvertedCursor.style(),
-            ));
-        }
-    }
+    spans.push(Span::styled(
+        ch.map_or_else(|| " ".to_string(), |c| c.to_string()),
+        ElementStyle::InvertedCursor.style(),
+    ));
     if !after.is_empty() {
         spans.push(Span::styled(
             after.to_string(),
