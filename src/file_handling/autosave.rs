@@ -460,6 +460,43 @@ mod tests {
     }
 
     #[test]
+    fn a_consumed_snapshot_is_zeroized_after_the_write() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let wiped = std::sync::Arc::new(AtomicBool::new(false));
+        let at_save = std::sync::Arc::new(AtomicBool::new(true));
+        let save_flag = std::sync::Arc::clone(&wiped);
+        let observed = std::sync::Arc::clone(&at_save);
+        let save = move |_: &Spy| {
+            // The snapshot must still hold its plaintext while `save` runs.
+            observed.store(save_flag.load(Ordering::SeqCst), Ordering::SeqCst);
+            Ok(())
+        };
+
+        let (events_tx, events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(CancelToken::new(), save, move |event| {
+            let _ = events_tx.send(event);
+        })
+        .unwrap();
+
+        autosave.submit(Spy {
+            value: "written".to_string(),
+            zeroized: std::sync::Arc::clone(&wiped),
+        });
+
+        let event = events_rx.recv_timeout(TIMEOUT).unwrap();
+        assert!(event.result.is_ok());
+        assert!(
+            !at_save.load(Ordering::SeqCst),
+            "the snapshot must not be wiped before save runs"
+        );
+        assert!(
+            wiped.load(Ordering::SeqCst),
+            "the worker must wipe the snapshot after it wrote it"
+        );
+    }
+
+    #[test]
     fn submit_returns_increasing_generations() {
         let (events_tx, _events_rx) = mpsc::channel();
         let mut autosave = Autosave::spawn(
