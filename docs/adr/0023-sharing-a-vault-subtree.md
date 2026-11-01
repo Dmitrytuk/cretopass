@@ -21,7 +21,7 @@ A bundle is:
 
 `<stem>` is the source secret file's stem, plus the sanitised Node name when a
 single branch is shared (`vault_Work.cretopass`) — the same rule as
-`export::suggest_name` (`file_handling::share::suggest_name`).
+`export::suggest_export_name` (`file_handling::share::suggest_share_name`).
 
 Rules that follow from it:
 
@@ -34,7 +34,7 @@ Rules that follow from it:
   file, and the steps to open it; a protected bundle says the password travels
   over a separate channel, a passwordless one says no password is needed.
 - **One place knows the naming and the write.** `file_handling::share` owns
-  `suggest_name` (the folder name) and `share_tree` (the write). The bundle's
+  `suggest_share_name` (the folder name) and `share_tree` (the write). The bundle's
   file goes through the same atomic temp + fsync + rename path as a normal save
   (`save_tree`), so a crash mid-write never leaves a truncated bundle; the
   instruction is written after it, so a failure there still leaves an openable

@@ -16,7 +16,7 @@ and `FileBrowserMode::ExportFile { format }` is the mode that names the file.
 Rules that follow from it:
 
 - **One place knows the naming.** `file_handling::export` owns both rules:
-  `suggest_name` (the secret file's stem, the Node's sanitised name when a single
+  `suggest_export_name` (the secret file's stem, the Node's sanitised name when a single
   Node is exported, the format's extension) and `output_path` (same directory and
   stem, the format's extension). The browser and the writer both call them.
 - **The format still owns the extension.** `output_path` replaces whatever

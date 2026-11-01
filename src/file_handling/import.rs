@@ -1,50 +1,64 @@
-use std::path::Path;
+use std::io::Read;
 
 use crate::file_handling::FileHandlingError;
+use crate::file_handling::error::ImportSyntax;
+use crate::file_handling::file_process::MAX_FILE_SIZE;
+use crate::file_handling::format::Format;
 use crate::tree::node::{ExtraField, FieldType, Node, migrate_legacy_description};
 use uuid::Uuid;
 
-/// Maximum size (in bytes) of a file accepted for import.
-const MAX_IMPORT_SIZE: u64 = 50 * 1024 * 1024;
+/// The formats an imported document may use.
+pub type ImportFormat = Format;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ImportFormat {
-    Json,
-    Xml,
-    Csv,
+/// Builds a [`FileHandlingError::ImportSyntax`] from `reason`.
+fn syntax(reason: ImportSyntax) -> FileHandlingError {
+    FileHandlingError::ImportSyntax(reason)
 }
 
-impl ImportFormat {
-    pub fn from_path(path: &str) -> Option<Self> {
-        let ext = Path::new(path).extension()?.to_str()?.to_lowercase();
-        match ext.as_str() {
-            "json" => Some(ImportFormat::Json),
-            "xml" => Some(ImportFormat::Xml),
-            "csv" => Some(ImportFormat::Csv),
-            _ => None,
-        }
-    }
-}
-
+/// Reads `path` and builds a tree from it, choosing the parser by extension.
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::UnsupportedImportFormat`] for an extension
+/// this module cannot parse, [`FileHandlingError::FileTooLarge`] when the file
+/// exceeds the shared size cap, [`FileHandlingError::Io`] when it cannot be
+/// read, and a [`FileHandlingError::ImportSyntax`] (or
+/// [`FileHandlingError::CsvRowTooFewFields`]) when the document is malformed.
 pub fn import_tree(path: &str) -> Result<Node, FileHandlingError> {
-    let format = ImportFormat::from_path(path).ok_or_else(|| {
-        FileHandlingError::ImportError(format!("unsupported file extension: {path}"))
-    })?;
+    let format = ImportFormat::from_path(path)
+        .ok_or_else(|| FileHandlingError::UnsupportedImportFormat(path.to_string()))?;
 
-    let meta = std::fs::metadata(path).map_err(FileHandlingError::Io)?;
-    if meta.len() > MAX_IMPORT_SIZE {
+    let file = std::fs::File::open(path).map_err(FileHandlingError::Io)?;
+    let meta = file.metadata().map_err(FileHandlingError::Io)?;
+    if meta.len() > MAX_FILE_SIZE {
         return Err(FileHandlingError::FileTooLarge {
             size: meta.len(),
-            max: MAX_IMPORT_SIZE,
+            max: MAX_FILE_SIZE,
         });
     }
 
-    let data = std::fs::read_to_string(path).map_err(FileHandlingError::Io)?;
+    // Read through a bounded reader so a file that grows (or is swapped for a
+    // stream) between the metadata check and the read cannot exhaust memory.
+    // The cap is checked on the raw bytes before UTF-8 validation so an
+    // over-sized file is always reported as `FileTooLarge`.
+    let mut bytes = Vec::new();
+    file.take(MAX_FILE_SIZE + 1)
+        .read_to_end(&mut bytes)
+        .map_err(FileHandlingError::Io)?;
+    if bytes.len() as u64 > MAX_FILE_SIZE {
+        return Err(FileHandlingError::FileTooLarge {
+            size: bytes.len() as u64,
+            max: MAX_FILE_SIZE,
+        });
+    }
+    let data = String::from_utf8(bytes).map_err(|e| {
+        FileHandlingError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    })?;
 
     match format {
-        ImportFormat::Json => import_json(&data),
-        ImportFormat::Xml => import_xml(&data),
-        ImportFormat::Csv => import_csv(&data),
+        Format::Json => import_json(&data),
+        Format::Xml => import_xml(&data),
+        Format::Csv => import_csv(&data),
     }
 }
 
@@ -56,13 +70,17 @@ fn import_json(data: &str) -> Result<Node, FileHandlingError> {
 /// stack overflow from maliciously deep files.
 const MAX_XML_DEPTH: usize = 256;
 
+/// Maximum number of `>`-separated segments accepted in a CSV path,
+/// mirroring [`MAX_XML_DEPTH`] so both importers bound their tree depth.
+const MAX_CSV_PATH_DEPTH: usize = 256;
+
 fn import_xml(data: &str) -> Result<Node, FileHandlingError> {
     let trimmed = data.trim();
     // Skip XML declaration if present
     let body = if trimmed.starts_with("<?xml") {
         let end = trimmed
             .find("?>")
-            .ok_or_else(|| FileHandlingError::ImportError("unterminated XML declaration".into()))?;
+            .ok_or_else(|| syntax(ImportSyntax::UnterminatedXmlDeclaration))?;
         trimmed[end + 2..].trim()
     } else {
         trimmed
@@ -74,27 +92,25 @@ fn import_xml(data: &str) -> Result<Node, FileHandlingError> {
 
 fn parse_xml_node(input: &str, depth: usize) -> Result<(Node, &str), FileHandlingError> {
     if depth > MAX_XML_DEPTH {
-        return Err(FileHandlingError::ImportError(
-            "XML nesting too deep".into(),
-        ));
+        return Err(syntax(ImportSyntax::XmlNestingTooDeep));
     }
     let input = input.trim_start();
 
     if !input.starts_with("<node") {
-        return Err(FileHandlingError::ImportError("expected <node".into()));
+        return Err(syntax(ImportSyntax::ExpectedNodeStart));
     }
 
     let tag_end = input
         .find('>')
-        .ok_or_else(|| FileHandlingError::ImportError("expected > in <node".into()))?;
+        .ok_or_else(|| syntax(ImportSyntax::ExpectedNodeTagEnd))?;
     let attrs_str = &input[5..tag_end];
 
-    let attrs = extract_xml_attrs(attrs_str);
+    let attrs = extract_xml_attrs(attrs_str)?;
     let name = attrs
         .iter()
         .find(|(k, _)| k == "name")
         .map(|(_, v)| unescape_xml(v))
-        .ok_or_else(|| FileHandlingError::ImportError("missing name attribute".into()))?;
+        .ok_or_else(|| syntax(ImportSyntax::MissingNodeName))?;
     let description = attrs
         .iter()
         .find(|(k, _)| k == "description")
@@ -106,15 +122,13 @@ fn parse_xml_node(input: &str, depth: usize) -> Result<(Node, &str), FileHandlin
     let ef_open = "<extra_fields>";
     let ef_close = "</extra_fields>";
     if !remaining.starts_with(ef_open) {
-        return Err(FileHandlingError::ImportError(
-            "expected <extra_fields>".into(),
-        ));
+        return Err(syntax(ImportSyntax::ExpectedExtraFieldsStart));
     }
     remaining = &remaining[ef_open.len()..];
 
     let ef_end = remaining
         .find(ef_close)
-        .ok_or_else(|| FileHandlingError::ImportError("expected </extra_fields>".into()))?;
+        .ok_or_else(|| syntax(ImportSyntax::ExpectedExtraFieldsEnd))?;
     let ef_content = &remaining[..ef_end];
     remaining = &remaining[ef_end + ef_close.len()..];
 
@@ -142,7 +156,7 @@ fn parse_xml_node(input: &str, depth: usize) -> Result<(Node, &str), FileHandlin
 
     // Expect </node>
     if !remaining.starts_with("</node>") {
-        return Err(FileHandlingError::ImportError("expected </node>".into()));
+        return Err(syntax(ImportSyntax::ExpectedNodeEnd));
     }
     remaining = &remaining["</node>".len()..];
 
@@ -156,28 +170,34 @@ fn parse_xml_node(input: &str, depth: usize) -> Result<(Node, &str), FileHandlin
     Ok((node, remaining))
 }
 
-fn extract_xml_attrs(s: &str) -> Vec<(String, String)> {
+fn extract_xml_attrs(s: &str) -> Result<Vec<(String, String)>, FileHandlingError> {
     let mut attrs = Vec::new();
     let mut remaining = s.trim();
     while !remaining.is_empty() {
         remaining = remaining.trim_start();
-        let eq_pos = match remaining.find('=') {
-            Some(p) => p,
-            None => break,
-        };
-        let key = remaining[..eq_pos].trim().to_string();
-        remaining = &remaining[eq_pos + 1..];
-        remaining = remaining.trim_start();
-        if remaining.starts_with('"') {
-            remaining = &remaining[1..];
-            if let Some(end) = remaining.find('"') {
-                let value = remaining[..end].to_string();
-                attrs.push((key, value));
-                remaining = &remaining[end + 1..];
-            }
+        if remaining.is_empty() {
+            break;
         }
+        // A self-closing tag leaves a lone `/` after the last attribute.
+        if let Some(rest) = remaining.strip_prefix('/') {
+            remaining = rest;
+            continue;
+        }
+        let eq_pos = remaining
+            .find('=')
+            .ok_or_else(|| syntax(ImportSyntax::MalformedAttribute))?;
+        let key = remaining[..eq_pos].trim().to_string();
+        remaining = remaining[eq_pos + 1..].trim_start();
+        let after_quote = remaining
+            .strip_prefix('"')
+            .ok_or_else(|| syntax(ImportSyntax::MalformedAttribute))?;
+        let end = after_quote
+            .find('"')
+            .ok_or_else(|| syntax(ImportSyntax::MalformedAttribute))?;
+        attrs.push((key, after_quote[..end].to_string()));
+        remaining = &after_quote[end + 1..];
     }
-    attrs
+    Ok(attrs)
 }
 
 fn parse_xml_fields(input: &str) -> Result<Vec<ExtraField>, FileHandlingError> {
@@ -189,27 +209,27 @@ fn parse_xml_fields(input: &str) -> Result<Vec<ExtraField>, FileHandlingError> {
             break;
         }
         if !remaining.starts_with("<field") {
-            return Err(FileHandlingError::ImportError("expected <field".into()));
+            return Err(syntax(ImportSyntax::ExpectedFieldStart));
         }
         remaining = &remaining["<field".len()..];
 
         let tag_end = remaining
             .find('>')
-            .ok_or_else(|| FileHandlingError::ImportError("expected > in <field".into()))?;
+            .ok_or_else(|| syntax(ImportSyntax::ExpectedFieldTagEnd))?;
         let attrs_str = &remaining[..tag_end];
         remaining = &remaining[tag_end + 1..];
 
-        let attrs = extract_xml_attrs(attrs_str);
+        let attrs = extract_xml_attrs(attrs_str)?;
         let ft_str = attrs
             .iter()
             .find(|(k, _)| k == "type")
             .map(|(_, v)| v.as_str())
-            .ok_or_else(|| FileHandlingError::ImportError("missing type in <field>".into()))?;
+            .ok_or_else(|| syntax(ImportSyntax::MissingFieldType))?;
         let value = attrs
             .iter()
             .find(|(k, _)| k == "value")
             .map(|(_, v)| unescape_xml(v))
-            .ok_or_else(|| FileHandlingError::ImportError("missing value in <field>".into()))?;
+            .ok_or_else(|| syntax(ImportSyntax::MissingFieldValue))?;
 
         let field_type = FieldType::from_wire_label(ft_str);
 
@@ -218,12 +238,47 @@ fn parse_xml_fields(input: &str) -> Result<Vec<ExtraField>, FileHandlingError> {
     Ok(fields)
 }
 
+/// Decodes the five predefined XML entities in a single pass.
+///
+/// A single pass is essential: replacing the entities one after another would
+/// decode `&amp;lt;` — the correct escape of a literal `&lt;` — twice, turning
+/// it into `<`. An unknown entity is left verbatim.
 fn unescape_xml(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(idx) = rest.find('&') {
+        out.push_str(&rest[..idx]);
+        let tail = &rest[idx..];
+        match decode_entity(tail) {
+            Some((decoded, consumed)) => {
+                out.push(decoded);
+                rest = &tail[consumed..];
+            }
+            None => {
+                out.push('&');
+                rest = &tail[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Decodes the entity at the start of `s`, returning it and the number of
+/// bytes consumed.
+fn decode_entity(s: &str) -> Option<(char, usize)> {
+    for (name, decoded) in [
+        ("&amp;", '&'),
+        ("&lt;", '<'),
+        ("&gt;", '>'),
+        ("&quot;", '"'),
+        ("&apos;", '\''),
+    ] {
+        if s.starts_with(name) {
+            return Some((decoded, name.len()));
+        }
+    }
+    None
 }
 
 #[derive(Default)]
@@ -235,10 +290,9 @@ struct PathData {
 
 /// Maps a CSV header to the column indices of the fields we understand.
 ///
-/// Both the legacy layout (`path,name,description,field_type,field_value`) and
-/// the current one (`path,name,field_type,field_value`) are accepted; the
-/// legacy `description` column, when present and non-empty, is migrated into a
-/// Description extra field.
+/// Columns are located by name, so a reordered or quoted header is understood.
+/// `path` and `name` are required; the legacy `description` column and the
+/// `field_type`/`field_value` pair are optional.
 struct CsvColumns {
     path: usize,
     name: usize,
@@ -248,51 +302,37 @@ struct CsvColumns {
 }
 
 impl CsvColumns {
-    /// Default positional layout used when the file has no recognisable header.
-    fn positional(header: &[String]) -> Self {
-        if let Some(desc) = header.iter().position(|c| c == "description") {
-            let field_type = header.iter().position(|c| c == "field_type");
-            let field_value = header.iter().position(|c| c == "field_value");
-            Self {
-                path: header.iter().position(|c| c == "path").unwrap_or(0),
-                name: header.iter().position(|c| c == "name").unwrap_or(1),
-                description: Some(desc),
-                field_type,
-                field_value,
-            }
-        } else {
-            Self {
-                path: 0,
-                name: 1,
-                description: None,
-                field_type: Some(2),
-                field_value: Some(3),
-            }
-        }
+    /// Locates the columns by header name.
+    ///
+    /// Both the legacy layout (`path,name,description,field_type,field_value`)
+    /// and the current one (`path,name,field_type,field_value`) are accepted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ImportSyntax::MissingCsvHeader`] when the header has no `path`
+    /// or `name` column, i.e. the first record is not a recognisable header.
+    fn from_header(header: &[String]) -> Result<Self, FileHandlingError> {
+        let find = |column: &str| header.iter().position(|c| c.trim() == column);
+        Ok(Self {
+            path: find("path").ok_or_else(|| syntax(ImportSyntax::MissingCsvHeader))?,
+            name: find("name").ok_or_else(|| syntax(ImportSyntax::MissingCsvHeader))?,
+            description: find("description"),
+            field_type: find("field_type"),
+            field_value: find("field_value"),
+        })
     }
 }
 
 fn import_csv(data: &str) -> Result<Node, FileHandlingError> {
-    let mut lines: Vec<&str> = data.lines().collect();
-    if lines.is_empty() {
-        return Err(FileHandlingError::ImportError("empty CSV file".into()));
+    let mut records = parse_csv_records(data);
+    if records.is_empty() {
+        return Err(syntax(ImportSyntax::EmptyCsv));
     }
 
-    // Parse the header to locate columns (tolerate a trailing CR).
-    let header_line = lines[0].trim_end_matches('\r').trim();
-    if !header_line.starts_with("path,") {
-        return Err(FileHandlingError::ImportError(
-            "CSV file is missing its header row".into(),
-        ));
-    }
-    let header = parse_csv_line(header_line);
-    let cols = CsvColumns::positional(&header);
-    lines.remove(0);
-
-    if lines.is_empty() {
-        return Err(FileHandlingError::ImportError(
-            "CSV file has no data rows".into(),
-        ));
+    let (_, header) = records.remove(0);
+    let cols = CsvColumns::from_header(&header)?;
+    if records.is_empty() {
+        return Err(syntax(ImportSyntax::NoCsvDataRows));
     }
 
     let get = |fields: &[String], idx: Option<usize>| -> Option<String> {
@@ -302,23 +342,18 @@ fn import_csv(data: &str) -> Result<Node, FileHandlingError> {
     // Group by path: collect all extra fields per path
     // Use a map to track insertion order
     let mut path_map: Vec<(String, PathData)> = Vec::new();
-    for line in &lines {
-        // Strip a trailing CR left by CRLF line endings.
-        let trimmed = line.trim_end_matches('\r').trim();
-        if trimmed.is_empty() {
+    for (line, fields) in &records {
+        if fields.iter().all(|field| field.trim().is_empty()) {
             continue;
         }
-        let fields = parse_csv_line(trimmed);
         if fields.len() <= cols.path || fields.len() <= cols.name {
-            return Err(FileHandlingError::ImportError(format!(
-                "CSV row has too few fields: {trimmed}"
-            )));
+            return Err(FileHandlingError::CsvRowTooFewFields { line: *line });
         }
         let path = fields[cols.path].clone();
         let name = fields[cols.name].clone();
-        let description = get(&fields, cols.description).filter(|d| !d.is_empty());
-        let field_type = get(&fields, cols.field_type).filter(|ft| !ft.is_empty());
-        let field_value = get(&fields, cols.field_value).unwrap_or_default();
+        let description = get(fields, cols.description).filter(|d| !d.is_empty());
+        let field_type = get(fields, cols.field_type).filter(|ft| !ft.is_empty());
+        let field_value = get(fields, cols.field_value).unwrap_or_default();
 
         if let Some((_, data)) = path_map.iter_mut().find(|(p, _)| *p == path) {
             if let Some(ft) = field_type {
@@ -376,6 +411,9 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
 
     for (path_str, data) in path_map {
         let segments: Vec<&str> = path_str.split(" > ").collect();
+        if segments.len() > MAX_CSV_PATH_DEPTH {
+            return Err(syntax(ImportSyntax::CsvPathTooDeep));
+        }
         let mut idx_path: Vec<usize> = Vec::new();
 
         for (seg_idx, seg) in segments.iter().enumerate() {
@@ -427,7 +465,7 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
     }
 
     if roots.is_empty() {
-        return Err(FileHandlingError::ImportError("no data to import".into()));
+        return Err(syntax(ImportSyntax::NoTree));
     }
 
     if roots.len() == 1 {
@@ -443,37 +481,74 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
     }
 }
 
-fn parse_csv_line(line: &str) -> Vec<String> {
-    let mut fields = Vec::new();
+/// Splits CSV `data` into records, honouring quoted fields that may span
+/// multiple physical lines and `""`-escaped quotes.
+///
+/// Each record is paired with the 1-based physical line it starts on, so a
+/// parse error can be reported by position without echoing any value.
+fn parse_csv_records(data: &str) -> Vec<(usize, Vec<String>)> {
+    let mut records = Vec::new();
+    let mut fields: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut in_quotes = false;
-    let mut chars = line.chars();
+    let mut line = 1usize;
+    let mut record_line = 1usize;
+    let mut chars = data.chars().peekable();
 
     while let Some(c) = chars.next() {
         match c {
             '"' if !in_quotes => in_quotes = true,
             '"' if in_quotes => {
-                // Check for escaped quote ""
-                if let Some(next) = chars.clone().next() {
-                    if next == '"' {
-                        chars.next();
-                        current.push('"');
-                    } else {
-                        in_quotes = false;
-                    }
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    current.push('"');
                 } else {
                     in_quotes = false;
                 }
             }
-            ',' if !in_quotes => {
-                fields.push(current.clone());
-                current.clear();
+            ',' if !in_quotes => fields.push(std::mem::take(&mut current)),
+            '\n' if !in_quotes => {
+                fields.push(std::mem::take(&mut current));
+                records.push((record_line, std::mem::take(&mut fields)));
+                line += 1;
+                record_line = line;
+            }
+            '\r' if !in_quotes => {
+                // A CRLF pair terminates one record: consume the LF here so it
+                // does not start an empty record of its own.
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                fields.push(std::mem::take(&mut current));
+                records.push((record_line, std::mem::take(&mut fields)));
+                line += 1;
+                record_line = line;
+            }
+            '\n' => {
+                // A newline inside a quoted field is data.
+                current.push('\n');
+                line += 1;
             }
             _ => current.push(c),
         }
     }
-    fields.push(current);
-    fields
+
+    if !current.is_empty() || !fields.is_empty() {
+        fields.push(current);
+        records.push((record_line, fields));
+    }
+
+    records
+}
+
+/// Parses a single CSV line into its fields. Used for headers and tests.
+#[cfg(test)]
+fn parse_csv_line(line: &str) -> Vec<String> {
+    parse_csv_records(line)
+        .into_iter()
+        .next()
+        .map(|(_, fields)| fields)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -652,6 +727,15 @@ mod tests {
     }
 
     #[test]
+    fn a_header_only_csv_is_rejected_as_having_no_rows() {
+        let error = import_csv("path,name,field_type,field_value").unwrap_err();
+        assert!(matches!(
+            error,
+            FileHandlingError::ImportSyntax(ImportSyntax::NoCsvDataRows)
+        ));
+    }
+
+    #[test]
     fn test_import_xml_escaped_chars() {
         let xml = r#"<?xml version="1.0"?>
 <node name="A &amp; B" description="x &lt; y">
@@ -715,12 +799,32 @@ mod tests {
 
     #[test]
     fn test_extract_xml_attrs() {
-        let attrs = extract_xml_attrs(r#"name="Root" description="hello world""#);
+        let attrs = extract_xml_attrs(r#"name="Root" description="hello world""#).unwrap();
         assert_eq!(attrs.len(), 2);
         assert_eq!(attrs[0].0, "name");
         assert_eq!(attrs[0].1, "Root");
         assert_eq!(attrs[1].0, "description");
         assert_eq!(attrs[1].1, "hello world");
+    }
+
+    #[test]
+    fn an_attribute_without_a_value_is_rejected() {
+        assert!(matches!(
+            extract_xml_attrs(r#"name="Root" broken"#),
+            Err(FileHandlingError::ImportSyntax(
+                crate::file_handling::error::ImportSyntax::MalformedAttribute
+            ))
+        ));
+    }
+
+    #[test]
+    fn an_attribute_with_an_unterminated_quote_is_rejected() {
+        assert!(matches!(
+            extract_xml_attrs(r#"name="Root"#),
+            Err(FileHandlingError::ImportSyntax(
+                crate::file_handling::error::ImportSyntax::MalformedAttribute
+            ))
+        ));
     }
 
     #[test]
@@ -985,7 +1089,160 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            FileHandlingError::ImportError(_)
+            FileHandlingError::UnsupportedImportFormat(_)
+        ));
+    }
+
+    // ── Round-trip and hardening tests ──
+
+    #[test]
+    fn unescape_decodes_each_entity_exactly_once() {
+        // `&amp;lt;` is the correct escape of a literal `&lt;`: decoding the
+        // entities sequentially would turn it into `<`.
+        assert_eq!(unescape_xml("&amp;lt;"), "&lt;");
+        assert_eq!(unescape_xml("&amp;amp;"), "&amp;");
+        assert_eq!(unescape_xml("&amp;"), "&");
+        assert_eq!(unescape_xml("a &lt; b &amp; c &gt; d"), "a < b & c > d");
+        // An unknown entity is preserved verbatim.
+        assert_eq!(unescape_xml("&nbsp;"), "&nbsp;");
+    }
+
+    #[test]
+    fn xml_roundtrip_preserves_a_literal_entity() {
+        let mut original = Node::new("Root");
+        original.extra_fields = vec![ExtraField {
+            field_type: FieldType::Custom("Note".to_string()),
+            value: "literal &lt; tag &amp; more".to_string(),
+        }];
+
+        let imported = roundtrip_node(&original);
+
+        assert_nodes_match(&original, &imported);
+        assert_eq!(
+            imported.extra_fields[0].value,
+            "literal &lt; tag &amp; more"
+        );
+    }
+
+    #[test]
+    fn csv_roundtrip_preserves_an_embedded_newline() {
+        let mut child = Node::new("Entry");
+        child.extra_fields = vec![ExtraField {
+            field_type: FieldType::Password,
+            value: "first line\nsecond line".to_string(),
+        }];
+        let original = Node::with_children("Root", vec![child]);
+
+        let csv_path = format!("/tmp/roundtrip_csv_nl_{}.csv", uuid::Uuid::new_v4());
+        export_tree(&original, &csv_path, ExportFormat::Csv).unwrap();
+        let imported = import_tree(&csv_path).unwrap();
+        let _ = std::fs::remove_file(&csv_path);
+
+        assert_nodes_match(&original, &imported);
+        assert_eq!(
+            imported.children[0].extra_fields[0].value,
+            "first line\nsecond line"
+        );
+    }
+
+    #[test]
+    fn csv_roundtrip_preserves_a_bare_carriage_return() {
+        let mut child = Node::new("Entry");
+        child.extra_fields = vec![ExtraField {
+            field_type: FieldType::Password,
+            value: "before\rafter".to_string(),
+        }];
+        let original = Node::with_children("Root", vec![child]);
+
+        let csv_path = format!("/tmp/roundtrip_csv_cr_{}.csv", uuid::Uuid::new_v4());
+        export_tree(&original, &csv_path, ExportFormat::Csv).unwrap();
+        let imported = import_tree(&csv_path).unwrap();
+        let _ = std::fs::remove_file(&csv_path);
+
+        assert_nodes_match(&original, &imported);
+        assert_eq!(imported.children[0].extra_fields[0].value, "before\rafter");
+    }
+
+    #[test]
+    fn import_csv_accepts_a_reordered_and_quoted_header() {
+        let data = "\"name\",\"path\",\"field_value\",\"field_type\"\n\
+                    Root,Root,val,Login";
+        let node = import_csv(data).unwrap();
+
+        assert_eq!(node.name, "Root");
+        assert_eq!(node.extra_fields[0].value, "val");
+        assert_eq!(node.extra_fields[0].field_type.label(), "Login");
+    }
+
+    #[test]
+    fn a_short_csv_row_is_reported_by_line_without_its_contents() {
+        let data = "path,name,field_type,field_value\n\
+                    Root,Root,Login,user\n\
+                    onlypath";
+        let error = import_csv(data).unwrap_err();
+
+        assert!(matches!(
+            error,
+            FileHandlingError::CsvRowTooFewFields { line: 3 }
+        ));
+        // The row's contents (a decrypted password) must never be echoed.
+        assert!(!error.to_string().contains("onlypath"));
+        assert_eq!(error.to_string(), "import: CSV row 3 has too few fields");
+    }
+
+    fn nested_xml(depth: usize) -> String {
+        let mut xml = String::from("<?xml version=\"1.0\"?>\n");
+        for i in 0..depth.saturating_sub(1) {
+            xml.push_str(&format!(
+                "<node name=\"n{i}\"><extra_fields></extra_fields><children>"
+            ));
+        }
+        xml.push_str("<node name=\"leaf\"><extra_fields></extra_fields></node>");
+        for _ in 0..depth.saturating_sub(1) {
+            xml.push_str("</children></node>");
+        }
+        xml
+    }
+
+    #[test]
+    fn xml_nesting_beyond_the_limit_is_rejected() {
+        assert!(import_xml(&nested_xml(10)).is_ok());
+
+        let error = import_xml(&nested_xml(MAX_XML_DEPTH + 5)).unwrap_err();
+        assert!(matches!(
+            error,
+            FileHandlingError::ImportSyntax(ImportSyntax::XmlNestingTooDeep)
+        ));
+    }
+
+    #[test]
+    fn a_csv_path_beyond_the_limit_is_rejected() {
+        let deep_path = (0..MAX_CSV_PATH_DEPTH + 5)
+            .map(|i| format!("s{i}"))
+            .collect::<Vec<_>>()
+            .join(" > ");
+        let data = format!("path,name,field_type,field_value\n{deep_path},Leaf,,");
+
+        let error = import_csv(&data).unwrap_err();
+        assert!(matches!(
+            error,
+            FileHandlingError::ImportSyntax(ImportSyntax::CsvPathTooDeep)
+        ));
+    }
+
+    #[test]
+    fn import_tree_enforces_the_size_cap() {
+        let path = format!("/tmp/import_too_large_{}.json", uuid::Uuid::new_v4());
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(MAX_FILE_SIZE + 1).unwrap();
+        drop(file);
+
+        let result = import_tree(&path);
+        let _ = std::fs::remove_file(&path);
+
+        assert!(matches!(
+            result,
+            Err(FileHandlingError::FileTooLarge { .. })
         ));
     }
 }

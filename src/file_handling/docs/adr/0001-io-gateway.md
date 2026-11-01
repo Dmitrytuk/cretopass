@@ -20,7 +20,7 @@ audit I/O patterns.
 | `error.rs` | `FileHandlingError` enum (+ `crypt::CryptError` for typed encryption/decryption failures) wrapping Io / Serde / typed crypt errors + domain errors |
 | `export.rs` | `ExportFormat` (JSON/XML/CSV), recursive XML serialization, flattened CSV export |
 | `import.rs` | `ImportFormat` detection, JSON/XML/CSV import with custom parsers, `build_tree_from_paths()` |
-| `share.rs` | `suggest_name` (the bundle-folder name) and `share_tree`: writes a share bundle — a re-encrypted secret file via `save_tree`, then a `HOW-TO-OPEN.txt` instruction ([0023](../../../../docs/adr/0023-sharing-a-vault-subtree.md)) |
+| `share.rs` | `suggest_share_name` (the bundle-folder name) and `share_tree`: writes a share bundle — a re-encrypted secret file via `save_tree`, then a `HOW-TO-OPEN.txt` instruction ([0023](../../../../docs/adr/0023-sharing-a-vault-subtree.md)) |
 
 ## Contracts
 

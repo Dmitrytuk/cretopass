@@ -35,9 +35,9 @@ const SUGGEST_FALLBACK: &str = "secrets";
 /// stem, plus the sanitised Node name when a single branch is shared.
 ///
 /// Every character in `node_name` that is not alphanumeric or `-`/`_` becomes
-/// `_` (the same rule as [`crate::file_handling::export::suggest_name`]), so the
+/// `_` (the same rule as [`crate::file_handling::export::suggest_export_name`]), so the
 /// suggestion is always a usable folder name.
-pub fn suggest_name(base_path: Option<&Path>, node_name: Option<&str>) -> String {
+pub fn suggest_share_name(base_path: Option<&Path>, node_name: Option<&str>) -> String {
     let stem = base_path
         .and_then(Path::file_stem)
         .and_then(OsStr::to_str)
@@ -53,7 +53,7 @@ pub fn suggest_name(base_path: Option<&Path>, node_name: Option<&str>) -> String
 ///
 /// The bundle holds `<stem>.<SHARE_FILE_EXT>` — `node` re-encrypted under
 /// `passphrase` — and [`SHARE_README_NAME`], where `<stem>` is
-/// [`suggest_name`]`(base_path, node_name)`. The secret file is written first
+/// [`suggest_share_name`]`(base_path, node_name)`. The secret file is written first
 /// (atomically); the instruction is written after it, so a failure there still
 /// leaves an openable vault. An empty `passphrase` produces a passwordless
 /// bundle whose instruction says so.
@@ -64,8 +64,8 @@ pub fn suggest_name(base_path: Option<&Path>, node_name: Option<&str>) -> String
 ///
 /// # Errors
 ///
-/// Returns [`FileHandlingError::ShareError`] when `dest_dir` exists as a file
-/// (in particular a secret file) instead of a folder. Returns
+/// Returns [`FileHandlingError::ShareDestinationNotAFolder`] when `dest_dir`
+/// exists as a file (in particular a secret file) instead of a folder. Returns
 /// [`FileHandlingError::Io`] when the folder, the secret file or the instruction
 /// cannot be written.
 pub fn share_tree(
@@ -76,15 +76,17 @@ pub fn share_tree(
     passphrase: &[u8],
 ) -> Result<PathBuf, FileHandlingError> {
     if dest_dir.exists() && !dest_dir.is_dir() {
-        return Err(FileHandlingError::ShareError(format!(
-            "refusing to share into {}: not a folder",
-            dest_dir.display()
-        )));
+        return Err(FileHandlingError::ShareDestinationNotAFolder {
+            path: dest_dir.display().to_string(),
+        });
     }
 
     create_dir(dest_dir)?;
 
-    let file_name = format!("{}.{SHARE_FILE_EXT}", suggest_name(base_path, node_name));
+    let file_name = format!(
+        "{}.{SHARE_FILE_EXT}",
+        suggest_share_name(base_path, node_name)
+    );
     let file_path = dest_dir.join(&file_name);
     save_tree(node, &file_path.to_string_lossy(), passphrase)?;
 
@@ -161,25 +163,25 @@ mod tests {
     }
 
     #[test]
-    fn suggest_name_uses_the_secret_file_stem() {
+    fn suggest_share_name_uses_the_secret_file_stem() {
         assert_eq!(
-            suggest_name(Some(Path::new("/tmp/vault.age")), None),
+            suggest_share_name(Some(Path::new("/tmp/vault.age")), None),
             "vault"
         );
     }
 
     #[test]
-    fn suggest_name_appends_a_sanitised_node_name() {
+    fn suggest_share_name_appends_a_sanitised_node_name() {
         assert_eq!(
-            suggest_name(Some(Path::new("/tmp/vault.age")), Some("My Email/Work")),
+            suggest_share_name(Some(Path::new("/tmp/vault.age")), Some("My Email/Work")),
             "vault_My_Email_Work"
         );
     }
 
     #[test]
-    fn suggest_name_falls_back_without_a_secret_file() {
-        assert_eq!(suggest_name(None, None), "secrets");
-        assert_eq!(suggest_name(None, Some("Login")), "secrets_Login");
+    fn suggest_share_name_falls_back_without_a_secret_file() {
+        assert_eq!(suggest_share_name(None, None), "secrets");
+        assert_eq!(suggest_share_name(None, Some("Login")), "secrets_Login");
     }
 
     #[test]
@@ -251,7 +253,10 @@ mod tests {
 
         let result = share_tree(&sample_node(), &target, None, None, b"pw");
 
-        assert!(matches!(result, Err(FileHandlingError::ShareError(_))));
+        assert!(matches!(
+            result,
+            Err(FileHandlingError::ShareDestinationNotAFolder { .. })
+        ));
         // The vault it refused to clobber is untouched.
         let data = std::fs::read(&target).unwrap();
         assert!(decrypt_to_node(&data, "pw").is_ok());
@@ -265,7 +270,10 @@ mod tests {
 
         let result = share_tree(&sample_node(), &target, None, None, b"pw");
 
-        assert!(matches!(result, Err(FileHandlingError::ShareError(_))));
+        assert!(matches!(
+            result,
+            Err(FileHandlingError::ShareDestinationNotAFolder { .. })
+        ));
         assert_eq!(std::fs::read(&target).unwrap(), b"hello");
     }
 

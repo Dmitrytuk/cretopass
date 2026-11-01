@@ -3,6 +3,7 @@ pub mod disks;
 pub mod error;
 pub mod export;
 pub mod file_process;
+pub mod format;
 pub mod import;
 pub mod share;
 

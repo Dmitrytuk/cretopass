@@ -7,7 +7,9 @@ use crate::file_handling::FileHandlingError;
 use crate::theming::texts;
 use crate::tree::node::Node;
 
-const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024;
+/// The maximum size (in bytes) of a vault or import the gateway will read.
+pub(crate) const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024;
+/// The age file-format magic header every encrypted vault begins with.
 const AGE_MAGIC: &[u8; 11] = b"age-encrypt";
 
 /// A single entry in a directory listing.
