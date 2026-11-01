@@ -111,6 +111,30 @@ the module's callers, not its siblings' own imports.
 
 For file_browser keybindings see [ADR 0007 — file_browser](../../file_browser/docs/adr/0007-file-browser.md).
 
+## Testing the write path
+
+`atomic.rs` is a thin wrapper over the write primitives (`TempFile` create /
+`write` / `fsync` / `rename`, or the `link` + `unlink` fallback where a
+no-clobber rename is unavailable) plus the symlink-refusing `open_for_read`.
+It is tested against a real `tempfile::tempdir()` by design: the value of the
+tests is that they exercise the kernel's actual behaviour (an exclusive random
+temp name, a preserved mode, a symlink that is not followed, a no-clobber
+rename), which a mock would not prove. **No filesystem seam is introduced.**
+
+The consequence is deliberate and accepted: the failure branches that need a
+hostile filesystem — `EACCES`, `EIO`, an `fsync` failure, and the mid-write
+`WriteError::Io` path in the atomic write primitive (the shared code behind
+`save_tree`, `create_secret_file`, `write_file` and the exports) — cannot be
+injected and are therefore not unit-tested. The classified failures that *can*
+be produced with a real filesystem are covered: an occupied target
+(`AlreadyExists`, an existing file), a missing directory (`NotWritable`), and a
+cancelled write (`Abandoned`). Where injection *is* needed, it already exists
+one level up: `Autosave` takes its save as a `Fn` closure, so the worker's
+scheduling, cancellation and zeroization can be driven with a stub write
+without touching `atomic.rs`. If a future change makes a syscall failure branch
+load-bearing, revisit this decision and add a narrow `trait WriteTarget` at
+that point rather than pre-emptively.
+
 ## Dependencies
 
 - `age` 0.11 — encryption
