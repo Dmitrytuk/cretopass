@@ -95,7 +95,7 @@ pub fn export_tree(
 
     // Write the plaintext export atomically, at owner-only permissions: it
     // holds decrypted secrets, so it must not be world-readable.
-    super::file_process::write_atomic_private(&out_path, data.as_bytes())?;
+    super::atomic::write_atomic_private(&out_path, data.as_bytes())?;
 
     Ok(out_path.to_string_lossy().to_string())
 }

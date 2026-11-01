@@ -34,7 +34,7 @@ pub(super) fn message(error: &FileHandlingError) -> String {
             format!("{}{error}", texts::MSG_SAVE_FAILED)
         }
         FileHandlingError::PathNotWritable(_) => texts::MSG_CANNOT_WRITE.to_string(),
-        // `create_secret_file` claims its target with `O_EXCL`, so a lost race
+        // `create_secret_file` finishes with a no-clobber rename, so a lost race
         // surfaces here instead of the caller-side `Path::exists()` check.
         FileHandlingError::Io(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             texts::MSG_FILE_EXISTS.to_string()

@@ -1,6 +1,7 @@
 use std::io::Read;
 
 use super::FileHandlingError;
+use super::atomic;
 use super::error::ImportSyntax;
 use super::file_process::MAX_FILE_SIZE;
 use super::format::Format;
@@ -28,7 +29,7 @@ pub fn import_tree(path: &str) -> Result<Node, FileHandlingError> {
     let format = ImportFormat::from_path(path)
         .ok_or_else(|| FileHandlingError::UnsupportedImportFormat(path.to_string()))?;
 
-    let file = std::fs::File::open(path).map_err(FileHandlingError::Io)?;
+    let file = atomic::open_for_read(std::path::Path::new(path))?;
     let meta = file.metadata().map_err(FileHandlingError::Io)?;
     if meta.len() > MAX_FILE_SIZE {
         return Err(FileHandlingError::FileTooLarge {

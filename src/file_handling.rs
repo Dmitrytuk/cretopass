@@ -8,6 +8,7 @@
 //! without touching call sites. The contract is documented in
 //! `src/file_handling/docs/adr/0001-io-gateway.md` (ADR 0001).
 
+pub(crate) mod atomic;
 pub(crate) mod autosave;
 pub(crate) mod disks;
 pub(crate) mod error;

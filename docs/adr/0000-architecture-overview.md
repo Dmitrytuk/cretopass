@@ -9,7 +9,7 @@ snapshot back to an age-encrypted JSON file.
 
 | Module | ADR | Role |
 |--------|-----|------|
-| `file_handling` | [0001](../src/file_handling/docs/adr/0001-io-gateway.md) | I/O gateway — the single vault/document I/O boundary (CLI install/config manage their own artifacts); background autosave worker ([0010](0010-async-tree-autosave.md)) |
+| `file_handling` | [0001](../src/file_handling/docs/adr/0001-io-gateway.md) | I/O gateway — the single vault/document I/O boundary (only the CLI lifecycle commands manage their own install artifacts); background autosave worker ([0010](0010-async-tree-autosave.md)) |
 | `crypt` | [0002](../src/crypt/docs/adr/0002-crypt.md) | age-based encryption/decryption |
 | `cursor` | [0003](../src/cursor/docs/adr/0003-cursor.md) | UTF-8 byte-offset cursor editing + TUI span helpers, including the masked password fields (`SecretField`/`SecretFieldGroup`) |
 | `theming` | [0004](../src/theming/docs/adr/0004-theming.md) | Centralized keybindings, styles, icons, UI strings, the switchable [dark and light colour schemes](0019-runtime-colour-scheme-switching.md) ([0015](0015-default-dark-colour-scheme.md)), the title-bar `Status`/`Spinner` ([0011](0011-animated-status-spinner.md)), and the shared status bar ([0014](0014-status-bar-unification.md)) |
@@ -47,7 +47,7 @@ password pair that the Tree and Home share flows both use, and never imports
 
 ## Core design principles
 
-1. **I/O gateway** — all vault and document I/O goes through `file_handling`. The CLI lifecycle commands and `vault::utils` config manage their own artifacts with `std::fs` (see [ADR 0001](../src/file_handling/docs/adr/0001-io-gateway.md)).
+1. **I/O gateway** — all vault and document I/O goes through `file_handling`. Every write is atomic (exclusive temp file + `fsync` + rename) and reads are symlink-safe. The CLI lifecycle commands are the single deliberate exception, managing their own install artifacts with `std::fs` (see [ADR 0001](../src/file_handling/docs/adr/0001-io-gateway.md)).
 2. **State-machine UI** — every screen and modal is an enum variant in `InputMode` (tree) or `HomeModal` (vault), carrying its own transient state. Key handlers dispatch by variant.
 3. **DFS flat-list rendering** — the tree view flattens the recursive `Node` tree into a `Vec<VisibleNode>` with indentation. Expansion state is a `HashSet<Uuid>`.
 4. **Asynchronous atomic autosave** — mutations submit a root snapshot to a single background writer. The worker serializes, encrypts, and writes via an exclusive temp file + fsync + rename + directory fsync. A newer snapshot replaces a waiting one; `q`/`H` flush the latest generation before leaving.
@@ -70,6 +70,7 @@ password pair that the Tree and Home share flows both use, and never imports
 | `rkyv` | vault::utils | zero-copy config serialization |
 | `zeroize` | vault::active_file, vault::widget, tree | secure passphrase wipe on drop |
 | `sysinfo` 0.38 (disk) | file_handling::disks | cross-platform mounted-disk enumeration for file-browser Locations |
+| `tempfile` 3 | file_handling::atomic | exclusively created temp file + no-clobber `persist` for every atomic write |
 
 ## Re-exports (public API)
 

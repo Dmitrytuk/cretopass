@@ -92,7 +92,7 @@ pub fn share_tree(
     save_tree(node, &file_path.to_string_lossy(), passphrase)?;
 
     let instruction = instruction(&file_name, passphrase.is_empty());
-    super::file_process::write_atomic(&dest_dir.join(SHARE_README_NAME), instruction.as_bytes())?;
+    super::atomic::write_atomic(&dest_dir.join(SHARE_README_NAME), instruction.as_bytes())?;
 
     Ok(dest_dir.to_path_buf())
 }

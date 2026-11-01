@@ -1,11 +1,11 @@
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use super::FileHandlingError;
+use super::atomic;
 use crate::crypt;
 use crate::theming::texts;
 use crate::tree::node::Node;
@@ -14,8 +14,6 @@ use crate::tree::node::Node;
 pub(crate) const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024;
 /// The age file-format magic header every encrypted vault begins with.
 const AGE_MAGIC: &[u8; 11] = b"age-encrypt";
-/// Mode (Unix) new secret-bearing files are created with: owner only.
-const SECRET_FILE_MODE: u32 = 0o600;
 /// Mode (Unix) directories the gateway creates are given: owner only.
 const SECRET_DIR_MODE: u32 = 0o700;
 
@@ -57,27 +55,31 @@ pub fn json_to_node(json: &str) -> Result<Node, serde_json::Error> {
 
 // ── Raw I/O ──
 
-/// Reads the whole of `path` into memory.
+/// Reads the whole of `path` into memory, refusing to follow a symlink.
 ///
 /// # Errors
 ///
-/// Returns [`FileHandlingError::Io`] when `path` cannot be read.
+/// Returns [`FileHandlingError::Io`] when `path` cannot be read, is a symlink
+/// (Unix), or is not a regular file.
 pub fn read_file(path: &str) -> Result<Vec<u8>, FileHandlingError> {
-    fs::read(path).map_err(FileHandlingError::Io)
+    let mut file = atomic::open_for_read(Path::new(path))?;
+    let mut data = Vec::new();
+    file.read_to_end(&mut data).map_err(FileHandlingError::Io)?;
+    Ok(data)
 }
 
-/// Writes `data` to `path` in a single call.
+/// Writes `data` to `path` atomically.
 ///
-/// **Not atomic** and it does not restrict permissions: intended only for the
-/// caller's non-secret configuration (`vault::utils`), never for a vault or an
-/// export — use [`save_tree`] or
-/// [`export_tree`](crate::file_handling::export_tree) for those.
+/// Every write goes through the same exclusive temp file + `fsync` + rename
+/// path as a vault save, so a crash mid-write can never leave a truncated file.
+/// When `path` already exists as a regular file its mode is preserved; a file
+/// this creates is owner-only on Unix.
 ///
 /// # Errors
 ///
 /// Returns [`FileHandlingError::Io`] when `path` cannot be written.
 pub fn write_file(path: &str, data: &[u8]) -> Result<(), FileHandlingError> {
-    fs::write(path, data).map_err(FileHandlingError::Io)
+    atomic::write_atomic(Path::new(path), data)
 }
 
 // ── Encrypted file operations ──
@@ -91,7 +93,7 @@ pub fn write_file(path: &str, data: &[u8]) -> Result<(), FileHandlingError> {
 /// magic header, [`FileHandlingError::NotAnAgeFile`] when the header does not
 /// match, and [`FileHandlingError::Io`] when the file cannot be opened or read.
 pub fn validate_encrypted_file(path: &str) -> Result<Vec<u8>, FileHandlingError> {
-    let file = fs::File::open(path).map_err(FileHandlingError::Io)?;
+    let file = atomic::open_for_read(Path::new(path))?;
     let meta = file.metadata().map_err(FileHandlingError::Io)?;
 
     if meta.len() > MAX_FILE_SIZE {
@@ -138,155 +140,6 @@ pub fn decrypt_to_node(data: &[u8], passphrase: &str) -> Result<Node, FileHandli
     json_to_node(&json).map_err(FileHandlingError::Serde)
 }
 
-/// A temporary file created exclusively under a random name beside its target.
-///
-/// [`create_with_mode`] opens it with `O_CREAT | O_EXCL`, so a pre-planted
-/// symlink at the temp path is never followed and the write can never truncate
-/// the link's target; the random suffix also means two concurrent writers never
-/// collide. Dropping the guard removes the file unless it was
-/// [`TempFile::persist`]ed, so a failed write leaves nothing behind.
-struct TempFile {
-    path: PathBuf,
-    file: Option<fs::File>,
-    persisted: bool,
-}
-
-impl TempFile {
-    /// Creates a temp file for `target` in `target`'s own directory, with
-    /// `mode` (Unix only) and a random suffix.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`FileHandlingError::Io`] when no unique temp file can be
-    /// created (for example when the directory is not writable).
-    fn beside(target: &Path, mode: u32) -> Result<Self, FileHandlingError> {
-        let dir = parent_dir(target);
-        let name = target
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("vault");
-
-        for _ in 0..16 {
-            let candidate = dir.join(format!(".{name}.{}.tmp", Uuid::new_v4().simple()));
-            match create_with_mode(&candidate, mode) {
-                Ok(file) => {
-                    return Ok(Self {
-                        path: candidate,
-                        file: Some(file),
-                        persisted: false,
-                    });
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(FileHandlingError::Io(error)),
-            }
-        }
-
-        Err(FileHandlingError::Io(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "could not create a unique temporary file",
-        )))
-    }
-
-    /// Writes `data` and `fsync`s the file.
-    fn write_all_and_sync(&mut self, data: &[u8]) -> Result<(), FileHandlingError> {
-        let file = self
-            .file
-            .as_mut()
-            .expect("the temp file is open until it is persisted");
-        file.write_all(data).map_err(FileHandlingError::Io)?;
-        file.sync_all().map_err(FileHandlingError::Io)
-    }
-
-    /// Atomically renames the temp file over `target`, then best-effort
-    /// `fsync`s the containing directory so the rename itself is durable.
-    fn persist(mut self, target: &Path) -> Result<(), FileHandlingError> {
-        // Close the handle first so the rename can replace an open target.
-        self.file = None;
-        fs::rename(&self.path, target).map_err(FileHandlingError::Io)?;
-        self.persisted = true;
-        sync_parent_dir(target);
-        Ok(())
-    }
-}
-
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        if !self.persisted {
-            self.file = None;
-            let _ = fs::remove_file(&self.path); // best-effort cleanup
-        }
-    }
-}
-
-/// Opens `path` for writing, creating it exclusively with `mode` (Unix only).
-fn create_with_mode(path: &Path, mode: u32) -> std::io::Result<fs::File> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(mode);
-    }
-    // `mode` is only meaningful on Unix; this keeps it "used" elsewhere.
-    let _ = mode;
-    options.open(path)
-}
-
-/// The directory holding `path`, or `.` for a bare file name.
-fn parent_dir(path: &Path) -> &Path {
-    path.parent()
-        .filter(|dir| !dir.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
-}
-
-/// Best-effort `fsync` of `path`'s parent directory so a rename into it is
-/// durable after a crash. Not every platform allows this, so it is ignored.
-fn sync_parent_dir(path: &Path) {
-    if let Ok(handle) = fs::File::open(parent_dir(path)) {
-        let _ = handle.sync_all();
-    }
-}
-
-/// Copies `target`'s permission bits onto a freshly created temp file, so
-/// replacing an existing regular file preserves the mode the user gave it.
-///
-/// Uses `symlink_metadata`: a mode is never inherited from a symlink's target,
-/// only from an ordinary existing file.
-fn preserve_target_mode(target: &Path, file: &fs::File) -> Result<(), FileHandlingError> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = fs::symlink_metadata(target)
-            && meta.is_file()
-        {
-            let mode = meta.permissions().mode();
-            file.set_permissions(fs::Permissions::from_mode(mode))
-                .map_err(FileHandlingError::Io)?;
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = (target, file);
-    Ok(())
-}
-
-/// Writes `data` to `target` atomically, preserving the mode of an existing
-/// regular target (used for ciphertext, where the user may have set a mode).
-pub(crate) fn write_atomic(target: &Path, data: &[u8]) -> Result<(), FileHandlingError> {
-    let mut temp = TempFile::beside(target, SECRET_FILE_MODE)?;
-    preserve_target_mode(target, temp.file.as_ref().expect("temp file is open"))?;
-    temp.write_all_and_sync(data)?;
-    temp.persist(target)
-}
-
-/// Writes plaintext `data` to `target` atomically at owner-only permissions,
-/// never inheriting a more permissive mode from an existing file — the output
-/// holds decrypted secrets (an export) and must not be group/world readable.
-pub(crate) fn write_atomic_private(target: &Path, data: &[u8]) -> Result<(), FileHandlingError> {
-    let mut temp = TempFile::beside(target, SECRET_FILE_MODE)?;
-    temp.write_all_and_sync(data)?;
-    temp.persist(target)
-}
-
 /// Serialises `node` to JSON (zeroizing the plaintext buffer afterwards) and
 /// encrypts it with `passphrase`.
 fn encrypt_node(node: &Node, passphrase: &str) -> Result<Vec<u8>, FileHandlingError> {
@@ -315,18 +168,15 @@ pub fn save_tree(root: &Node, path: &str, passphrase: &[u8]) -> Result<(), FileH
 
     let encrypted = encrypt_node(root, passphrase_str)?;
 
-    write_atomic(Path::new(path), &encrypted)
+    atomic::write_atomic(Path::new(path), &encrypted)
 }
 
 /// Creates a new encrypted secret file at `path` with a "Secrets" root node.
 ///
-/// The target is claimed with `O_EXCL`, so an existing file (or a symlink) is
-/// never overwritten and no pre-existing vault can be destroyed. The content is
-/// then written atomically (temp + `fsync` + rename); only a failure *after*
-/// the claim but before the rename — a hard kill in that window — can leave a
-/// zero-byte placeholder at `path`, which the caller can remove and retry.
-/// Closing that window needs a no-clobber rename, tracked as a future
-/// hardening task. On any error the claimed name is released again.
+/// The file is created by a single no-clobber rename, so an existing file (or a
+/// symlink) is never overwritten, no pre-existing vault can be destroyed, and a
+/// crash at any point leaves either the previous file or nothing — never a
+/// zero-byte placeholder.
 ///
 /// # Errors
 ///
@@ -336,26 +186,20 @@ pub fn save_tree(root: &Node, path: &str, passphrase: &[u8]) -> Result<(), FileH
 /// it already exists. Encryption and serialisation failures surface as
 /// [`FileHandlingError::Crypt`] / [`FileHandlingError::Serde`].
 pub fn create_secret_file(path: &str, passphrase: &str) -> Result<Node, FileHandlingError> {
-    let target = Path::new(path);
-
-    // Claim the name exclusively: `rename` at the end replaces this
-    // placeholder, and `O_EXCL` refuses to follow a symlink at `path`.
-    let placeholder = create_with_mode(target, SECRET_FILE_MODE).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::AlreadyExists {
-            FileHandlingError::Io(error)
-        } else {
-            FileHandlingError::PathNotWritable(path.to_string())
-        }
-    })?;
-    drop(placeholder);
-
     let node = Node::new(texts::DEFAULT_ROOT_NAME);
-    let outcome = encrypt_node(&node, passphrase).and_then(|data| write_atomic(target, &data));
-    if outcome.is_err() {
-        // Do not leave a zero-byte file claiming the name.
-        let _ = fs::remove_file(target); // best-effort release of the name
-    }
-    outcome?;
+    let data = encrypt_node(&node, passphrase)?;
+
+    // `write_atomic_new` can only fail with an `Io` error (encryption has
+    // already succeeded). A lost race maps to `AlreadyExists`; every other
+    // failure — a missing parent, a read-only directory, a full disk, a
+    // filesystem that supports neither a no-clobber rename nor a hard link —
+    // means the path could not be written.
+    atomic::write_atomic_new(Path::new(path), &data).map_err(|error| match error {
+        FileHandlingError::Io(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            FileHandlingError::Io(e)
+        }
+        _ => FileHandlingError::PathNotWritable(path.to_string()),
+    })?;
 
     Ok(node)
 }
@@ -420,7 +264,7 @@ pub fn is_age_file(path: &Path) -> bool {
 }
 
 fn scan_age_header(path: &Path) -> bool {
-    let mut file = match fs::File::open(path) {
+    let mut file = match atomic::open_for_read(path) {
         Ok(f) => f,
         Err(_) => return false,
     };
@@ -486,8 +330,7 @@ pub fn rename_file(from: &Path, to: &Path) -> Result<(), FileHandlingError> {
 /// Returns [`FileHandlingError::PathNotWritable`] when no temp file can be
 /// created beside `path`.
 pub fn probe_path_writable(path: &str) -> Result<(), FileHandlingError> {
-    TempFile::beside(Path::new(path), SECRET_FILE_MODE)
-        .map(|_| ())
+    atomic::probe_writable(Path::new(path))
         .map_err(|_| FileHandlingError::PathNotWritable(path.to_string()))
 }
 
@@ -506,6 +349,8 @@ pub fn is_dir_empty(path: &Path) -> Result<bool, FileHandlingError> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use super::FileHandlingError;
     use super::*;
     use crate::crypt::CryptError;
@@ -815,7 +660,7 @@ mod tests {
     fn test_create_secret_file_invalid_path() {
         let path = "/nonexistent_dir_12345/test.age".to_string();
         let result = create_secret_file(&path, "pass");
-        assert!(result.is_err());
+        assert!(matches!(result, Err(FileHandlingError::PathNotWritable(_))));
     }
 
     #[test]
@@ -892,7 +737,11 @@ mod tests {
         create_secret_file(&path.to_string_lossy(), "pw").unwrap();
 
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, SECRET_FILE_MODE, "the vault must be owner-only");
+        assert_eq!(
+            mode,
+            atomic::SECRET_FILE_MODE,
+            "the vault must be owner-only"
+        );
     }
 
     #[cfg(unix)]
@@ -926,24 +775,6 @@ mod tests {
         assert_eq!(mode, SECRET_DIR_MODE, "the directory must be owner-only");
     }
 
-    #[test]
-    fn a_temp_file_is_removed_when_it_is_not_persisted() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("vault.age");
-
-        let temp = TempFile::beside(&target, SECRET_FILE_MODE).unwrap();
-        let temp_path = temp.path.clone();
-        assert!(temp_path.exists());
-
-        drop(temp);
-
-        assert!(
-            !temp_path.exists(),
-            "an unpersisted temp must be cleaned up"
-        );
-        assert!(!target.exists(), "the target must not have been created");
-    }
-
     #[cfg(unix)]
     #[test]
     fn save_tree_does_not_inherit_a_link_targets_mode() {
@@ -961,7 +792,7 @@ mod tests {
         // The vault replaces the link, so its mode must be owner-only, never
         // the target's 0666.
         let mode = fs::metadata(&link).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, SECRET_FILE_MODE);
+        assert_eq!(mode, atomic::SECRET_FILE_MODE);
         assert_eq!(fs::read(&victim).unwrap(), b"victim");
     }
 

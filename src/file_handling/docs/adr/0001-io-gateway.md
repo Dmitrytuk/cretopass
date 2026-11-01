@@ -5,11 +5,12 @@ entire application. All vault and document I/O is mediated through this module
 so that encryption, error handling, and import/export/share logic share one
 place.
 
-**Deliberate exceptions:** the CLI lifecycle commands (`cli/layout.rs`,
-`cli/remove.rs`, `cli/update.rs`) and the Home config migration in
-`vault/utils.rs` still use `std::fs` directly. They manage the app's own
-install/config artifacts rather than secrets, and are kept independent of the
-gateway so `remove`/`update` do not depend on the vault stack.
+**Deliberate exception:** the CLI lifecycle commands (`cli/layout.rs`,
+`cli/remove.rs`, `cli/update.rs`) still use `std::fs` directly. They manage the
+app's own install artifacts rather than secrets, and are kept independent of the
+gateway so `remove`/`update` do not depend on the vault stack. Every other
+module — including the Home config in `vault/utils.rs` — writes only through
+this gateway.
 
 **Rejected alternative:** sprinkling `std::fs` calls across modules. This would
 make it impossible to guarantee atomic saves, enforce encryption on write, or
@@ -19,7 +20,8 @@ audit I/O patterns.
 
 | File | Responsibility |
 |------|---------------|
-| `file_process.rs` | JSON serde, raw read/write, encrypted file ops, directory listing (visible or including hidden), atomic save through an exclusive temp file, path probes, age-header detection, owner-only permissions |
+| `atomic.rs` | the atomic write layer: an exclusively created temp file + `fsync` + `rename` (replacing), no-clobber `commit_new`, symlink-safe `open_for_read`, owner-only modes, best-effort directory `fsync`, and the per-platform durability statement |
+| `file_process.rs` | JSON serde, raw read/write, encrypted file ops, directory listing (visible or including hidden), path probes, age-header detection, owner-only permissions; every write is delegated to `atomic.rs` |
 | `autosave.rs` | `Autosave`: one background writer thread with a latest-wins snapshot slot, generation numbers, `SaveEvent` notifications, panic containment, and flush-on-drop ([ADR 0010](../../../../docs/adr/0010-async-tree-autosave.md)) |
 | `disks.rs` | `DiskInfo` + `list_disks()`: cross-platform mounted-volume enumeration via `sysinfo`, with loop/squashfs filtering |
 | `error.rs` | `FileHandlingError` enum (+ `crypt::CryptError` for typed encryption/decryption failures) wrapping Io / Serde / typed crypt errors + structured domain errors; `#[non_exhaustive]` and free of any imported-value payload |
@@ -48,11 +50,20 @@ site outside this module.
   never inherited from a symlink's target. Files the gateway creates for
   secrets are `0600` and secret directories are `0700` on Unix. A plaintext
   export is always written `0600`, never inheriting a more permissive mode.
-- `create_secret_file()` claims the target with `O_EXCL`, so an existing file
-  (or a symlink) is never overwritten, and writes the content atomically. Only a
-  hard kill between the claim and the rename can leave a zero-byte placeholder;
-  closing that window needs a no-clobber rename, tracked as a future hardening
-  task.
+- `create_secret_file()` creates the vault with a single **no-clobber rename**
+  (`renameat2(RENAME_NOREPLACE)` / `renamex_np`, falling back to `link` +
+  `unlink`), so an existing file (or a symlink) is never overwritten and no
+  hard kill can leave a zero-byte placeholder.
+- Reads are symlink-safe: `validate_encrypted_file()`, `import_tree()`,
+  `read_file()` and the age-header scan open the file with `O_NOFOLLOW`
+  (Linux/macOS) and reject anything that is not a regular file, so a planted
+  symlink is never followed. A vault kept *behind* a symlink is therefore
+  deliberately refused rather than followed.
+- Durability is stated per platform in
+  [`atomic.rs`](../../atomic.rs): Linux/macOS `fsync` both the
+  file and its directory; Windows cannot `fsync` a directory with `std`, so the
+  rename is best-effort. In every case a reader sees either the previous file or
+  the complete new one — never a torn write.
 - `share_tree()` refuses a destination that already exists as a file, creates the folder, writes the bundle's secret file through `save_tree()`, and only then writes the `HOW-TO-OPEN.txt` instruction.
 - `Autosave` serializes all writes through one thread. Callers submit a root snapshot and receive a generation; a newer submission replaces one that has not started. The worker emits `SaveEvent` after every attempt. Because `save_tree()` uses an exclusive random temp name, concurrent saves for the same path cannot collide.
 - `validate_encrypted_file()` enforces a 50MB size cap and scans for the `age-encryption.org` magic header. `import_tree()` shares the same cap.
@@ -69,4 +80,6 @@ For file_browser keybindings see [ADR 0007 — file_browser](../../file_browser/
 - `age` 0.11 — encryption
 - `serde` 1 + `serde_json` 1 — tree serialization
 - `sysinfo` 0.38 (`disk` feature only) — cross-platform mounted-disk enumeration
+- `tempfile` 3 — the atomic layer's exclusively created temp file and its
+  `persist` / `persist_noclobber` rename (`atomic.rs`)
 - `std` only for autosave — `std::thread`, `Mutex`, `Condvar`; no async runtime in this module

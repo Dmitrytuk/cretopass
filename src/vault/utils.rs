@@ -125,7 +125,7 @@ fn config_file_path(dir: &Path) -> PathBuf {
     let new_path = dir.join(CONFIG_FILE_NAME);
     let old_path = dir.join("settings.pwd");
     if old_path.exists() && !new_path.exists() {
-        let _ = std::fs::rename(&old_path, &new_path);
+        let _ = file_handling::rename_file(&old_path, &new_path);
     }
     new_path
 }
@@ -198,24 +198,42 @@ pub fn push_recent_secret_file(config: &mut Configuration, path: &str) -> Result
 #[cfg(test)]
 // `std::env::set_var`/`remove_var` are `unsafe` in edition 2024. The crate
 // denies `unsafe_code` everywhere else; this module is the single, test-only
-// exception. The environment is process-global, so these tests must not run
-// concurrently with each other (see the SAFETY notes on each call).
+// exception. The environment is process-global, so every env-mutating test
+// takes `ENV_LOCK` for its whole duration (see the SAFETY notes on each call);
+// `TestConfigDir` holds the guard, and the one test that does not use it locks
+// explicitly.
 #[allow(unsafe_code)]
 mod tests {
+    use std::sync::{Mutex, MutexGuard};
+
     use super::*;
+
+    /// Serialises the tests that mutate the process-global environment, so the
+    /// suite is safe under `cargo test`'s default parallel runner.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     /// Points configuration I/O at an isolated temp directory so tests never touch
     /// the developer's real `~/.config/cretopass`.
-    struct TestConfigDir(PathBuf);
+    ///
+    /// Holds `ENV_LOCK` for its whole lifetime, so only one env-mutating test
+    /// runs at a time.
+    struct TestConfigDir {
+        dir: PathBuf,
+        // Declared last so it is dropped after `Drop` runs `remove_var`.
+        _guard: MutexGuard<'static, ()>,
+    }
 
     impl TestConfigDir {
         fn new() -> Self {
+            let guard = ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let dir = std::env::temp_dir().join(format!("cretopass-test-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&dir).unwrap();
-            // SAFETY: tests in this module run single-threaded via
-            // `cargo test -- --test-threads=1`; no other thread mutates env.
+            // SAFETY: the `ENV_LOCK` guard makes this module's env mutation
+            // single-threaded.
             unsafe { std::env::set_var("CRETOPASS_CONFIG_DIR", &dir) };
-            Self(dir)
+            Self { dir, _guard: guard }
         }
     }
 
@@ -223,7 +241,7 @@ mod tests {
         fn drop(&mut self) {
             // SAFETY: see TestConfigDir::new.
             unsafe { std::env::remove_var("CRETOPASS_CONFIG_DIR") };
-            let _ = std::fs::remove_dir_all(&self.0);
+            let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
 
@@ -347,7 +365,11 @@ mod tests {
 
     #[test]
     fn test_dev_mode_config_dir() {
-        // SAFETY: tests run with --test-threads=1
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // SAFETY: the `ENV_LOCK` guard makes this module's env mutation
+        // single-threaded.
         unsafe { std::env::set_var("CRETOPASS_ENV", "development") };
         let dir = config_dir();
         unsafe { std::env::remove_var("CRETOPASS_ENV") };
@@ -357,7 +379,8 @@ mod tests {
     #[test]
     fn test_dev_mode_falls_through_on_other_value() {
         let _tmp = TestConfigDir::new();
-        // SAFETY: tests run with --test-threads=1
+        // SAFETY: `TestConfigDir` holds `ENV_LOCK`, making env mutation
+        // single-threaded.
         unsafe { std::env::set_var("CRETOPASS_ENV", "production") };
         let dir = config_dir();
         unsafe { std::env::remove_var("CRETOPASS_ENV") };
@@ -368,7 +391,8 @@ mod tests {
     fn test_config_dir_override_beats_dev_mode() {
         let _tmp = TestConfigDir::new();
         // CRETOPASS_CONFIG_DIR is set by TestConfigDir; dev mode should be ignored.
-        // SAFETY: tests run with --test-threads=1
+        // SAFETY: `TestConfigDir` holds `ENV_LOCK`, making env mutation
+        // single-threaded.
         unsafe { std::env::set_var("CRETOPASS_ENV", "development") };
         let dir = config_dir();
         unsafe { std::env::remove_var("CRETOPASS_ENV") };
