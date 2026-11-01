@@ -52,10 +52,7 @@ pub(crate) fn execute<B: Backend>(
             include_children,
             format,
             path,
-        } => {
-            export(state, node, include_children, format, &path);
-            Ok(())
-        }
+        } => export(state, terminal, draw, node, include_children, format, path),
         TreeAction::BeginShareDestination {
             node,
             include_children,
@@ -145,19 +142,30 @@ fn node_for_scope(node: Node, include_children: bool) -> Node {
 }
 
 /// Writes `node` to `path` as `format` and reports the outcome as an alert.
-fn export(
+///
+/// The write runs off the UI thread so the title bar keeps animating its
+/// `Saving` status while the tree is serialised and the file is fsynced —
+/// the same path the neighbouring share flow takes.
+fn export<B: Backend>(
     state: &mut TreeState,
+    terminal: &mut Terminal<B>,
+    draw: fn(&mut Frame, &mut TreeState),
     node: Node,
     include_children: bool,
     format: ExportFormat,
-    path: &str,
-) {
+    path: String,
+) -> io::Result<()> {
     let export_node = node_for_scope(node, include_children);
 
-    state.modal = Some(match export_tree(&export_node, path, format) {
+    let result = run_with_busy(terminal, state, Status::Saving, draw, move || {
+        export_tree(&export_node, &path, format)
+    })?;
+
+    state.modal = Some(match result {
         Ok(out_path) => Modal::success(format!("{}{}", texts::MSG_EXPORT_NODE_SUCCESS, out_path)),
         Err(error) => Modal::error(format!("{error}")),
     });
+    Ok(())
 }
 
 /// Writes a share bundle of `node`, with or without its children, into `path`
@@ -232,5 +240,46 @@ fn copy_to_clipboard(text: &str) {
             let _ = child.wait();
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+
+    /// A renderer that does nothing: the export test only cares that the write
+    /// runs and its outcome is reported.
+    fn noop_draw(_frame: &mut Frame, _state: &mut TreeState) {}
+
+    #[test]
+    fn a_failed_export_is_reported_and_clears_the_status() {
+        let mut state = TreeState::new(Node::new("Root"));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        // A directory that does not exist: the atomic write fails.
+        export(
+            &mut state,
+            &mut terminal,
+            noop_draw,
+            Node::new("Root"),
+            true,
+            ExportFormat::Json,
+            "/nonexistent_dir_xyz123/vault.age".to_string(),
+        )
+        .unwrap();
+
+        match &state.modal {
+            Some(Modal::Alert(alert)) => assert!(
+                alert.message.contains("io:"),
+                "the write failure must be reported: {}",
+                alert.message
+            ),
+            _ => panic!("a failed export must be reported in an alert"),
+        }
+        assert!(
+            state.operation_status.is_none(),
+            "the busy status is cleared once the write finishes"
+        );
     }
 }

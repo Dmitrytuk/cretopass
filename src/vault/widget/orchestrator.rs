@@ -188,10 +188,7 @@ pub fn execute<B: Backend>(
             });
             Ok(())
         }
-        HomeAction::Export { path, format } => {
-            export(state, &path, format);
-            Ok(())
-        }
+        HomeAction::Export { path, format } => export(state, terminal, path, format),
         HomeAction::Share { dest, passphrase } => share(state, terminal, &dest, passphrase),
         HomeAction::ToggleSetting(setting) => {
             apply_setting(state, setting);

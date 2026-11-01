@@ -80,6 +80,24 @@ where
     F: FnOnce() -> T + Send + 'static,
 {
     state.status = Some(status);
+    let outcome = run_animated(terminal, state, work);
+    // Cleared here rather than inside `run_animated`, so a failed draw or a
+    // failed spawn cannot leave the title bar pinned on the busy status.
+    state.status = None;
+    outcome
+}
+
+/// The draw/spin/join loop behind [`run_with_spinner`].
+fn run_animated<B, T, F>(
+    terminal: &mut Terminal<B>,
+    state: &mut HomeState,
+    work: F,
+) -> io::Result<T>
+where
+    B: Backend,
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
     terminal.draw(|f| render(f, f.area(), state))?;
 
     let handle = std::thread::Builder::new()
@@ -100,11 +118,9 @@ where
         }
     }
 
-    let result = handle
+    handle
         .join()
-        .map_err(|_| io::Error::other("blocking worker thread panicked"))?;
-    state.status = None;
-    Ok(result)
+        .map_err(|_| io::Error::other("blocking worker thread panicked"))
 }
 
 // ── Modal key handling ──
