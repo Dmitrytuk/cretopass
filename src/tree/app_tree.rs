@@ -114,13 +114,25 @@ pub fn run_app<B: Backend>(
                                     dispatch_key(key, state);
                                 }
 
-                                if state.modified
-                                    && let Some(ref mut worker) = autosave
-                                    && worker.is_running()
-                                {
-                                    state.modified = false;
-                                    submitted = worker.submit(state.root.clone());
-                                    state.save_state = SaveState::Saving;
+                                if let Some(ref mut worker) = autosave {
+                                    match autosave_action(
+                                        state.modified,
+                                        worker.is_running(),
+                                        &state.save_state,
+                                    ) {
+                                        AutosaveAction::Submit => {
+                                            state.modified = false;
+                                            submitted = worker.submit(state.root.clone());
+                                            state.save_state = SaveState::Saving;
+                                        }
+                                        AutosaveAction::ReportWorkerStopped => {
+                                            state.save_state = SaveState::Failed {
+                                                error: SaveError::WorkerStopped,
+                                                acknowledged: false,
+                                            };
+                                        }
+                                        AutosaveAction::Idle => {}
+                                    }
                                 }
                             }
                         }
@@ -240,6 +252,39 @@ enum ExitPlan {
     Wait(u64),
     /// Re-submit the current root, then wait for it.
     ResubmitThenWait,
+}
+
+/// What the autosave loop should do with a modified tree this turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutosaveAction {
+    /// Hand the current snapshot to the worker and show `Saving`.
+    Submit,
+    /// The worker is gone: report it now instead of waiting for the exit.
+    ReportWorkerStopped,
+    /// Nothing to do.
+    Idle,
+}
+
+/// Decides the autosave action for a tree.
+///
+/// A worker that has stopped (`is_running() == false`) can never write a
+/// snapshot, so a modified tree is reported immediately rather than staying
+/// silent until the user quits. (Inside the event loop the worker stops only
+/// through the closed-event-channel contract of the `file_handling` autosave
+/// module, so this is a real failure, not a false alarm.) The report is not
+/// repeated once the failure is already showing, so dismissing its overlay
+/// keeps it dismissed.
+fn autosave_action(modified: bool, worker_running: bool, save_state: &SaveState) -> AutosaveAction {
+    if !modified {
+        return AutosaveAction::Idle;
+    }
+    if worker_running {
+        return AutosaveAction::Submit;
+    }
+    if save_state.has_failed() {
+        return AutosaveAction::Idle;
+    }
+    AutosaveAction::ReportWorkerStopped
 }
 
 /// Decides how an exit request should make the vault durable.
@@ -1751,6 +1796,57 @@ mod tests {
         });
 
         assert!(timed_out.is_err());
+    }
+
+    #[test]
+    fn autosave_action_submits_a_modified_tree_to_a_live_worker() {
+        assert_eq!(
+            autosave_action(true, true, &SaveState::Idle),
+            AutosaveAction::Submit
+        );
+        assert_eq!(
+            autosave_action(true, true, &SaveState::Saving),
+            AutosaveAction::Submit
+        );
+    }
+
+    #[test]
+    fn autosave_action_reports_a_dead_worker_on_the_next_edit() {
+        // The tree still knows it is modified, but the user is told the save
+        // cannot happen instead of finding out only at exit.
+        assert_eq!(
+            autosave_action(true, false, &SaveState::Idle),
+            AutosaveAction::ReportWorkerStopped
+        );
+        assert_eq!(
+            autosave_action(true, false, &SaveState::Saving),
+            AutosaveAction::ReportWorkerStopped
+        );
+    }
+
+    #[test]
+    fn autosave_action_does_not_re_report_a_failure() {
+        // The guard keys on `has_failed()`, not on acknowledgement: an
+        // unacknowledged failure the user is looking at must not be reset.
+        for acknowledged in [false, true] {
+            let failed = SaveState::Failed {
+                error: SaveError::WorkerStopped,
+                acknowledged,
+            };
+            assert_eq!(autosave_action(true, false, &failed), AutosaveAction::Idle);
+        }
+    }
+
+    #[test]
+    fn autosave_action_ignores_an_unmodified_tree() {
+        assert_eq!(
+            autosave_action(false, true, &SaveState::Idle),
+            AutosaveAction::Idle
+        );
+        assert_eq!(
+            autosave_action(false, false, &SaveState::Idle),
+            AutosaveAction::Idle
+        );
     }
 
     #[test]
