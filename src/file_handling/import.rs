@@ -220,7 +220,7 @@ fn parse_xml_fields(input: &str) -> Result<Vec<ExtraField>, FileHandlingError> {
         remaining = &remaining[tag_end + 1..];
 
         let attrs = extract_xml_attrs(attrs_str)?;
-        let ft_str = attrs
+        let field_type_label = attrs
             .iter()
             .find(|(k, _)| k == "type")
             .map(|(_, v)| v.as_str())
@@ -231,7 +231,7 @@ fn parse_xml_fields(input: &str) -> Result<Vec<ExtraField>, FileHandlingError> {
             .map(|(_, v)| unescape_xml(v))
             .ok_or_else(|| syntax(ImportSyntax::MissingFieldValue))?;
 
-        let field_type = FieldType::from_wire_label(ft_str);
+        let field_type = FieldType::from_wire_label(field_type_label);
 
         fields.push(ExtraField { field_type, value });
     }
@@ -1228,6 +1228,33 @@ mod tests {
             error,
             FileHandlingError::ImportSyntax(ImportSyntax::CsvPathTooDeep)
         ));
+    }
+
+    #[test]
+    fn xml_parse_errors_name_the_problem() {
+        let cases = [
+            (
+                "<?xml version=\"1.0\"",
+                ImportSyntax::UnterminatedXmlDeclaration,
+            ),
+            ("<node name=\"X\">", ImportSyntax::ExpectedExtraFieldsStart),
+            (
+                "<node ><extra_fields></extra_fields></node>",
+                ImportSyntax::MissingNodeName,
+            ),
+            (
+                "<node name=\"X\"><extra_fields></extra_fields>",
+                ImportSyntax::ExpectedNodeEnd,
+            ),
+        ];
+
+        for (xml, expected) in cases {
+            let error = import_xml(xml).unwrap_err();
+            assert!(
+                matches!(error, FileHandlingError::ImportSyntax(reason) if reason == expected),
+                "{xml:?} should report {expected:?}, got {error:?}"
+            );
+        }
     }
 
     #[test]

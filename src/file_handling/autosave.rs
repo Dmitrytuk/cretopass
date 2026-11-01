@@ -638,4 +638,14 @@ mod tests {
         }
         assert!(!autosave.is_running(), "the worker must report itself dead");
     }
+
+    #[test]
+    fn save_error_display_names_each_kind() {
+        assert_eq!(
+            SaveError::Failed(FileHandlingError::FileTooSmall).to_string(),
+            FileHandlingError::FileTooSmall.to_string()
+        );
+        assert_eq!(SaveError::Panicked.to_string(), "save worker panicked");
+        assert_eq!(SaveError::WorkerStopped.to_string(), "save worker stopped");
+    }
 }

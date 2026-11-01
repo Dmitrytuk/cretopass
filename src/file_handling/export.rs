@@ -144,11 +144,11 @@ fn escape_xml(s: &str) -> String {
 
 fn node_to_csv(node: &Node) -> String {
     let mut buf = String::from("path,name,field_type,field_value\n");
-    write_csv_rows(&mut buf, node, String::new());
+    write_csv_rows(&mut buf, node, "");
     buf
 }
 
-fn write_csv_rows(buf: &mut String, node: &Node, parent_path: String) {
+fn write_csv_rows(buf: &mut String, node: &Node, parent_path: &str) {
     let current_name = csv_escape(&node.name);
     let current_path = if parent_path.is_empty() {
         current_name.clone()
@@ -177,7 +177,7 @@ fn write_csv_rows(buf: &mut String, node: &Node, parent_path: String) {
     }
 
     for child in &node.children {
-        write_csv_rows(buf, child, current_path.clone());
+        write_csv_rows(buf, child, &current_path);
     }
 }
 

@@ -392,11 +392,9 @@ fn list_dir_impl(path: &Path, include_hidden: bool) -> Result<Vec<FileEntry>, Fi
 
         let path = entry.path();
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        let is_age_file = if is_dir {
-            false
-        } else {
-            path.is_file() && scan_age_header(&path)
-        };
+        // `is_file` follows symlinks and rejects special files (a FIFO open
+        // would otherwise block the event-loop thread): keep the guard.
+        let is_age_file = !is_dir && path.is_file() && scan_age_header(&path);
 
         entries.push(FileEntry {
             name,
@@ -426,7 +424,7 @@ fn scan_age_header(path: &Path) -> bool {
         Ok(f) => f,
         Err(_) => return false,
     };
-    let mut header = [0u8; 11];
+    let mut header = [0u8; AGE_MAGIC.len()];
     if file.read_exact(&mut header).is_err() {
         return false;
     }
@@ -1171,51 +1169,158 @@ mod tests {
     }
 
     #[test]
-    fn test_create_file_timing() {
-        let path = format!("/tmp/test_create_time_{}.age", uuid::Uuid::new_v4());
-        let passphrase = "test-passphrase";
+    fn create_secret_file_writes_an_openable_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.age");
+        let path = path.to_string_lossy().to_string();
 
-        let start = std::time::Instant::now();
-        let result = create_secret_file(&path, passphrase);
-        let elapsed = start.elapsed();
+        let node = create_secret_file(&path, "test-passphrase").unwrap();
 
-        assert!(result.is_ok());
-        assert!(Path::new(&path).exists());
-
-        println!(
-            "create_secret_file took {:?} ({}.{:03} ms)",
-            elapsed,
-            elapsed.as_millis(),
-            elapsed.subsec_millis(),
-        );
-
-        let _ = fs::remove_file(&path);
+        assert_eq!(node.name, texts::DEFAULT_ROOT_NAME);
+        let data = validate_encrypted_file(&path).unwrap();
+        assert!(decrypt_to_node(&data, "test-passphrase").is_ok());
     }
 
     #[test]
-    fn test_open_file_timing() {
-        let path = format!("/tmp/test_open_time_{}.age", uuid::Uuid::new_v4());
-        let passphrase = "test-passphrase";
+    fn decrypt_to_node_opens_a_written_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.age");
+        let path = path.to_string_lossy().to_string();
 
-        let root = Node::new("Secrets");
-        create_test_encrypted_file(&path, passphrase, &root);
+        create_test_encrypted_file(&path, "test-passphrase", &Node::new("Secrets"));
 
         let data = validate_encrypted_file(&path).expect("validation should succeed");
+        let node = decrypt_to_node(&data, "test-passphrase").expect("decryption should succeed");
 
-        let start = std::time::Instant::now();
-        let node = decrypt_to_node(&data, passphrase);
-        let elapsed = start.elapsed();
+        assert_eq!(node.name, "Secrets");
+    }
 
-        assert!(node.is_ok());
-        assert_eq!(node.unwrap().name, "Secrets");
+    #[test]
+    fn save_tree_rejects_a_non_utf8_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.age");
+        let path = path.to_string_lossy().to_string();
 
-        println!(
-            "decrypt_to_node took {:?} ({}.{:03} ms)",
-            elapsed,
-            elapsed.as_millis(),
-            elapsed.subsec_millis(),
+        let result = save_tree(&Node::new("X"), &path, &[0xff, 0xfe]);
+
+        assert!(matches!(
+            result,
+            Err(FileHandlingError::InvalidPassphraseEncoding)
+        ));
+        assert!(!Path::new(&path).exists());
+    }
+
+    #[test]
+    fn a_failed_rename_leaves_no_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory at the target path makes `rename` fail.
+        let target = dir.path().join("vault.age");
+        fs::create_dir(&target).unwrap();
+
+        let result = save_tree(&Node::new("X"), &target.to_string_lossy(), b"pw");
+
+        assert!(result.is_err());
+        assert!(target.is_dir(), "the directory is untouched");
+        let leftovers: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".tmp"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "no temp file may survive: {leftovers:?}"
         );
+    }
 
-        let _ = fs::remove_file(&path);
+    #[test]
+    fn validate_rejects_a_file_one_byte_over_the_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.age");
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(MAX_FILE_SIZE + 1).unwrap();
+        drop(file);
+
+        assert!(matches!(
+            validate_encrypted_file(&path.to_string_lossy()),
+            Err(FileHandlingError::FileTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_accepts_a_file_exactly_at_the_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.age");
+        let mut file = fs::File::create(&path).unwrap();
+        file.write_all(AGE_MAGIC).unwrap();
+        file.set_len(MAX_FILE_SIZE).unwrap();
+        drop(file);
+
+        let data = validate_encrypted_file(&path.to_string_lossy()).unwrap();
+        assert_eq!(data.len() as u64, MAX_FILE_SIZE);
+    }
+
+    #[test]
+    fn probe_path_writable_accepts_a_writable_directory_and_cleans_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("vault.age");
+
+        assert!(probe_path_writable(&target.to_string_lossy()).is_ok());
+        assert_eq!(
+            fs::read_dir(dir.path()).unwrap().count(),
+            0,
+            "the probe must not leave its temp file behind"
+        );
+    }
+
+    #[test]
+    fn probe_path_writable_rejects_a_missing_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing").join("vault.age");
+
+        assert!(matches!(
+            probe_path_writable(&missing.to_string_lossy()),
+            Err(FileHandlingError::PathNotWritable(_))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_dir_does_not_block_on_a_fifo() {
+        use std::process::Command;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("pipe");
+        // Opening a FIFO for reading blocks until a writer appears; `list_dir`
+        // must skip it rather than hang the event-loop thread.
+        let created = Command::new("mkfifo").arg(&fifo).status();
+        if !matches!(created, Ok(status) if status.success()) {
+            return; // `mkfifo` is unavailable here.
+        }
+
+        let (tx, rx) = mpsc::channel();
+        let scan_dir = dir.path().to_path_buf();
+        std::thread::spawn(move || {
+            let _ = tx.send(list_dir(&scan_dir));
+        });
+
+        let entries = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("list_dir must not block on a FIFO")
+            .unwrap();
+        let entry = entries.iter().find(|e| e.name == "pipe").unwrap();
+        assert!(!entry.is_age_file, "a FIFO must never be scanned");
+    }
+
+    #[test]
+    fn read_file_and_write_file_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.bin");
+        let path = path.to_string_lossy().to_string();
+
+        write_file(&path, b"hello").unwrap();
+
+        assert_eq!(read_file(&path).unwrap(), b"hello");
     }
 }
