@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+use zeroize::Zeroizing;
+
 use super::format::{Format, encode_path_segment};
 use super::{FileHandlingError, is_age_file, node_to_json};
 use crate::tree::node::Node;
@@ -101,10 +103,10 @@ pub fn export_tree(
     Ok(out_path.to_string_lossy().to_string())
 }
 
-fn node_to_xml(node: &Node) -> String {
+fn node_to_xml(node: &Node) -> Zeroizing<String> {
     let mut buf = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     write_xml_node(&mut buf, node, 0);
-    buf
+    Zeroizing::new(buf)
 }
 
 fn write_xml_node(buf: &mut String, node: &Node, depth: usize) {
@@ -143,10 +145,10 @@ fn escape_xml(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-fn node_to_csv(node: &Node) -> String {
+fn node_to_csv(node: &Node) -> Zeroizing<String> {
     let mut buf = String::from("path,name,field_type,field_value\n");
     write_csv_rows(&mut buf, node, "", &encode_path_segment(&node.name));
-    buf
+    Zeroizing::new(buf)
 }
 
 /// Writes `node` and its subtree, one row per extra field.

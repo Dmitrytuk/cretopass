@@ -34,14 +34,15 @@ pub struct FileEntry {
 
 /// Serialises `node` to pretty-printed JSON.
 ///
-/// The result holds every secret in the tree in the clear; the caller is
-/// responsible for zeroizing it.
+/// The result holds every secret in the tree in the clear. It is returned in a
+/// [`Zeroizing`] so the plaintext is wiped when the caller drops it, rather than
+/// trusting every call site to remember.
 ///
 /// # Errors
 ///
 /// Returns a [`serde_json::Error`] when `node` cannot be serialised.
-pub fn node_to_json(node: &Node) -> Result<String, serde_json::Error> {
-    serde_json::to_string_pretty(node)
+pub fn node_to_json(node: &Node) -> Result<Zeroizing<String>, serde_json::Error> {
+    serde_json::to_string_pretty(node).map(Zeroizing::new)
 }
 
 /// Parses `json` into a [`Node`], migrating a legacy top-level `description`.
@@ -143,7 +144,7 @@ pub fn decrypt_to_node(data: &[u8], passphrase: &str) -> Result<Node, FileHandli
 /// Serialises `node` to JSON (zeroizing the plaintext buffer afterwards) and
 /// encrypts it with `passphrase`.
 fn encrypt_node(node: &Node, passphrase: &str) -> Result<Vec<u8>, FileHandlingError> {
-    let json = Zeroizing::new(node_to_json(node)?);
+    let json = node_to_json(node)?;
     Ok(crypt::encrypt(&json, passphrase)?)
 }
 
