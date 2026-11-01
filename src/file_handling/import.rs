@@ -55,11 +55,16 @@ pub fn import_tree(path: &str) -> Result<Node, FileHandlingError> {
     let data = String::from_utf8(bytes).map_err(|e| {
         FileHandlingError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     })?;
+    // A byte-order mark is what some editors (Excel, Google Sheets for "CSV
+    // UTF-8") put in front of a UTF-8 file. It is not content: drop one before
+    // dispatching, or every format's first token ("{", "<?xml", the CSV header)
+    // fails to match.
+    let data = data.strip_prefix('\u{feff}').unwrap_or(&data);
 
     match format {
-        Format::Json => import_json(&data),
-        Format::Xml => import_xml(&data),
-        Format::Csv => import_csv(&data),
+        Format::Json => import_json(data),
+        Format::Xml => import_xml(data),
+        Format::Csv => import_csv(data),
     }
 }
 
@@ -878,6 +883,29 @@ mod tests {
     fn test_import_from_file_unsupported() {
         let result = import_tree("/tmp/test.unsupported");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn a_leading_utf8_bom_does_not_break_any_import() {
+        let dir = tempfile::tempdir().unwrap();
+        let samples = [
+            ("json", serde_json::to_string(&sample_node()).unwrap()),
+            ("xml", sample_xml().to_string()),
+            ("csv", sample_csv().to_string()),
+        ];
+
+        for (ext, body) in samples {
+            let path = dir.path().join(format!("bom.{ext}"));
+            std::fs::write(&path, format!("\u{feff}{body}")).unwrap();
+
+            let imported = import_tree(&path.to_string_lossy())
+                .unwrap_or_else(|error| panic!("a {ext} file with a BOM must import: {error}"));
+            assert_eq!(imported.name, "Secrets", "{ext}");
+            if ext == "json" {
+                // The JSON sample is a whole tree: compare it in full.
+                assert_nodes_match(&sample_node(), &imported);
+            }
+        }
     }
 
     #[test]
