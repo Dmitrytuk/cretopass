@@ -28,6 +28,13 @@ audit I/O patterns.
 | `import.rs` | `ImportFormat` detection (an alias of `format::Format`), JSON/XML/CSV import with custom parsers, `build_tree_from_paths()` |
 | `share.rs` | `suggest_share_name` (the bundle-folder name) and `share_tree`: writes a share bundle — a re-encrypted secret file via `save_tree`, then a `HOW-TO-OPEN.txt` instruction ([0023](../../../../docs/adr/0023-sharing-a-vault-subtree.md)) |
 
+## Facade
+
+The submodules are `pub(crate)`. Every caller imports the symbols it needs from
+`file_handling::…` directly; the `pub use` list in `src/file_handling.rs` is the
+single facade, so a submodule can be renamed or split without touching any call
+site outside this module.
+
 ## Contracts
 
 - All public functions accept `&str` or `&Path` for paths (not `PathBuf`).

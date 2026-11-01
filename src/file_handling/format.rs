@@ -9,8 +9,11 @@ use std::path::Path;
 /// A serialised-document format accepted by import and export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
+    /// The cretopass-native JSON document.
     Json,
+    /// The XML interchange document.
     Xml,
+    /// The flattened CSV interchange document.
     Csv,
 }
 

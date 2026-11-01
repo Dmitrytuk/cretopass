@@ -12,7 +12,7 @@ use ratatui::layout::Rect;
 
 use super::TreeAction;
 use crate::file_browser::{self, FileBrowserAction, FileBrowserSession, FileBrowserState};
-use crate::file_handling::export::ExportFormat;
+use crate::file_handling::ExportFormat;
 use crate::theming::ElementStyle;
 use crate::tree::node::Node;
 use crate::tree::widget::TreeState;

@@ -12,9 +12,9 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use crate::file_handling::export::sanitize;
-use crate::file_handling::file_process::create_private_dir;
-use crate::file_handling::{FileHandlingError, save_tree};
+use super::export::sanitize;
+use super::file_process::create_private_dir;
+use super::{FileHandlingError, save_tree};
 use crate::theming::texts;
 use crate::tree::node::Node;
 
@@ -36,7 +36,7 @@ const SUGGEST_FALLBACK: &str = "secrets";
 /// stem, plus the sanitised Node name when a single branch is shared.
 ///
 /// Every character in `node_name` that is not alphanumeric or `-`/`_` becomes
-/// `_` (the same rule as [`crate::file_handling::export::suggest_export_name`]), so the
+/// `_` (the same rule as [`super::export::suggest_export_name`]), so the
 /// suggestion is always a usable folder name.
 pub fn suggest_share_name(base_path: Option<&Path>, node_name: Option<&str>) -> String {
     let stem = base_path
@@ -92,10 +92,7 @@ pub fn share_tree(
     save_tree(node, &file_path.to_string_lossy(), passphrase)?;
 
     let instruction = instruction(&file_name, passphrase.is_empty());
-    crate::file_handling::file_process::write_atomic(
-        &dest_dir.join(SHARE_README_NAME),
-        instruction.as_bytes(),
-    )?;
+    super::file_process::write_atomic(&dest_dir.join(SHARE_README_NAME), instruction.as_bytes())?;
 
     Ok(dest_dir.to_path_buf())
 }

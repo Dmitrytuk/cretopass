@@ -1,9 +1,9 @@
 use std::io::Read;
 
-use crate::file_handling::FileHandlingError;
-use crate::file_handling::error::ImportSyntax;
-use crate::file_handling::file_process::MAX_FILE_SIZE;
-use crate::file_handling::format::Format;
+use super::FileHandlingError;
+use super::error::ImportSyntax;
+use super::file_process::MAX_FILE_SIZE;
+use super::format::Format;
 use crate::tree::node::{ExtraField, FieldType, Node, migrate_legacy_description};
 use uuid::Uuid;
 
@@ -554,7 +554,7 @@ fn parse_csv_line(line: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::file_handling::export::{ExportFormat, export_tree};
+    use crate::file_handling::{ExportFormat, export_tree};
 
     fn sample_xml() -> &'static str {
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -812,7 +812,7 @@ mod tests {
         assert!(matches!(
             extract_xml_attrs(r#"name="Root" broken"#),
             Err(FileHandlingError::ImportSyntax(
-                crate::file_handling::error::ImportSyntax::MalformedAttribute
+                ImportSyntax::MalformedAttribute
             ))
         ));
     }
@@ -822,7 +822,7 @@ mod tests {
         assert!(matches!(
             extract_xml_attrs(r#"name="Root"#),
             Err(FileHandlingError::ImportSyntax(
-                crate::file_handling::error::ImportSyntax::MalformedAttribute
+                ImportSyntax::MalformedAttribute
             ))
         ));
     }

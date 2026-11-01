@@ -25,7 +25,7 @@ pub(super) fn import<B: Backend>(
     terminal: &mut Terminal<B>,
     import_path: String,
 ) -> io::Result<()> {
-    let imported = match file_handling::import::import_tree(&import_path) {
+    let imported = match file_handling::import_tree(&import_path) {
         Ok(node) => node,
         Err(e) => {
             state.modal = Some(Modal::error(errors::message(&e)));

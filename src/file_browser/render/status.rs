@@ -149,7 +149,7 @@ mod tests {
     use super::status_parts;
     use crate::file_browser::FileBrowserMode;
     use crate::file_browser::state::{AddPrefix, FileFilter, FocusTarget};
-    use crate::file_handling::export::ExportFormat;
+    use crate::file_handling::ExportFormat;
     use crate::theming::texts;
 
     #[test]

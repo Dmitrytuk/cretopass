@@ -6,7 +6,7 @@ use std::path::Path;
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 
-use crate::file_handling::share::share_tree;
+use crate::file_handling::share_tree;
 use crate::share::SharePassword;
 use crate::theming::Status;
 use crate::theming::texts;

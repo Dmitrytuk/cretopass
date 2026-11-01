@@ -133,7 +133,7 @@ fn config_file_path(dir: &Path) -> PathBuf {
 /// Saves app configuration to the given config directory as binary.
 fn save_config_to(dir: &Path, config: &Configuration) -> Result<(), ConfigError> {
     let path = config_file_path(dir);
-    file_handling::file_process::create_private_dir(dir).map_err(ConfigError::Io)?;
+    file_handling::create_private_dir(dir).map_err(ConfigError::Io)?;
     let bytes = rkyv::to_bytes::<rancor::Error>(config)
         .map_err(|e| ConfigError::Serialize(e.to_string()))?;
     file_handling::write_file(&path.to_string_lossy(), &bytes).map_err(ConfigError::Io)?;
@@ -196,6 +196,11 @@ pub fn push_recent_secret_file(config: &mut Configuration, path: &str) -> Result
 }
 
 #[cfg(test)]
+// `std::env::set_var`/`remove_var` are `unsafe` in edition 2024. The crate
+// denies `unsafe_code` everywhere else; this module is the single, test-only
+// exception. The environment is process-global, so these tests must not run
+// concurrently with each other (see the SAFETY notes on each call).
+#[allow(unsafe_code)]
 mod tests {
     use super::*;
 

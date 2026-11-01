@@ -33,7 +33,7 @@ pub use unlock::UnlockPrompt;
 
 use crossterm::event::KeyEvent;
 
-use crate::file_handling::export::ExportFormat;
+use crate::file_handling::ExportFormat;
 use crate::share::SharePassword;
 
 /// What the active modal asks the Home screen to do.

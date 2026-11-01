@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use zeroize::Zeroize;
 
-use crate::file_handling::error::FileHandlingError;
+use super::error::FileHandlingError;
 
 /// Bound on waiting for the save worker to finish.
 ///
@@ -155,6 +155,11 @@ impl<T: Send + Zeroize + 'static> Autosave<T> {
     ///
     /// If an older snapshot is still waiting, it is replaced: the new snapshot
     /// already contains every earlier change.
+    ///
+    /// A stopped worker cannot be detected here: this always returns a
+    /// generation, even when the worker will never attempt the save. Callers
+    /// that need to know should check [`Autosave::is_running`] first (and the
+    /// closed event channel reports [`SaveError::WorkerStopped`]).
     pub fn submit(&mut self, root: T) -> u64 {
         self.next_generation += 1;
         let generation = self.next_generation;
@@ -175,6 +180,19 @@ impl<T: Send + Zeroize + 'static> Autosave<T> {
 }
 
 impl<T> Autosave<T> {
+    /// Returns `true` while the writer thread is alive.
+    ///
+    /// The worker stops only after a panic in `on_event` has closed the event
+    /// channel; from then on [`Autosave::submit`] would accept snapshots that
+    /// are never attempted. Callers use this to avoid reporting a pending save
+    /// that cannot happen.
+    pub fn is_running(&self) -> bool {
+        self.handle
+            .as_ref()
+            .map(|handle| !handle.is_finished())
+            .unwrap_or(false)
+    }
+
     /// Stops the worker, waiting up to `timeout` for it to finish.
     ///
     /// Any snapshot still waiting in the slot is written first. When the thread
@@ -611,5 +629,13 @@ mod tests {
             events_rx.recv_timeout(TIMEOUT),
             Err(mpsc::RecvTimeoutError::Disconnected)
         ));
+
+        // ...and it reports itself stopped, so the app can stop showing
+        // "Saving" for a save that will never happen.
+        let deadline = Instant::now() + TIMEOUT;
+        while autosave.is_running() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!autosave.is_running(), "the worker must report itself dead");
     }
 }

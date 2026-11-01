@@ -21,7 +21,7 @@ A bundle is:
 
 `<stem>` is the source secret file's stem, plus the sanitised Node name when a
 single branch is shared (`vault_Work.cretopass`) — the same rule as
-`export::suggest_export_name` (`file_handling::share::suggest_share_name`).
+`file_handling::suggest_export_name` (`file_handling::suggest_share_name`).
 
 Rules that follow from it:
 

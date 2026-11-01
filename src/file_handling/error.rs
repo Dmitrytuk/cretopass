@@ -89,16 +89,26 @@ impl fmt::Display for ImportSyntax {
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum FileHandlingError {
+    /// An underlying I/O failure.
     Io(std::io::Error),
+    /// A JSON (de)serialisation failure.
     Serde(serde_json::Error),
+    /// An encryption or decryption failure.
     Crypt(CryptError),
+    /// A file exceeded the shared size cap.
     FileTooLarge {
+        /// The size seen, in bytes.
         size: u64,
+        /// The cap that was exceeded, in bytes.
         max: u64,
     },
+    /// A file was shorter than the age magic header.
     FileTooSmall,
+    /// A file did not begin with the age magic header.
     NotAnAgeFile,
+    /// A passphrase could not be represented as UTF-8.
     InvalidPassphraseEncoding,
+    /// A path could not be written to.
     PathNotWritable(String),
     /// The import path's extension maps to no supported format.
     UnsupportedImportFormat(String),
@@ -107,16 +117,19 @@ pub enum FileHandlingError {
     /// A CSV data row (1-based `line`, counting the header) had fewer fields
     /// than the header requires.
     CsvRowTooFewFields {
+        /// The 1-based physical line the row starts on.
         line: usize,
     },
     /// An export would overwrite an age-encrypted secret file.
     ExportOverwritesSecret {
+        /// The secret file that would have been overwritten.
         path: String,
     },
     /// Serialising the tree for an export failed.
     ExportSerialization(serde_json::Error),
     /// A share destination exists as something other than a folder.
     ShareDestinationNotAFolder {
+        /// The destination that was not a folder.
         path: String,
     },
 }

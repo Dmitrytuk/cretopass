@@ -114,12 +114,13 @@ pub fn run_app<B: Backend>(
                                     dispatch_key(key, state);
                                 }
 
-                                if state.modified {
+                                if state.modified
+                                    && let Some(ref mut worker) = autosave
+                                    && worker.is_running()
+                                {
                                     state.modified = false;
-                                    if let Some(ref mut worker) = autosave {
-                                        submitted = worker.submit(state.root.clone());
-                                        state.save_state = SaveState::Saving;
-                                    }
+                                    submitted = worker.submit(state.root.clone());
+                                    state.save_state = SaveState::Saving;
                                 }
                             }
                         }

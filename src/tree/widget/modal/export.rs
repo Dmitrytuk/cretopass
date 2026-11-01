@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use super::TreeAction;
 use super::chrome::centered_rect;
 use crate::cursor::selected_span;
-use crate::file_handling::export::ExportFormat;
+use crate::file_handling::ExportFormat;
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::TreeState;

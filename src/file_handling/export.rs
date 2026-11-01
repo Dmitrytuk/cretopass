@@ -8,8 +8,8 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use crate::file_handling::format::Format;
-use crate::file_handling::{FileHandlingError, is_age_file, node_to_json};
+use super::format::Format;
+use super::{FileHandlingError, is_age_file, node_to_json};
 use crate::tree::node::Node;
 
 /// The formats an exported document may use.
@@ -95,7 +95,7 @@ pub fn export_tree(
 
     // Write the plaintext export atomically, at owner-only permissions: it
     // holds decrypted secrets, so it must not be world-readable.
-    crate::file_handling::file_process::write_atomic_private(&out_path, data.as_bytes())?;
+    super::file_process::write_atomic_private(&out_path, data.as_bytes())?;
 
     Ok(out_path.to_string_lossy().to_string())
 }

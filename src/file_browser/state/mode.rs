@@ -1,6 +1,6 @@
 //! What the File Browser was opened for, and what a selection therefore means.
 
-use crate::file_handling::export::ExportFormat;
+use crate::file_handling::ExportFormat;
 
 /// Why the file browser was opened, which decides what a selection means.
 #[derive(Debug, Clone, Copy, PartialEq)]

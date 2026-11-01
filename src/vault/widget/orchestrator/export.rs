@@ -1,7 +1,7 @@
 //! Writing the open tree to the file the user named, as plain text.
 
 use crate::file_handling;
-use crate::file_handling::export::ExportFormat;
+use crate::file_handling::ExportFormat;
 use crate::theming::texts;
 
 use super::super::{HomeState, Modal};
@@ -20,10 +20,8 @@ pub(super) fn export(state: &mut HomeState, path: &str, format: ExportFormat) {
         return;
     };
 
-    state.modal = Some(
-        match file_handling::export::export_tree(&node, path, format) {
-            Ok(out_path) => Modal::success(format!("{}{}", texts::MSG_EXPORT_SUCCESS, out_path)),
-            Err(e) => Modal::error(errors::message(&e)),
-        },
-    );
+    state.modal = Some(match file_handling::export_tree(&node, path, format) {
+        Ok(out_path) => Modal::success(format!("{}{}", texts::MSG_EXPORT_SUCCESS, out_path)),
+        Err(e) => Modal::error(errors::message(&e)),
+    });
 }

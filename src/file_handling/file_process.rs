@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
+use super::FileHandlingError;
 use crate::crypt;
-use crate::file_handling::FileHandlingError;
 use crate::theming::texts;
 use crate::tree::node::Node;
 
@@ -22,18 +22,35 @@ const SECRET_DIR_MODE: u32 = 0o700;
 /// A single entry in a directory listing.
 #[derive(Debug, Clone)]
 pub struct FileEntry {
+    /// The entry's file name (lossy for a non-UTF-8 name).
     pub name: String,
+    /// The entry's full path.
     pub path: PathBuf,
+    /// Whether the entry is a directory.
     pub is_dir: bool,
+    /// Whether the entry is a regular file that carries the age magic header.
     pub is_age_file: bool,
 }
 
 // ── JSON helpers ──
 
+/// Serialises `node` to pretty-printed JSON.
+///
+/// The result holds every secret in the tree in the clear; the caller is
+/// responsible for zeroizing it.
+///
+/// # Errors
+///
+/// Returns a [`serde_json::Error`] when `node` cannot be serialised.
 pub fn node_to_json(node: &Node) -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(node)
 }
 
+/// Parses `json` into a [`Node`], migrating a legacy top-level `description`.
+///
+/// # Errors
+///
+/// Returns a [`serde_json::Error`] when `json` is not a valid node.
 pub fn json_to_node(json: &str) -> Result<Node, serde_json::Error> {
     serde_json::from_str(json)
 }
@@ -53,7 +70,8 @@ pub fn read_file(path: &str) -> Result<Vec<u8>, FileHandlingError> {
 ///
 /// **Not atomic** and it does not restrict permissions: intended only for the
 /// caller's non-secret configuration (`vault::utils`), never for a vault or an
-/// export — use [`save_tree`] or [`export_tree`] for those.
+/// export — use [`save_tree`] or
+/// [`export_tree`](crate::file_handling::export_tree) for those.
 ///
 /// # Errors
 ///
@@ -427,6 +445,10 @@ pub fn create_dir(path: &Path) -> Result<(), FileHandlingError> {
 
 /// Creates `path` and any missing parents with owner-only permissions on Unix,
 /// for directories that hold secrets (share bundles, the config directory).
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::Io`] when a directory cannot be created.
 pub(crate) fn create_private_dir(path: &Path) -> Result<(), FileHandlingError> {
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true);
@@ -438,11 +460,21 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<(), FileHandlingError> {
     builder.create(path).map_err(FileHandlingError::Io)
 }
 
+/// Deletes the file at `path`.
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::Io`] when `path` cannot be removed.
 pub fn delete_file(path: &Path) -> Result<(), FileHandlingError> {
     fs::remove_file(path)?;
     Ok(())
 }
 
+/// Renames `from` to `to`, replacing `to` if it exists.
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::Io`] when the rename fails.
 pub fn rename_file(from: &Path, to: &Path) -> Result<(), FileHandlingError> {
     fs::rename(from, to)?;
     Ok(())
@@ -476,9 +508,9 @@ pub fn is_dir_empty(path: &Path) -> Result<bool, FileHandlingError> {
 
 #[cfg(test)]
 mod tests {
+    use super::FileHandlingError;
     use super::*;
     use crate::crypt::CryptError;
-    use crate::file_handling::FileHandlingError;
     use crate::tree::node::{ExtraField, FieldType};
 
     // ── JSON roundtrip tests (original) ──

@@ -13,7 +13,7 @@ use ratatui::Terminal;
 use ratatui::backend::Backend;
 
 use crate::file_browser::FileBrowserMode;
-use crate::file_handling::export::ExportFormat;
+use crate::file_handling::ExportFormat;
 use crate::theming::texts;
 use crate::theming::{Palette, set_palette};
 use crate::vault::utils;
