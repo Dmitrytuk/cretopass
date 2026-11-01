@@ -57,7 +57,8 @@ pub enum HomeAction {
     ToggleSetting(Setting),
     /// Persist the configuration as it stands.
     SaveConfig,
-    /// Reload the stored configuration, discarding the edits.
+    /// Revert the configuration to the snapshot taken when the dialog opened,
+    /// discarding the edits.
     DiscardConfig,
     /// Decrypt the file the unlock prompt was opened for, with the typed password.
     Unlock,

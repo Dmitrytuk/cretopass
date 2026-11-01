@@ -266,6 +266,35 @@ mod tests {
         );
     }
 
+    /// Reopening the dialog takes a fresh revert snapshot: a change made while
+    /// the dialog is closed (a file opened in the meantime) must survive the
+    /// next cancel, not roll back to the copy taken at startup.
+    #[test]
+    fn reopening_the_config_dialog_refreshes_the_revert_snapshot() {
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let enter = || event::KeyEvent::from(KeyCode::Enter);
+        let esc = || event::KeyEvent::from(KeyCode::Esc);
+
+        // Open the dialog from the menu (row 2) and cancel.
+        state.selected = 2;
+        handle_home_key(enter(), &mut state, &mut terminal).unwrap();
+        handle_modal_key(esc(), &mut state, &mut terminal).unwrap();
+
+        // A file opened in the meantime changes the live config.
+        state.config.recent_files.push("/opened.age".to_string());
+
+        // Reopen and cancel: the fresh snapshot must win.
+        state.selected = 2;
+        handle_home_key(enter(), &mut state, &mut terminal).unwrap();
+        handle_modal_key(esc(), &mut state, &mut terminal).unwrap();
+
+        assert!(
+            state.config.recent_files.iter().any(|p| p == "/opened.age"),
+            "a change made between dialogs must survive the next cancel"
+        );
+    }
+
     /// Minimal importable fixture: one root node with one child.
     const IMPORT_FIXTURE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <node name="Secrets" description="My vault">
