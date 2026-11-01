@@ -1,5 +1,6 @@
 use std::process::ExitCode;
 
+use cretopass::cli::LifecycleCommand;
 use cretopass::theming::texts;
 
 const USAGE: &str = "\
@@ -13,7 +14,9 @@ Options:
 
 Commands:
   remove           Delete the app and all artifacts from the system
-  update           Check for a new version and install it";
+                   (self-managed installs only)
+  update           Reinstall the latest release by running its installer
+                   (self-managed installs only; no version comparison)";
 
 /// Feedback block appended to `--help`.
 ///
@@ -41,7 +44,7 @@ fn help_footer() -> String {
 
 fn main() -> ExitCode {
     let mut parser = lexopt::Parser::from_env();
-    let mut subcommand: Option<String> = None;
+    let mut subcommand: Option<LifecycleCommand> = None;
 
     loop {
         let arg = match parser.next() {
@@ -62,23 +65,23 @@ fn main() -> ExitCode {
                 println!("{} {}", texts::APP_NAME, texts::APP_VERSION);
                 return ExitCode::SUCCESS;
             }
-            lexopt::Arg::Value(cmd) => match cmd.to_str() {
-                Some("remove") | Some("update") => {
-                    if subcommand.is_some() {
-                        eprintln!("cretopass: multiple commands are not allowed\n\n{USAGE}");
+            lexopt::Arg::Value(cmd) => {
+                let parsed = cmd.to_str().and_then(LifecycleCommand::parse);
+                match parsed {
+                    Some(command) => {
+                        if subcommand.is_some() {
+                            eprintln!("cretopass: multiple commands are not allowed\n\n{USAGE}");
+                            return ExitCode::FAILURE;
+                        }
+                        subcommand = Some(command);
+                    }
+                    None => {
+                        let shown = cmd.to_string_lossy();
+                        eprintln!("cretopass: unexpected argument '{shown}'\n\n{USAGE}");
                         return ExitCode::FAILURE;
                     }
-                    subcommand = Some(cmd.to_string_lossy().into_owned());
                 }
-                Some(other) => {
-                    eprintln!("cretopass: unexpected argument '{other}'\n\n{USAGE}");
-                    return ExitCode::FAILURE;
-                }
-                None => {
-                    eprintln!("cretopass: unexpected argument (invalid UTF-8)\n\n{USAGE}");
-                    return ExitCode::FAILURE;
-                }
-            },
+            }
             _ => {
                 eprintln!("cretopass: unexpected argument\n\n{USAGE}");
                 return ExitCode::FAILURE;
@@ -86,9 +89,8 @@ fn main() -> ExitCode {
         }
     }
 
-    match subcommand.as_deref() {
-        Some("remove") => cretopass::cli::remove::run_remove(),
-        Some("update") => cretopass::cli::update::run_update(),
+    match subcommand {
+        Some(command) => command.run(),
         None => match cretopass::run() {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
@@ -96,7 +98,6 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        _ => unreachable!(),
     }
 }
 

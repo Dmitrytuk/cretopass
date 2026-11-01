@@ -1,6 +1,12 @@
-use std::io;
-use std::path::PathBuf;
+use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
+
+#[cfg(windows)]
+use std::io;
+
+use super::detect::InstallSource;
+use super::layout;
+use super::layout::TempDir;
 
 const REPO: &str = "Dmitrytuk/cretopass";
 #[cfg(unix)]
@@ -12,11 +18,13 @@ const INSTALLER: &str = "install.ps1";
 ///
 /// Downloads the platform installer script from GitHub Releases and runs it.
 /// On Windows, the installer is run via a detached helper script after the
-/// current process exits to avoid file-locking issues.
-pub fn run_update() -> ExitCode {
-    if let Err(msg) = super::detect::InstallSource::detect().require_self_managed() {
-        eprintln!("cretopass update: {msg}");
-        return ExitCode::from(2);
+/// current process exits to avoid file-locking issues; that path reports
+/// staging success (not the installer's result), which is an accepted
+/// asymmetry documented in ADR 0008.
+pub(crate) fn run_update() -> ExitCode {
+    if let Err(err) = InstallSource::detect().require_self_managed() {
+        eprintln!("cretopass update: {err}");
+        return ExitCode::from(super::EXIT_FOREIGN_INSTALL);
     }
 
     #[cfg(windows)]
@@ -31,20 +39,29 @@ pub fn run_update() -> ExitCode {
 
 #[cfg(unix)]
 fn run_update_unix() -> ExitCode {
-    let tmp_dir = match create_temp_dir("cretopass-update") {
-        Ok(d) => d,
+    let url = match installer_url() {
+        Ok(url) => url,
+        Err(e) => {
+            eprintln!("cretopass update: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let tmp = match TempDir::create("cretopass-update") {
+        Ok(dir) => dir,
         Err(e) => {
             eprintln!("cretopass update: failed to create temp directory: {e}");
             return ExitCode::FAILURE;
         }
     };
 
-    let script_path = tmp_dir.join(INSTALLER);
-    let url = installer_url();
-
+    let script_path = tmp.path().join(INSTALLER);
+    if let Err(e) = layout::create_new_file(&script_path) {
+        eprintln!("cretopass update: failed to stage installer file: {e}");
+        return ExitCode::FAILURE;
+    }
     if let Err(e) = download_with_curl(&url, &script_path) {
         eprintln!("cretopass update: failed to download installer: {e}");
-        let _ = std::fs::remove_dir_all(&tmp_dir);
         return ExitCode::FAILURE;
     }
 
@@ -55,14 +72,10 @@ fn run_update_unix() -> ExitCode {
         .stderr(Stdio::inherit())
         .status();
 
-    let _ = std::fs::remove_dir_all(&tmp_dir);
-
+    // `tmp` is dropped here, removing the staged script and directory.
     match status {
         Ok(s) if s.success() => ExitCode::SUCCESS,
-        Ok(s) => {
-            let code = s.code().unwrap_or(1);
-            ExitCode::from(code as u8)
-        }
+        Ok(s) => exit_code_from(s.code().unwrap_or(1)),
         Err(e) => {
             eprintln!("cretopass update: failed to run installer: {e}");
             ExitCode::FAILURE
@@ -81,37 +94,37 @@ fn run_update_windows() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let tmp_dir = match create_temp_dir("cretopass-update") {
-        Ok(d) => d,
+    let url = match installer_url() {
+        Ok(url) => url,
+        Err(e) => {
+            eprintln!("cretopass update: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let tmp = match TempDir::create("cretopass-update") {
+        Ok(dir) => dir,
         Err(e) => {
             eprintln!("cretopass update: failed to create temp directory: {e}");
             return ExitCode::FAILURE;
         }
     };
 
-    let script_path = tmp_dir.join(INSTALLER);
-    let url = installer_url();
-
+    let script_path = tmp.path().join(INSTALLER);
+    if let Err(e) = layout::create_new_file(&script_path) {
+        eprintln!("cretopass update: failed to stage installer file: {e}");
+        return ExitCode::FAILURE;
+    }
     if let Err(e) = download_with_powershell(&url, &script_path) {
         eprintln!("cretopass update: failed to download installer: {e}");
-        let _ = std::fs::remove_dir_all(&tmp_dir);
         return ExitCode::FAILURE;
     }
 
     // Write a detached helper batch script that waits for the current
     // process to exit, then runs the installer with -Force.
-    let helper_path = tmp_dir.join("_helper.bat");
-    let helper_content = format!(
-        "@echo off\r\n\
-         timeout /t 2 /nobreak > nul\r\n\
-         powershell -NoProfile -ExecutionPolicy Bypass -File \"{}\" -Force\r\n\
-         del /f /q \"{}\"\r\n",
-        script_path.display(),
-        helper_path.display(),
-    );
-    if let Err(e) = std::fs::write(&helper_path, helper_content) {
+    let helper_path = tmp.join("_helper.bat");
+    if let Err(e) = write_update_helper(&helper_path, &script_path, tmp.path()) {
         eprintln!("cretopass update: failed to write helper script: {e}");
-        let _ = std::fs::remove_dir_all(&tmp_dir);
         return ExitCode::FAILURE;
     }
 
@@ -126,28 +139,74 @@ fn run_update_windows() -> ExitCode {
 
     match spawn_result {
         Ok(_) => {
+            // The detached helper reads the staged script after this process
+            // exits, so the temp directory must outlive the drop guard.
+            tmp.keep();
             println!("Update staged. It will complete automatically after this window closes.");
             ExitCode::SUCCESS
         }
         Err(e) => {
             eprintln!("cretopass update: failed to start update helper: {e}");
-            let _ = std::fs::remove_dir_all(&tmp_dir);
             ExitCode::FAILURE
         }
     }
 }
 
+/// Writes the detached Windows update helper.
+///
+/// Every embedded path is validated to be absolute and free of shell
+/// metacharacters before it is interpolated, so an attacker-controlled
+/// `TEMP`/`TMP`/`LOCALAPPDATA` value cannot inject commands.
+#[cfg(windows)]
+fn write_update_helper(helper: &Path, script: &Path, tmp: &Path) -> Result<(), String> {
+    for path in [helper, script, tmp] {
+        layout::ensure_safe_windows_path(path)?;
+    }
+
+    let content = format!(
+        "@echo off\r\n\
+         timeout /t 2 /nobreak > nul\r\n\
+         powershell -NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Force\r\n\
+         del /f /q \"{script}\"\r\n\
+         rmdir /q /s \"{tmp}\"\r\n",
+        script = script.display(),
+        tmp = tmp.display(),
+    );
+    std::fs::write(helper, content).map_err(|e| format!("failed to write helper: {e}"))
+}
+
 /// Returns the URL of the installer script to download.
 ///
-/// Honours the `CRETOPASS_UPDATE_URL` environment variable to allow tests (and
-/// mirrors) to point at a different source. An empty value is treated as unset.
-fn installer_url() -> String {
-    installer_url_from(
-        std::env::var("CRETOPASS_UPDATE_URL")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .as_deref(),
-    )
+/// Honours the `CRETOPASS_UPDATE_URL` environment variable in debug builds to
+/// allow tests and mirrors to point at a different source. The override is
+/// compiled out of release builds. An empty value is treated as unset.
+fn installer_url() -> Result<String, String> {
+    match update_url_override() {
+        Some(url) => {
+            validate_update_url(&url)?;
+            Ok(url)
+        }
+        None => Ok(default_installer_url()),
+    }
+}
+
+/// Reads the debug-only `CRETOPASS_UPDATE_URL` override.
+#[cfg(debug_assertions)]
+fn update_url_override() -> Option<String> {
+    std::env::var("CRETOPASS_UPDATE_URL")
+        .ok()
+        .filter(|value| !value.is_empty())
+}
+
+/// Release builds ignore the override entirely.
+#[cfg(not(debug_assertions))]
+fn update_url_override() -> Option<String> {
+    None
+}
+
+/// The default GitHub Releases URL for the current platform's installer.
+fn default_installer_url() -> String {
+    installer_url_from(None)
 }
 
 /// Resolves the installer URL from an optional override.
@@ -161,19 +220,55 @@ fn installer_url_from(base: Option<&str>) -> String {
     }
 }
 
-/// Creates a uniquely named temporary directory.
-fn create_temp_dir(prefix: &str) -> io::Result<PathBuf> {
-    let dir = std::env::temp_dir().join(format!("{prefix}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir)?;
-    Ok(dir)
+/// Rejects an update URL that could be parsed as a `curl` option or an
+/// unsupported protocol.
+fn validate_update_url(url: &str) -> Result<(), String> {
+    if url.starts_with('-') {
+        return Err(format!("refusing update URL starting with '-': {url}"));
+    }
+    if !scheme_allowed(url) {
+        return Err(format!("refusing unsupported update URL scheme: {url}"));
+    }
+    Ok(())
+}
+
+/// Debug builds also accept `file://` fixtures.
+#[cfg(debug_assertions)]
+fn scheme_allowed(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("file://")
+}
+
+/// Release builds accept `https://` only.
+#[cfg(not(debug_assertions))]
+fn scheme_allowed(url: &str) -> bool {
+    url.starts_with("https://")
+}
+
+/// Maps a child exit status into an [`ExitCode`].
+///
+/// Out-of-range or signal-terminated statuses become failure rather than being
+/// truncated into a misleading success (`256 as u8 == 0`).
+#[cfg(unix)]
+fn exit_code_from(code: i32) -> ExitCode {
+    match u8::try_from(code) {
+        Ok(code) => ExitCode::from(code),
+        Err(_) => ExitCode::FAILURE,
+    }
 }
 
 /// Downloads a file using `curl`.
+///
+/// The protocol is pinned to HTTPS (with no redirect downgrade) and the URL is
+/// placed after `--` so a value can never be parsed as a curl option.
 #[cfg(unix)]
-fn download_with_curl(url: &str, dest: &PathBuf) -> Result<(), String> {
-    let status = Command::new("curl")
-        .args(["-fsSL", "-o"])
-        .arg(dest)
+fn download_with_curl(url: &str, dest: &Path) -> Result<(), String> {
+    let mut command = Command::new("curl");
+    command.arg("-fsSL").arg("-o").arg(dest);
+    if url.starts_with("https://") {
+        command.args(["--proto", "=https", "--proto-redir", "=https"]);
+    }
+    let status = command
+        .arg("--")
         .arg(url)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -188,16 +283,19 @@ fn download_with_curl(url: &str, dest: &PathBuf) -> Result<(), String> {
 }
 
 /// Downloads a file using PowerShell's `Invoke-WebRequest`.
+///
+/// The URL and destination are passed through the environment rather than
+/// interpolated into a `-Command` string, so a quote in either value cannot
+/// break out into arbitrary PowerShell.
 #[cfg(windows)]
-fn download_with_powershell(url: &str, dest: &std::path::Path) -> Result<(), String> {
+fn download_with_powershell(url: &str, dest: &Path) -> Result<(), String> {
     let status = Command::new("powershell")
+        .env("CRETOPASS_DL_URL", url)
+        .env("CRETOPASS_DL_DEST", dest)
         .args([
             "-NoProfile",
             "-Command",
-            &format!(
-                "Invoke-WebRequest -Uri '{url}' -OutFile '{}' -UseBasicParsing",
-                dest.display()
-            ),
+            "Invoke-WebRequest -Uri $env:CRETOPASS_DL_URL -OutFile $env:CRETOPASS_DL_DEST -UseBasicParsing",
         ])
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -232,25 +330,80 @@ mod tests {
         );
     }
 
+    /// A leading `-` would be parsed by `curl` as an option, so it is refused.
+    #[test]
+    fn validate_update_url_rejects_option_like_values() {
+        let err = validate_update_url("-Kconfig").unwrap_err();
+        assert!(err.contains("starting with '-'"), "{err}");
+    }
+
+    /// A plain-HTTP URL is refused.
+    #[test]
+    fn validate_update_url_rejects_plain_http() {
+        assert!(validate_update_url("http://example.com/install.sh").is_err());
+    }
+
+    /// HTTPS is always accepted.
+    #[test]
+    fn validate_update_url_accepts_https() {
+        assert!(validate_update_url("https://example.com/install.sh").is_ok());
+    }
+
+    /// Debug builds accept a `file://` fixture URL so tests can run offline.
+    #[test]
+    #[cfg(debug_assertions)]
+    fn validate_update_url_accepts_file_in_debug() {
+        assert!(validate_update_url("file:///tmp/fake-install.sh").is_ok());
+    }
+
+    /// Exit codes inside the `u8` range are preserved exactly.
+    #[test]
+    #[cfg(unix)]
+    fn exit_code_from_preserves_in_range_codes() {
+        assert_eq!(exit_code_from(0), ExitCode::SUCCESS);
+        assert_eq!(exit_code_from(1), ExitCode::from(1));
+        assert_eq!(exit_code_from(255), ExitCode::from(255));
+    }
+
+    /// Out-of-range statuses must not truncate into a false success.
+    #[test]
+    #[cfg(unix)]
+    fn exit_code_from_rejects_out_of_range() {
+        assert_eq!(exit_code_from(256), ExitCode::FAILURE);
+        assert_eq!(exit_code_from(-1), ExitCode::FAILURE);
+    }
+
     /// `download_with_curl` copies the source at a `file://` URL to the
-    /// destination path. Requires `curl` on `PATH`.
+    /// destination path. Skips at runtime when `curl` is unavailable.
     #[cfg(unix)]
     #[test]
     fn download_with_curl_file_url_copies_content() {
-        let fixture = std::env::temp_dir().join("cretopass-test-fixture.sh");
-        let dest = std::env::temp_dir().join("cretopass-test-dest.sh");
+        if !curl_available() {
+            eprintln!("skipping: curl is not available");
+            return;
+        }
+
+        let tmp = TempDir::create("cretopass-curl-test").unwrap();
+        let fixture = tmp.path().join("fixture.sh");
+        let dest = tmp.path().join("dest.sh");
         let content = "#!/bin/sh\necho cretopass-test\n";
         std::fs::write(&fixture, content).expect("write fixture");
 
         let url = format!("file://{}", fixture.display());
-        let result = download_with_curl(&url, &dest);
+        download_with_curl(&url, &dest).expect("curl download should succeed");
 
-        let copied = std::fs::read_to_string(&dest).ok();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), content);
+    }
 
-        let _ = std::fs::remove_file(&fixture);
-        let _ = std::fs::remove_file(&dest);
-
-        result.expect("curl download should succeed");
-        assert_eq!(copied.as_deref(), Some(content));
+    /// Returns true when `curl` is on `PATH`.
+    #[cfg(unix)]
+    fn curl_available() -> bool {
+        Command::new("curl")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
     }
 }
