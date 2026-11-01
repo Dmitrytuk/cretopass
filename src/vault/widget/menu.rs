@@ -58,7 +58,8 @@ fn menu_intent(state: &HomeState, action: &Action) -> Option<HomeAction> {
             2 => Some(HomeAction::OpenConfiguration),
             3 => Some(HomeAction::BeginChangePassword),
             4 => Some(HomeAction::BeginExport),
-            5 => Some(HomeAction::ChooseFileToImport),
+            5 => Some(HomeAction::BeginShare),
+            6 => Some(HomeAction::ChooseFileToImport),
             idx => state
                 .config
                 .recent_files

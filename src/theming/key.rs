@@ -58,7 +58,12 @@ pub enum Action {
     ToggleShowPassword,
     Yes,
     No,
+    /// Export the selected Node to a plain-text file.
     ExportNode,
+    /// Arms the `Ctrl+E` prefix: the next key picks Export (`e`) or Share (`s`).
+    ExportStart,
+    /// Share the selected Node's subtree as a new encrypted bundle.
+    ShareNode,
     OpenHelp,
     None,
 }
@@ -69,7 +74,7 @@ impl Action {
             return match key.code {
                 KeyCode::Enter => Self::OpenDetail,
                 KeyCode::Char('c') => Self::Quit,
-                KeyCode::Char('e') => Self::ExportNode,
+                KeyCode::Char('e') => Self::ExportStart,
                 _ => Self::None,
             };
         }
@@ -118,6 +123,18 @@ impl Action {
     pub fn from_pending_cut(key: &KeyEvent) -> Self {
         match key.code {
             KeyCode::Char('d') => Self::Cut,
+            _ => Self::Cancel,
+        }
+    }
+
+    /// Dispatch for the `PendingExport` mode entered by `Ctrl+E`.
+    ///
+    /// `e` keeps the single-node export, `s` starts the share flow; every other
+    /// key cancels, exactly like the `d`/`a`/`p` prefixes.
+    pub fn from_pending_export(key: &KeyEvent) -> Self {
+        match key.code {
+            KeyCode::Char('e') => Self::ExportNode,
+            KeyCode::Char('s') => Self::ShareNode,
             _ => Self::Cancel,
         }
     }
@@ -432,6 +449,42 @@ mod tests {
         assert_eq!(
             Action::from_pending_cut(&key(KeyCode::Enter)),
             Action::Cancel
+        );
+    }
+
+    #[test]
+    fn from_pending_export_e_exports_and_s_shares() {
+        assert_eq!(
+            Action::from_pending_export(&key(KeyCode::Char('e'))),
+            Action::ExportNode
+        );
+        assert_eq!(
+            Action::from_pending_export(&key(KeyCode::Char('s'))),
+            Action::ShareNode
+        );
+    }
+
+    #[test]
+    fn from_pending_export_any_other_key_cancels() {
+        assert_eq!(
+            Action::from_pending_export(&key(KeyCode::Char('x'))),
+            Action::Cancel
+        );
+        assert_eq!(
+            Action::from_pending_export(&key(KeyCode::Esc)),
+            Action::Cancel
+        );
+        assert_eq!(
+            Action::from_pending_export(&key(KeyCode::Enter)),
+            Action::Cancel
+        );
+    }
+
+    #[test]
+    fn ctrl_e_arms_the_export_share_prefix() {
+        assert_eq!(
+            Action::from_normal(&ctrl(KeyCode::Char('e'))),
+            Action::ExportStart
         );
     }
 

@@ -1,21 +1,41 @@
-//! Masked password fields shared by the Home modals.
+//! Masked password fields shared by the Home prompts and the Share flow.
 //!
-//! `PassphraseInput`, `CreateSecretFile` and `ChangePwInput` all edit N masked
-//! text fields with one focused field and a shared "reveal plaintext" flag.
-//! This module owns that behaviour, so the three modals stop re-implementing
-//! the same editing and span-building code.
+//! The unlock, create-secret and change-password prompts all edit N masked text
+//! fields with one focused field and a shared "reveal plaintext" flag. This
+//! module owns that behaviour on top of the [`super::core`] editing primitives,
+//! so every prompt stops re-implementing the same editing and span-building
+//! code.
 
 use ratatui::text::Span;
+use zeroize::Zeroize;
 
-use crate::cursor::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
-use crate::theming::ElementStyle;
+use super::core::{backspace_at, cursor_left, cursor_right, delete_at, insert_char_at};
+use crate::theming::{Action, ElementStyle};
 
 /// A single masked text field: its text and a byte-offset cursor
-/// ([ADR 0003](../../cursor/docs/adr/0003-cursor.md)).
-#[derive(Debug, Default, Clone)]
+/// ([ADR 0003](docs/adr/0003-cursor.md)).
+///
+/// The text is a plaintext secret: it is wiped from the heap when the field is
+/// dropped ([`Zeroize`]) and redacted from [`Debug`], mirroring `SaveTarget`.
+#[derive(Default, Clone)]
 pub struct SecretField {
     text: String,
     cursor: usize,
+}
+
+impl std::fmt::Debug for SecretField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecretField")
+            .field("text", &"<redacted>")
+            .field("cursor", &self.cursor)
+            .finish()
+    }
+}
+
+impl Drop for SecretField {
+    fn drop(&mut self) {
+        self.text.zeroize();
+    }
 }
 
 impl SecretField {
@@ -63,15 +83,56 @@ impl SecretField {
     }
 }
 
+/// What a [`SecretFieldGroup::apply_action`] call did to the fields.
+///
+/// The prompts share one key map, but not one clear-the-report policy: typing
+/// again clears a rejection everywhere, while erasing or moving may not. The
+/// variant lets each prompt keep its own policy without re-implementing the
+/// dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldEdit {
+    /// A character was inserted into the focused field.
+    Inserted,
+    /// A character was removed from the focused field.
+    Deleted,
+    /// A cursor moved, the focus switched, or the reveal flag flipped.
+    Moved,
+    /// The action does not touch the fields (`Confirm`, `Cancel`, …).
+    Unhandled,
+}
+
+/// The verdict of validating a two-field passphrase pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PairVerdict {
+    /// Both fields are empty: a passwordless flow the caller must confirm.
+    Empty,
+    /// The two fields differ; the cursors were reset so it can be corrected.
+    Mismatch,
+    /// The pair matches and is not empty.
+    Match,
+}
+
 /// A group of [`SecretField`]s with one focused field and one reveal flag.
 ///
-/// The modals differ only in how many fields they hold: one for unlocking, two
-/// for creating a secret file, three for changing the master password.
-#[derive(Debug, Default, Clone)]
+/// The prompts differ only in how many fields they hold: one for unlocking, two
+/// for creating a secret file or a share bundle, three for changing the master
+/// password.
+#[derive(Default, Clone)]
 pub struct SecretFieldGroup {
     fields: Vec<SecretField>,
     focused: usize,
     show: bool,
+}
+
+impl std::fmt::Debug for SecretFieldGroup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Each field redacts its own text; print the shape, not the contents.
+        f.debug_struct("SecretFieldGroup")
+            .field("fields", &self.fields.len())
+            .field("focused", &self.focused)
+            .field("show", &self.show)
+            .finish()
+    }
 }
 
 impl SecretFieldGroup {
@@ -84,6 +145,13 @@ impl SecretFieldGroup {
         }
     }
 
+    /// The field at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `index` is out of range. Every caller passes an index within
+    /// the count the group was built with
+    /// ([`SecretFieldGroup::with_fields`]).
     pub fn field(&self, index: usize) -> &SecretField {
         &self.fields[index]
     }
@@ -118,6 +186,73 @@ impl SecretFieldGroup {
         if let Some(field) = self.fields.get_mut(self.focused) {
             action(field);
         }
+    }
+
+    /// Applies a dispatched prompt key to the group, reporting what it did.
+    ///
+    /// Every masked-password prompt — unlock, create-secret, change-password and
+    /// the share passphrase — dispatches the same [`Action`] set. This is the one
+    /// place that maps it onto the fields; the prompts keep only their own
+    /// `Cancel`, `Confirm` and clear-the-report policy.
+    pub fn apply_action(&mut self, action: Action) -> FieldEdit {
+        match action {
+            Action::NextField => {
+                self.next_field();
+                FieldEdit::Moved
+            }
+            Action::PrevField => {
+                self.prev_field();
+                FieldEdit::Moved
+            }
+            Action::ToggleShowPassword => {
+                self.toggle_show();
+                FieldEdit::Moved
+            }
+            Action::InsertChar(c) => {
+                self.apply(|field| field.insert(c));
+                FieldEdit::Inserted
+            }
+            Action::Backspace => {
+                self.apply(SecretField::backspace);
+                FieldEdit::Deleted
+            }
+            Action::DeleteChar => {
+                self.apply(SecretField::delete);
+                FieldEdit::Deleted
+            }
+            Action::CursorLeft => {
+                self.apply(SecretField::move_left);
+                FieldEdit::Moved
+            }
+            Action::CursorRight => {
+                self.apply(SecretField::move_right);
+                FieldEdit::Moved
+            }
+            Action::CursorHome => {
+                self.apply(SecretField::move_home);
+                FieldEdit::Moved
+            }
+            Action::CursorEnd => {
+                self.apply(SecretField::move_end);
+                FieldEdit::Moved
+            }
+            _ => FieldEdit::Unhandled,
+        }
+    }
+
+    /// Validates the two-field passphrase pair (fields 0 and 1) with the rule
+    /// the create-secret and share prompts share: both fields empty is the
+    /// passwordless case, a mismatch resets the cursors to be corrected, and a
+    /// matching non-empty pair is usable.
+    pub fn pair_verdict(&mut self) -> PairVerdict {
+        if self.field(0).text().is_empty() && self.field(1).text().is_empty() {
+            return PairVerdict::Empty;
+        }
+        if self.field(0).text() != self.field(1).text() {
+            self.reset_cursors();
+            return PairVerdict::Mismatch;
+        }
+        PairVerdict::Match
     }
 
     /// Moves every cursor to the start and focuses the first field, keeping the
@@ -173,7 +308,7 @@ pub fn secret_field_spans(field: &SecretField, focused: bool, show: bool) -> Vec
 }
 
 /// The padded `  Label: ` prefix followed by [`secret_field_spans`]: the layout
-/// the multi-field modals use.
+/// the multi-field prompts use.
 pub fn password_field_spans(
     label: &str,
     field: &SecretField,
@@ -246,6 +381,44 @@ mod tests {
         assert_eq!(group.focused_index(), 1);
         group.next_field();
         assert_eq!(group.focused_index(), 0);
+    }
+
+    #[test]
+    fn apply_action_reports_what_it_did() {
+        let mut group = SecretFieldGroup::with_fields(2);
+
+        assert_eq!(
+            group.apply_action(Action::InsertChar('x')),
+            FieldEdit::Inserted
+        );
+        assert_eq!(group.apply_action(Action::Backspace), FieldEdit::Deleted);
+        assert_eq!(group.apply_action(Action::CursorLeft), FieldEdit::Moved);
+        assert_eq!(
+            group.apply_action(Action::ToggleShowPassword),
+            FieldEdit::Moved
+        );
+        assert_eq!(group.apply_action(Action::NextField), FieldEdit::Moved);
+        assert_eq!(group.apply_action(Action::Confirm), FieldEdit::Unhandled);
+        assert_eq!(group.field(0).text(), "", "the char was backspaced away");
+    }
+
+    #[test]
+    fn pair_verdict_matches_the_two_field_rule() {
+        let mut group = SecretFieldGroup::with_fields(2);
+
+        assert_eq!(group.pair_verdict(), PairVerdict::Empty);
+
+        group.apply(|f| f.insert('a'));
+        group.next_field();
+        group.apply(|f| f.insert('b'));
+        assert_eq!(group.pair_verdict(), PairVerdict::Mismatch);
+        assert_eq!(group.focused_index(), 0, "a mismatch resets the focus");
+
+        group.clear();
+        group.apply(|f| f.insert('b'));
+        group.next_field();
+        group.apply(|f| f.insert('b'));
+        assert_eq!(group.pair_verdict(), PairVerdict::Match);
     }
 
     #[test]

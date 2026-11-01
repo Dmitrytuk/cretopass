@@ -61,6 +61,10 @@ cretopass remove   # delete the app and all its artifacts
   mid-save cannot corrupt the vault.
 - **Import / export** — secrets can be imported from and exported to
   JSON/CSV/XML files via the file browser.
+- **Share bundles** — hand a node (with or without its children) or the whole
+  vault to someone else as a still-encrypted folder they open with their own
+  password, plus a plain-text `HOW-TO-OPEN.txt`; reached from the Tree (`Ctrl+E`,
+  then `s`) or the Home menu's "Share active file".
 
 ## Security model
 

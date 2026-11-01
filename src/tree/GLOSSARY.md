@@ -86,5 +86,8 @@ _Avoid_: Clipboard, Yank buffer
 
 **Export**: Writing a Node (with or without children) to a plain-text file. Three steps: pick the scope, pick the format (JSON, XML, or CSV), then name the destination in the File Browser. An export never overwrites a secret file.
 
+**Share**: Writing the selected Node, with or without its children, (or the whole open file from Home) as a new **encrypted** secret file in a bundle the recipient opens with their own password, plus a plain-text instruction. Reached with `Ctrl+E` then `s`; what to share, the bundle folder and the password are chosen in three steps. Unlike an Export, nothing is written in the clear.
+_Avoid_: Export (an Export is plain text)
+
 **Search**: A navigation mode that filters the visible tree by node name. Activated with `/`. Matched nodes are highlighted; navigation is constrained to matches while search is active.
 _Avoid_: Filter, Find

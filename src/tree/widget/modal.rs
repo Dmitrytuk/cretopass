@@ -14,12 +14,18 @@ mod detail;
 mod export;
 mod export_destination;
 mod help;
+mod share;
+mod share_destination;
+mod share_passphrase;
 
 pub(crate) use alert::Alert;
 pub(crate) use detail::Detail;
 pub(crate) use export::ExportWizard;
 pub(crate) use export_destination::ExportDestination;
 pub(crate) use help::Help;
+pub(crate) use share::ShareWizard;
+pub(crate) use share_destination::ShareDestination;
+pub(crate) use share_passphrase::SharePassphrase;
 
 pub(crate) use chrome::centered_rect;
 
@@ -35,6 +41,7 @@ use crossterm::event::KeyEvent;
 
 use super::TreeState;
 use crate::file_handling::export::ExportFormat;
+use crate::share::SharePassword;
 use crate::tree::node::Node;
 
 /// What the active modal asks the Tree screen to do.
@@ -61,6 +68,23 @@ pub(crate) enum TreeAction {
         format: ExportFormat,
         path: String,
     },
+    /// Open the File Browser to name the folder a share bundle of `node`, with
+    /// or without its children, is written into.
+    BeginShareDestination { node: Node, include_children: bool },
+    /// Ask for the password a share bundle of `node` is encrypted with, having
+    /// named `dest`.
+    BeginSharePassphrase {
+        node: Node,
+        include_children: bool,
+        dest: String,
+    },
+    /// Write a share bundle of `node` into `dest`, encrypted with `passphrase`.
+    Share {
+        node: Node,
+        include_children: bool,
+        dest: String,
+        passphrase: SharePassword,
+    },
 }
 
 /// The Tree's modal slot: at most one at a time, over Normal navigation.
@@ -78,6 +102,14 @@ pub(crate) enum Modal {
     /// Naming the destination of an export in the File Browser. Boxed because the
     /// browser's state is far larger than the passive modals.
     ExportDestination(Box<ExportDestination>),
+    /// The share flow's first step: pick what to share (this node or with its
+    /// children).
+    Share(ShareWizard),
+    /// Naming the folder a share bundle is written into. Boxed because the
+    /// browser's state is far larger than the passive modals.
+    ShareDestination(Box<ShareDestination>),
+    /// The share flow's password step. Boxed for the same reason.
+    SharePassphrase(Box<SharePassphrase>),
 }
 
 impl Modal {
@@ -107,6 +139,9 @@ impl Modal {
             Self::Detail(detail) => detail.handle_key(key, state),
             Self::Export(wizard) => wizard.handle_key(key, state),
             Self::ExportDestination(destination) => destination.handle_key(key, state),
+            Self::Share(wizard) => wizard.handle_key(key, state),
+            Self::ShareDestination(destination) => destination.handle_key(key, state),
+            Self::SharePassphrase(prompt) => prompt.handle_key(key, state),
         }
     }
 }

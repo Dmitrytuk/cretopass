@@ -41,6 +41,9 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
         Some(Modal::Configuration(modal)) => modal.render(frame, area, &state.config),
         Some(Modal::ChangePassword(prompt)) => prompt.render(frame, area),
         Some(Modal::Export(wizard)) => wizard.render(frame, area),
+        Some(Modal::SharePassphrase(prompt)) => {
+            prompt.render(frame, area, state.config.display_full_path)
+        }
         None => {}
     }
 }
@@ -168,6 +171,7 @@ pub(super) fn home_status_parts(state: &HomeState) -> (&'static str, ElementStyl
         Some(Modal::Confirmation(confirmation)) => confirmation.status_parts(),
         Some(Modal::ChangePassword(prompt)) => prompt.status_parts(),
         Some(Modal::Export(wizard)) => wizard.status_parts(),
+        Some(Modal::SharePassphrase(prompt)) => prompt.status_parts(),
         Some(Modal::About(about)) => about.status_parts(),
     }
 }

@@ -22,6 +22,7 @@ pub enum ElementStyle {
     ModePendingCut,
     ModePendingPaste,
     ModePendingAdd,
+    ModePendingExport,
     ModeDetail,
     ModeEdit,
     ModeAdd,
@@ -115,6 +116,10 @@ impl ElementStyle {
             Self::ModePendingAdd => Style::default()
                 .bg(scheme.success)
                 .fg(scheme.inverse_fg)
+                .add_modifier(Modifier::BOLD),
+            Self::ModePendingExport => Style::default()
+                .bg(scheme.info)
+                .fg(scheme.text)
                 .add_modifier(Modifier::BOLD),
             Self::ModeDetail => Style::default()
                 .bg(scheme.selection_bg)

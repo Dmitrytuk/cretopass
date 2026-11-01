@@ -9,7 +9,7 @@ use super::modal::Modal;
 use super::save::{SaveExit, SaveState};
 use crate::file_browser::FileBrowserSession;
 use crate::generator::PasswordParams;
-use crate::theming::Spinner;
+use crate::theming::{Spinner, Status};
 use crate::tree::node::Node;
 
 /// A single visible row in the flattened tree display.
@@ -35,6 +35,8 @@ pub enum InputMode {
     PendingPaste,
     /// Waiting for the direction key after the first `a` (`PendingAdd`).
     PendingAdd,
+    /// Waiting for the export/share key after `Ctrl+E` (`PendingExport`).
+    PendingExport,
 }
 
 /// Where a pending "Add" form should place the newly created node.
@@ -78,7 +80,12 @@ pub struct TreeState {
     /// Persistence status of the autosave worker, shown in the title bar and as
     /// the save-error overlay.
     pub(crate) save_state: SaveState,
-    /// Frame counter for the animated busy glyph shown next to `save_state`.
+    /// Status of a blocking operation that is not the autosave worker (today,
+    /// writing a share bundle). Takes title-bar precedence over `save_state`
+    /// while it is set.
+    pub(crate) operation_status: Option<Status>,
+    /// Frame counter for the animated busy glyph shown next to the title-bar
+    /// status.
     pub(crate) spinner: Spinner,
     /// A requested exit that is parked waiting on the save worker.
     pub(crate) save_exit: SaveExit,
@@ -112,6 +119,7 @@ impl TreeState {
             browser_session: FileBrowserSession::default(),
             modified: false,
             save_state: SaveState::Idle,
+            operation_status: None,
             spinner: Spinner::default(),
             save_exit: SaveExit::None,
             display_full_path: true,

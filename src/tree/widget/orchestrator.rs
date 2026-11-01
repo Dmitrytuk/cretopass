@@ -8,15 +8,31 @@
 use std::io::{self, Write};
 use std::path::Path;
 
+use ratatui::Frame;
+use ratatui::Terminal;
+use ratatui::backend::Backend;
+
+use super::busy::run_with_busy;
 use super::modal::TreeAction;
-use super::{ExportDestination, Modal, TreeState};
+use super::{ExportDestination, Modal, ShareDestination, SharePassphrase, TreeState};
 use crate::file_handling::export::{ExportFormat, export_tree};
-use crate::theming::texts;
+use crate::file_handling::share::share_tree;
+use crate::share::SharePassword;
+use crate::theming::{Status, texts};
 use crate::tree::node::Node;
 
 /// Performs `action`. The modal that produced it has already been taken out of
 /// [`TreeState`], so dismissing it is the act of not putting it back.
-pub(crate) fn execute(state: &mut TreeState, action: TreeAction) -> io::Result<()> {
+///
+/// `terminal` and `draw` are only needed by actions that block (the share
+/// write): they let [`run_with_busy`] keep the title-bar status animating while
+/// the work runs off-thread. `draw` is the screen's full-frame renderer.
+pub(crate) fn execute<B: Backend>(
+    state: &mut TreeState,
+    terminal: &mut Terminal<B>,
+    action: TreeAction,
+    draw: fn(&mut Frame, &mut TreeState),
+) -> io::Result<()> {
     match action {
         TreeAction::Close => Ok(()),
         TreeAction::CopyToClipboard { text } => {
@@ -40,6 +56,39 @@ pub(crate) fn execute(state: &mut TreeState, action: TreeAction) -> io::Result<(
             export(state, node, include_children, format, &path);
             Ok(())
         }
+        TreeAction::BeginShareDestination {
+            node,
+            include_children,
+        } => {
+            open_share_destination(state, node, include_children);
+            Ok(())
+        }
+        TreeAction::BeginSharePassphrase {
+            node,
+            include_children,
+            dest,
+        } => {
+            state.modal = Some(Modal::SharePassphrase(Box::new(SharePassphrase::new(
+                node,
+                include_children,
+                dest,
+            ))));
+            Ok(())
+        }
+        TreeAction::Share {
+            node,
+            include_children,
+            dest,
+            passphrase,
+        } => share(
+            state,
+            terminal,
+            draw,
+            node,
+            include_children,
+            &dest,
+            passphrase,
+        ),
     }
 }
 
@@ -67,6 +116,34 @@ fn open_export_destination(
     state.modal = Some(Modal::ExportDestination(Box::new(destination)));
 }
 
+/// Opens the File Browser to name the folder a share bundle of `node` is written
+/// into.
+///
+/// The open secret file seeds the suggested folder name and the starting
+/// directory; the browser falls back to its session memory when there is none.
+fn open_share_destination(state: &mut TreeState, node: Node, include_children: bool) {
+    let destination = {
+        let base_path = state.active_vault_path.as_deref().map(Path::new);
+        ShareDestination::new(node, include_children, base_path, &state.browser_session)
+    };
+
+    state.modal = Some(Modal::ShareDestination(Box::new(destination)));
+}
+
+/// `node` as the scope selects it: unchanged when `include_children`, otherwise
+/// with its children dropped so a single node is written as a leaf.
+///
+/// Shared by the export and share flows, so "this node only" means the same
+/// thing in both.
+fn node_for_scope(node: Node, include_children: bool) -> Node {
+    if include_children {
+        return node;
+    }
+    let mut node = node;
+    node.children = Vec::new();
+    node
+}
+
 /// Writes `node` to `path` as `format` and reports the outcome as an alert.
 fn export(
     state: &mut TreeState,
@@ -75,18 +152,53 @@ fn export(
     format: ExportFormat,
     path: &str,
 ) {
-    let export_node = if include_children {
-        node
-    } else {
-        let mut node = node;
-        node.children = Vec::new();
-        node
-    };
+    let export_node = node_for_scope(node, include_children);
 
     state.modal = Some(match export_tree(&export_node, path, format) {
         Ok(out_path) => Modal::success(format!("{}{}", texts::MSG_EXPORT_NODE_SUCCESS, out_path)),
         Err(error) => Modal::error(format!("{error}")),
     });
+}
+
+/// Writes a share bundle of `node`, with or without its children, into `path`
+/// and reports the outcome as an alert.
+///
+/// The bundle is named after the Node. The write runs off the UI thread so the
+/// title bar keeps animating its `Saving` status while the bundle is re-encrypted
+/// and fsynced.
+fn share<B: Backend>(
+    state: &mut TreeState,
+    terminal: &mut Terminal<B>,
+    draw: fn(&mut Frame, &mut TreeState),
+    node: Node,
+    include_children: bool,
+    path: &str,
+    passphrase: SharePassword,
+) -> io::Result<()> {
+    // Mirror the export wizard: a node shared without its children drops them
+    // before it is written.
+    let bundle_root = node_for_scope(node, include_children);
+    let node_name = Some(bundle_root.name.clone());
+    let base_path = state.active_vault_path.clone();
+    let path = path.to_string();
+
+    // The password is moved into the worker as a `SharePassword`, so the bytes
+    // are zeroized when the closure drops rather than lingering in a `String`.
+    let result = run_with_busy(terminal, state, Status::Saving, draw, move || {
+        share_tree(
+            &bundle_root,
+            Path::new(&path),
+            base_path.as_deref().map(Path::new),
+            node_name.as_deref(),
+            passphrase.as_bytes(),
+        )
+    })?;
+
+    state.modal = Some(match result {
+        Ok(bundle) => Modal::success(format!("{}{}", texts::MSG_SHARE_SUCCESS, bundle.display())),
+        Err(error) => Modal::error(format!("{error}")),
+    });
+    Ok(())
 }
 
 /// Copies `text` to the system clipboard, trying the platform's helper in turn.

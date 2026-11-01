@@ -6,9 +6,9 @@
 use std::borrow::Cow;
 
 use super::HomeAction;
+use crate::cursor::{FieldEdit, SecretFieldGroup, secret_field_spans};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{display_path, make_overlay, paint_overlay};
-use crate::vault::widget::secret_field::{SecretField, SecretFieldGroup, secret_field_spans};
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -60,42 +60,14 @@ impl UnlockPrompt {
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<HomeAction> {
         match Action::from_passphrase_input(&key) {
             Action::Cancel => Some(HomeAction::Close),
-            Action::ToggleShowPassword => {
-                self.fields.toggle_show();
-                None
-            }
-            Action::InsertChar(c) => {
-                self.fields.apply(|field| field.insert(c));
-                // Typing again clears the previous "wrong password" report.
-                self.error = None;
-                None
-            }
-            Action::Backspace => {
-                self.fields.apply(SecretField::backspace);
-                None
-            }
-            Action::DeleteChar => {
-                self.fields.apply(SecretField::delete);
-                None
-            }
-            Action::CursorLeft => {
-                self.fields.apply(SecretField::move_left);
-                None
-            }
-            Action::CursorRight => {
-                self.fields.apply(SecretField::move_right);
-                None
-            }
-            Action::CursorHome => {
-                self.fields.apply(SecretField::move_home);
-                None
-            }
-            Action::CursorEnd => {
-                self.fields.apply(SecretField::move_end);
-                None
-            }
             Action::Confirm => Some(HomeAction::Unlock),
-            _ => None,
+            action => {
+                // Typing again clears the previous "wrong password" report.
+                if self.fields.apply_action(action) == FieldEdit::Inserted {
+                    self.error = None;
+                }
+                None
+            }
         }
     }
 

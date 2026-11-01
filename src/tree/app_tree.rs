@@ -6,8 +6,8 @@ use crate::theming::Action;
 use crate::theming::{ElementStyle, SPINNER_TICK, paint_background, render_status_bar, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::{
-    AddPosition, Detail, ExportWizard, Help, InputMode, Modal, SaveExit, SaveState, TreeAction,
-    TreeState, TreeWidget, centered_rect, execute,
+    AddPosition, Detail, ExportWizard, Help, InputMode, Modal, SaveExit, SaveState, ShareWizard,
+    TreeAction, TreeState, TreeWidget, centered_rect, execute,
 };
 use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
@@ -109,7 +109,7 @@ pub fn run_app<B: Backend>(
                                 }
                             } else {
                                 if state.modal.is_some() {
-                                    handle_modal_key(key, state)?;
+                                    handle_modal_key(key, state, terminal)?;
                                 } else {
                                     dispatch_key(key, state);
                                 }
@@ -390,6 +390,7 @@ fn dispatch_key(key: event::KeyEvent, state: &mut TreeState) {
         InputMode::PendingCut => handle_pending_cut(key, state),
         InputMode::PendingPaste => handle_pending_paste(key, state),
         InputMode::PendingAdd => handle_pending_add(key, state),
+        InputMode::PendingExport => handle_pending_export(key, state),
     }
 }
 
@@ -398,7 +399,11 @@ fn dispatch_key(key: event::KeyEvent, state: &mut TreeState) {
 /// The modal reads the key itself and reports a [`TreeAction`], which [`execute`]
 /// then performs. The modal is taken out of [`TreeState`] for the duration, so an
 /// action that dismisses it simply does not put it back.
-fn handle_modal_key(key: event::KeyEvent, state: &mut TreeState) -> io::Result<()> {
+fn handle_modal_key<B: Backend>(
+    key: event::KeyEvent,
+    state: &mut TreeState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
     let Some(mut modal) = state.modal.take() else {
         return Ok(());
     };
@@ -412,11 +417,17 @@ fn handle_modal_key(key: event::KeyEvent, state: &mut TreeState) -> io::Result<(
         Some(action) => {
             // The File Browser remembers where it was for its next opening, the
             // same way Home captures it when the browser reports an action.
-            if let Modal::ExportDestination(destination) = &modal {
-                state.browser_session = destination.session();
+            match &modal {
+                Modal::ExportDestination(destination) => {
+                    state.browser_session = destination.session();
+                }
+                Modal::ShareDestination(destination) => {
+                    state.browser_session = destination.session();
+                }
+                _ => {}
             }
             let keeps_produced = !matches!(action, TreeAction::Close);
-            let result = execute(state, action);
+            let result = execute(state, terminal, action, ui);
             state.modal = retained_modal(keeps_produced, modal, state.modal.take());
             result
         }
@@ -506,10 +517,8 @@ fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
         Action::ToggleSearch => {
             state.mode = InputMode::Search;
         }
-        Action::ExportNode => {
-            if let Some(node) = state.current_node_ref() {
-                state.modal = Some(Modal::Export(ExportWizard::new(node.clone())));
-            }
+        Action::ExportStart => {
+            state.mode = InputMode::PendingExport;
         }
         Action::Cancel => {
             state.clear_search();
@@ -568,6 +577,26 @@ fn handle_pending_add(key: event::KeyEvent, state: &mut TreeState) {
     state.modal = Some(Modal::Detail(Box::new(Detail::adding())));
 }
 
+/// Handles the `Ctrl+E` prefix: `e` opens the export wizard, `s` the share
+/// wizard, anything else cancels. Like the `d`/`a`/`p` prefixes, the mode ends
+/// whichever key arrives.
+fn handle_pending_export(key: event::KeyEvent, state: &mut TreeState) {
+    match Action::from_pending_export(&key) {
+        Action::ExportNode => {
+            if let Some(node) = state.current_node_ref() {
+                state.modal = Some(Modal::Export(ExportWizard::new(node.clone())));
+            }
+        }
+        Action::ShareNode => {
+            if let Some(node) = state.current_node_ref() {
+                state.modal = Some(Modal::Share(ShareWizard::new(node.clone())));
+            }
+        }
+        _ => {}
+    }
+    state.mode = InputMode::Normal;
+}
+
 fn handle_search(key: event::KeyEvent, state: &mut TreeState) {
     match Action::from_search(&key) {
         Action::ConfirmSearch => {
@@ -624,6 +653,9 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
             Modal::Detail(detail) => detail.render(frame, area, state),
             Modal::Export(wizard) => wizard.render(frame, area),
             Modal::ExportDestination(destination) => destination.render(frame, area),
+            Modal::Share(wizard) => wizard.render(frame, area),
+            Modal::ShareDestination(destination) => destination.render(frame, area),
+            Modal::SharePassphrase(prompt) => prompt.render(frame, area),
         }
         state.modal = Some(modal);
     }
@@ -693,6 +725,18 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, Cow<'_, s
                 let (mode, style, hint) = destination.status_parts();
                 (mode, style, Cow::Owned(hint))
             }
+            Modal::Share(wizard) => {
+                let (mode, style, hint) = wizard.status_parts();
+                (mode, style, Cow::Borrowed(hint))
+            }
+            Modal::ShareDestination(destination) => {
+                let (mode, style, hint) = destination.status_parts();
+                (mode, style, Cow::Owned(hint))
+            }
+            Modal::SharePassphrase(prompt) => {
+                let (mode, style, hint) = prompt.status_parts();
+                (mode, style, Cow::Borrowed(hint))
+            }
         };
     }
 
@@ -735,6 +779,11 @@ fn status_bar_parts(state: &TreeState) -> (&'static str, ElementStyle, Cow<'_, s
             } else {
                 texts::HINT_PENDING_ADD
             },
+        ),
+        InputMode::PendingExport => (
+            texts::MODE_PENDING_EXPORT,
+            ElementStyle::ModePendingExport,
+            texts::HINT_PENDING_EXPORT,
         ),
     };
     (mode, style, Cow::Borrowed(hint))
@@ -878,7 +927,8 @@ mod tests {
     /// modal first, then the navigation mode.
     fn dispatch_key(key: KeyEvent, state: &mut TreeState) {
         if state.modal.is_some() {
-            let _ = super::handle_modal_key(key, state);
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            let _ = super::handle_modal_key(key, state, &mut terminal);
         } else {
             super::dispatch_key(key, state);
         }
@@ -1491,8 +1541,8 @@ mod tests {
     fn tree_hints_stay_within_the_shipped_width() {
         // The status bar is one unwrapped line and the mode badge is drawn in
         // front of the hint, so the hints must not grow past the widest one the
-        // Tree already shipped (this is a ceiling, not a terminal-width
-        // guarantee).
+        // Tree already ships (`HINT_TREE_PASTE`). This is a ceiling, not a
+        // terminal-width guarantee.
         const BUDGET: usize = 82;
         let hints = [
             texts::HINT_TREE,
@@ -1523,6 +1573,12 @@ mod tests {
             texts::HINT_SAVE_EXIT_BLOCKED,
             texts::HINT_DISCARD_CONFIRM,
             texts::HINT_HELP,
+            texts::HINT_EXPORT_NODE_SELECT,
+            texts::HINT_EXPORT_NODE_FORMAT,
+            texts::HINT_PENDING_EXPORT,
+            texts::HINT_SHARE_SCOPE,
+            texts::HINT_SHARE_PASSPHRASE,
+            texts::HINT_SHARE_NO_PASSPHRASE,
         ];
         for hint in hints {
             assert!(
@@ -1576,7 +1632,12 @@ mod tests {
         let mut state = TreeState::new(Node::new("Root"));
         state.active_vault_path = Some(dir.path().join("vault.age").to_string_lossy().to_string());
 
-        dispatch_key(ctrl(KeyCode::Char('e')), &mut state); // open the export wizard
+        dispatch_key(ctrl(KeyCode::Char('e')), &mut state); // arm the prefix
+        assert!(
+            matches!(state.mode, InputMode::PendingExport),
+            "Ctrl+E must arm the export/share prefix"
+        );
+        dispatch_key(key(KeyCode::Char('e')), &mut state); // `e` -> export wizard
         dispatch_key(key(KeyCode::Enter), &mut state); // "this node" -> format
         dispatch_key(key(KeyCode::Enter), &mut state); // JSON -> destination
         assert!(
@@ -1592,6 +1653,83 @@ mod tests {
             "the export must be written where it was named"
         );
         assert!(matches!(state.modal, Some(Modal::Alert(_))));
+    }
+
+    #[test]
+    fn ctrl_e_s_opens_the_share_wizard() {
+        let mut state = TreeState::new(Node::new("Root"));
+
+        dispatch_key(ctrl(KeyCode::Char('e')), &mut state);
+        dispatch_key(key(KeyCode::Char('s')), &mut state);
+
+        assert!(matches!(state.modal, Some(Modal::Share(_))));
+        assert!(matches!(state.mode, InputMode::Normal));
+    }
+
+    #[test]
+    fn the_export_prefix_cancels_on_any_other_key() {
+        let mut state = TreeState::new(Node::new("Root"));
+        dispatch_key(ctrl(KeyCode::Char('e')), &mut state);
+
+        dispatch_key(key(KeyCode::Char('x')), &mut state);
+
+        assert!(matches!(state.mode, InputMode::Normal));
+        assert!(state.modal.is_none());
+    }
+
+    #[test]
+    fn the_pending_export_mode_advertises_its_hint() {
+        let mut state = TreeState::new(Node::new("Root"));
+        state.mode = InputMode::PendingExport;
+
+        let (mode, _, hint) = status_bar_parts(&state);
+
+        assert_eq!(mode, texts::MODE_PENDING_EXPORT);
+        assert_eq!(hint.as_ref(), texts::HINT_PENDING_EXPORT);
+    }
+
+    #[test]
+    fn sharing_a_branch_writes_a_bundle_where_it_was_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = TreeState::new(Node::new("Root"));
+        state.active_vault_path = Some(dir.path().join("vault.age").to_string_lossy().to_string());
+
+        dispatch_key(ctrl(KeyCode::Char('e')), &mut state); // arm the prefix
+        dispatch_key(key(KeyCode::Char('s')), &mut state); // `s` -> share wizard
+        dispatch_key(key(KeyCode::Enter), &mut state); // "this branch" -> destination
+        assert!(matches!(state.modal, Some(Modal::ShareDestination(_))));
+
+        dispatch_key(key(KeyCode::Char('n')), &mut state); // open the folder input
+        dispatch_key(key(KeyCode::Enter), &mut state); // commit the suggested folder
+        assert!(matches!(state.modal, Some(Modal::SharePassphrase(_))));
+
+        for c in "pw".chars() {
+            dispatch_key(key(KeyCode::Char(c)), &mut state);
+        }
+        dispatch_key(key(KeyCode::Tab), &mut state);
+        for c in "pw".chars() {
+            dispatch_key(key(KeyCode::Char(c)), &mut state);
+        }
+        dispatch_key(key(KeyCode::Enter), &mut state);
+
+        assert!(
+            matches!(state.modal, Some(Modal::Alert(_))),
+            "a successful share must be reported in an alert"
+        );
+        assert!(
+            state.operation_status.is_none(),
+            "the blocking status is cleared once the write finishes"
+        );
+
+        let bundle = dir.path().join("vault_Root");
+        let file = bundle.join("vault_Root.cretopass");
+        assert!(
+            crate::file_handling::is_age_file(&file),
+            "the bundle file must be encrypted"
+        );
+        assert!(bundle.join("HOW-TO-OPEN.txt").is_file());
+        let data = std::fs::read(&file).unwrap();
+        assert!(crate::file_handling::decrypt_to_node(&data, "pw").is_ok());
     }
 
     #[test]
@@ -2161,5 +2299,33 @@ mod tests {
         state.mode = InputMode::Search;
         state.search_query = "Ro".to_string();
         assert_no_terminal_background(&mut state);
+    }
+
+    /// The Tree title bar shows a blocking operation's status ahead of the
+    /// autosave status, with its busy glyph.
+    #[test]
+    fn a_blocking_operation_shows_the_saving_spinner_in_the_title_bar() {
+        let mut state = TreeState::new(Node::new("Root"));
+        state.save_state = SaveState::Idle;
+        state.operation_status = Some(crate::theming::Status::Saving);
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| ui(f, &mut state)).unwrap();
+
+        let content: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(
+            content.contains(texts::STATUS_SAVING),
+            "the title bar must show the operation status: {content:?}"
+        );
+        assert!(
+            content.contains(crate::theming::Spinner::default().glyph()),
+            "the busy glyph must be shown: {content:?}"
+        );
     }
 }

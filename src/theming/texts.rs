@@ -17,6 +17,14 @@ pub const APP_TAGLINE: &str = "Terminal-based secret keeper with age-encrypted s
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The single channel for ordinary bug reports and feature requests.
 pub const ISSUES_URL: &str = "https://github.com/Dmitrytuk/cretopass/issues";
+/// The project's source repository and homepage.
+pub const PROJECT_URL: &str = "https://github.com/Dmitrytuk/cretopass";
+/// The one-line installer for Linux and macOS.
+pub const INSTALL_SH_URL: &str =
+    "https://github.com/Dmitrytuk/cretopass/releases/latest/download/install.sh";
+/// The one-line installer for Windows.
+pub const INSTALL_PS1_URL: &str =
+    "https://github.com/Dmitrytuk/cretopass/releases/latest/download/install.ps1";
 /// GitHub's private vulnerability reporting form for security issues.
 pub const SECURITY_ADVISORY_URL: &str =
     "https://github.com/Dmitrytuk/cretopass/security/advisories/new";
@@ -71,6 +79,7 @@ pub const MENU_ITEMS: &[&str] = &[
     "Configuration",
     "Change file password",
     "Export active file",
+    "Share active file",
     "Import from file",
 ];
 
@@ -199,7 +208,8 @@ pub const TREE_HELP_KEY_BINDINGS: &[&str] = &[
     " p        Paste: p after, P before, l/→ child",
     " a        Add: a after, A before, l/→ child",
     " Root     No cut, no sibling add/paste",
-    " Ctrl+e   Export selected node",
+    " Ctrl+e e Export selected node",
+    " Ctrl+e s Share selected node",
     " /        Search",
     " ?        Show this help",
     " Esc      Clear search highlights",
@@ -223,6 +233,56 @@ pub const HINT_EXPORT_SELECT: &str = "j/k:nav  1-9:select  Enter:choose  Esc:can
 pub const MSG_EXPORT_NODE_SUCCESS: &str = "Node exported at ";
 pub const MODE_EXPORT_SELECT: &str = "EXPORT";
 pub const MODE_EXPORT_FORMAT: &str = "EXPORT FMT";
+
+// ── Share ──
+//
+// Sharing writes a self-contained bundle: a new encrypted secret file for the
+// chosen scope plus a HOW-TO-OPEN instruction. The File Browser names the
+// bundle folder (see [ADR 0023](../../../docs/adr/0023-sharing-a-vault-subtree.md)).
+
+pub const MODE_PENDING_EXPORT: &str = "EXPORT";
+pub const HINT_PENDING_EXPORT: &str = "e:export  s:share  Esc:cancel";
+
+pub const OVERLAY_SHARE_SCOPE: &str = " Share Node ";
+pub const SHARE_SCOPE_OPTIONS: [&str; 2] =
+    ["1. Share this node", "2. Share this node with children"];
+pub const HINT_SHARE_SCOPE: &str = "j/k:nav  1-2:select  Enter:choose  Esc:cancel";
+pub const MODE_SHARE: &str = "SHARE";
+
+pub const BROWSER_SHARE: &str = " Share into ";
+pub const OVERLAY_SHARE_FOLDER: &str = " Share Folder ";
+pub const LABEL_FOLDER_INLINE: &str = " Folder: ";
+pub const FB_HINT_SHARE_NAME: &str = " [n]name ";
+pub const FB_HINT_SHARE: &str = " [e]share ";
+pub const FB_HINT_SHARE_CONFIRM: &str = "Enter:share";
+pub const FB_PROMPT_SHARE_FOLDER: &str = " Write into ";
+
+pub const SHARE_TITLE_PASSPHRASE: &str = " Share Bundle Password ";
+pub const HINT_SHARE_PASSPHRASE: &str = "Tab/↑/↓:switch  Ctrl+S:show  Enter:share  Esc:cancel";
+pub const PROMPT_SHARE_NO_PASSPHRASE: &str = "Create the share bundle without a password?";
+pub const HINT_SHARE_NO_PASSPHRASE: &str = "y/Enter:yes  any key:no";
+pub const MODE_SHARE_CONFIRM: &str = "CONFIRM";
+pub const OVERLAY_SHARE_CONFIRM: &str = " Confirm Share ";
+
+pub const MSG_SHARE_SUCCESS: &str = "Share bundle written at ";
+pub const MSG_CANNOT_SHARE_INTO_FILE: &str = "Cannot share into an existing file";
+
+// The instruction file written into every share bundle. The password is never
+// part of it: it travels over a separate channel.
+pub const SHARE_README_TITLE: &str = "cretopass — share bundle";
+pub const SHARE_README_PROJECT_LABEL: &str = "Project: ";
+pub const SHARE_README_INSTALL_UNIX_LABEL: &str = "Install (Linux/macOS): ";
+pub const SHARE_README_INSTALL_WINDOWS_LABEL: &str = "Install (Windows): ";
+pub const SHARE_README_FILE_LABEL: &str = "Secret file: ";
+pub const SHARE_README_STEPS_HEADING: &str = "To open it:";
+pub const SHARE_README_STEP_INSTALL: &str = "  1. Install and start cretopass.";
+pub const SHARE_README_STEP_OPEN: &str = "  2. Choose \"Open secret file\" on the Home screen.";
+pub const SHARE_README_STEP_PASSWORD: &str =
+    "  3. Open the secret file and enter the password you received separately.";
+pub const SHARE_README_STEP_NO_PASSWORD: &str = "  3. Open the secret file — it has no password.";
+pub const SHARE_README_PASSWORD_NOTE: &str =
+    "The password is never stored in this folder; ask the sender for it over a separate channel.";
+pub const SHARE_README_FEEDBACK_LABEL: &str = "Feedback & bug reports: ";
 
 pub const MSG_NOT_IMPLEMENTED: &str = "This feature is not yet implemented";
 pub const MSG_NO_OPEN_FILE: &str = "No file is currently open";

@@ -18,7 +18,6 @@ mod menu;
 mod modal;
 mod orchestrator;
 mod render;
-mod secret_field;
 mod state;
 
 pub use state::HomeState;
@@ -395,6 +394,109 @@ mod tests {
         assert!(file_handling::is_age_file(std::path::Path::new(
             &vault_path
         )));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The Home share flow: name a bundle folder in the File Browser, type the
+    /// recipient's password twice, and the encrypted bundle lands where it was
+    /// named.
+    #[test]
+    fn share_writes_an_encrypted_bundle_where_the_browser_named_it() {
+        let dir = std::env::temp_dir().join(format!("cretopass-share-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let vault_path = dir.join("vault.age").to_string_lossy().to_string();
+        let node = file_handling::create_secret_file(&vault_path, "pw").unwrap();
+
+        let mut state = HomeState::new();
+        state.modal = None;
+        state.active_vault = Some(ActiveVaultState {
+            path: Some(vault_path.clone()),
+            passphrase: zeroize::Zeroizing::new(b"pw".to_vec()),
+            node: Some(node),
+        });
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        // Menu row 5 is "Share active file".
+        state.selected = 5;
+        handle_home_key(
+            event::KeyEvent::from(KeyCode::Enter),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+
+        let Some(Modal::FileBrowser(browser)) = &mut state.modal else {
+            panic!("the share menu item must open the File Browser");
+        };
+        assert_eq!(
+            browser.state_mut().creating_name,
+            "vault",
+            "the suggestion comes from the open vault"
+        );
+
+        // `n` opens the folder input; Enter commits the suggested folder.
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Char('n')),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Enter),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+
+        // The passphrase step: "pw" twice.
+        for c in "pw".chars() {
+            handle_modal_key(
+                event::KeyEvent::from(KeyCode::Char(c)),
+                &mut state,
+                &mut terminal,
+            )
+            .unwrap();
+        }
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Tab),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        for c in "pw".chars() {
+            handle_modal_key(
+                event::KeyEvent::from(KeyCode::Char(c)),
+                &mut state,
+                &mut terminal,
+            )
+            .unwrap();
+        }
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Enter),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+
+        match &state.modal {
+            Some(Modal::Alert(alert)) => assert!(
+                alert.message.starts_with(texts::MSG_SHARE_SUCCESS),
+                "unexpected alert: {}",
+                alert.message
+            ),
+            _ => panic!("a successful share must be reported in an alert"),
+        }
+
+        let bundle = dir.join("vault");
+        let file = bundle.join("vault.cretopass");
+        assert!(
+            file_handling::is_age_file(&file),
+            "the bundle file must be encrypted"
+        );
+        assert!(bundle.join("HOW-TO-OPEN.txt").is_file());
+        let data = std::fs::read(&file).unwrap();
+        assert!(file_handling::decrypt_to_node(&data, "pw").is_ok());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

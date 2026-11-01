@@ -17,6 +17,7 @@ entire duration makes "working" visibly different from "stuck".
 | 5 | **Home: work on a `std::thread`, UI thread busy-loops the redraw.** `run_with_spinner` spawns the closure, then `{ advance; draw; poll(SPINNER_TICK); drain }` until the worker finishes. | Home's outer loop is a blocking `event::read()`; the smallest change that animates is to move the one blocking call off-thread while the UI thread keeps drawing. A full async rework of Home is far larger for the same effect. |
 | 6 | **Input during the Home wait is read and fully drained, then discarded.** | A stray Enter must not trigger a second action once the wait ends. Esc / Ctrl+C cannot cancel the scrypt work, so swallowing them is the honest behavior. |
 | 7 | **Tree: a guarded `tokio::time::interval` tick.** `MissedTickBehavior::Delay`; the tick branch and the flush tick are both guarded by `save_state.spins()`. | `interval`'s first tick is immediate, but the guard is false while idle, so the app does not redraw at 12.5 fps when nothing is happening. The Tree draws once per 80 ms only while a save is outstanding. |
+| 8 | **Tree: a blocking helper for the share write.** `run_with_busy` mirrors Home's `run_with_spinner` for the one Tree operation that blocks outside autosave: a transient `operation_status` on `TreeState` takes title-bar precedence over `save_state`, and the helper advances the spinner and redraws until the worker finishes. | The share write (age scrypt + fsync, [0023](0023-sharing-a-vault-subtree.md)) is as slow as a save and would otherwise freeze the UI. Mid-wait input is left to the `EventStream` rather than drained: polling crossterm would race its reader thread. |
 
 ## Home busy helper
 
@@ -41,6 +42,24 @@ save/decrypt is **not** cancelled. This is intended: the operation is
 non-cancellable scrypt work, and abandoning it would risk a partially written
 file. The `io::Error` propagates once the wait ends.
 
+## Tree busy helper
+
+`run_with_busy(terminal, state, status, draw, work)` mirrors the Home helper for
+the Tree's blocking share write:
+
+- sets `state.operation_status` (a `TreeState` field the title bar prefers over
+  `save_state`) and draws once;
+- spawns `work` with `std::thread::Builder`;
+- loops until the worker finishes, advancing the spinner and redrawing with the
+  screen's full-frame renderer (`ui`), which the caller passes in;
+- clears `operation_status` and returns, so the loop's next draw renders the
+  result modal the caller installed.
+
+Unlike Home, the Tree wait does **not** drain input: the Tree's keys arrive
+through a tokio `EventStream` with its own reader thread, and polling crossterm
+here would race it. Keys pressed during the wait are buffered and handled on the
+next turn of the event loop.
+
 ## Rejected alternatives
 
 - **`throbber-widgets-tui`.** See decision 2 — saturating index, `ratatui` 0.28
@@ -60,3 +79,5 @@ file. The `io::Error` propagates once the wait ends.
   behavior (the modal is taken out of `state.modal` before the blocking call).
 - The Tree's idle event loop is unchanged: the guarded tick does not fire when no
   save is outstanding.
+- The Tree title bar shows a blocking operation's status ahead of the autosave
+  status; the two share one spinner frame counter.

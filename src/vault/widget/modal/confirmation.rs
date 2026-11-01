@@ -18,6 +18,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
+use crate::share::SharePassword;
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
 
@@ -30,6 +31,8 @@ pub enum ConfirmKind {
     ChangePassword,
     /// Create a secret file with no master password.
     NoPassphrase { file_path: String },
+    /// Share the open file with no password at all.
+    ShareNoPassphrase { dest: String },
 }
 
 /// A confirmation dialog: `y`/`Enter` accepts, anything else declines.
@@ -56,6 +59,13 @@ impl Confirmation {
         }
     }
 
+    /// A confirmation that the share bundle at `dest` will have no password.
+    pub fn share_no_passphrase(dest: String) -> Self {
+        Self {
+            kind: ConfirmKind::ShareNoPassphrase { dest },
+        }
+    }
+
     /// `y`/`Enter` accepts; every other key declines, as the hint promises.
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<HomeAction> {
         match Action::from_confirm(&key) {
@@ -72,6 +82,10 @@ impl Confirmation {
             ConfirmKind::NoPassphrase { file_path } => HomeAction::CreateWithoutPassword {
                 file_path: file_path.clone(),
             },
+            ConfirmKind::ShareNoPassphrase { dest } => HomeAction::Share {
+                dest: dest.clone(),
+                passphrase: SharePassword::empty(),
+            },
         }
     }
 
@@ -84,6 +98,9 @@ impl Confirmation {
             ConfirmKind::NoPassphrase { file_path } => HomeAction::ReopenCreateSecret {
                 file_path: file_path.clone(),
             },
+            ConfirmKind::ShareNoPassphrase { dest } => {
+                HomeAction::ReopenSharePassphrase { dest: dest.clone() }
+            }
             _ => HomeAction::Close,
         }
     }
@@ -92,12 +109,16 @@ impl Confirmation {
         let title = match &self.kind {
             ConfirmKind::DeleteRecent { .. } => texts::HOME_DELETE_CONFIRM,
             ConfirmKind::ChangePassword => texts::HOME_CHANGE_PASSWORD,
-            ConfirmKind::NoPassphrase { .. } => texts::HOME_NO_PASSPHRASE,
+            ConfirmKind::NoPassphrase { .. } | ConfirmKind::ShareNoPassphrase { .. } => {
+                texts::HOME_NO_PASSPHRASE
+            }
         };
         let style = match &self.kind {
             ConfirmKind::DeleteRecent { .. } => ElementStyle::HomeDeleteBlock,
             ConfirmKind::ChangePassword => ElementStyle::HomeChangePwBlock,
-            ConfirmKind::NoPassphrase { .. } => ElementStyle::HomeNoPassBlock,
+            ConfirmKind::NoPassphrase { .. } | ConfirmKind::ShareNoPassphrase { .. } => {
+                ElementStyle::HomeNoPassBlock
+            }
         };
 
         let overlay_area = make_overlay(area, 6);
@@ -134,6 +155,7 @@ impl Confirmation {
             ),
             ConfirmKind::ChangePassword => texts::PROMPT_CHANGE_PW.to_string(),
             ConfirmKind::NoPassphrase { .. } => texts::PROMPT_NO_PASSPHRASE.to_string(),
+            ConfirmKind::ShareNoPassphrase { .. } => texts::PROMPT_SHARE_NO_PASSPHRASE.to_string(),
         }
     }
 
@@ -142,6 +164,9 @@ impl Confirmation {
             ConfirmKind::DeleteRecent { .. } => (texts::MODE_DELETE, texts::HINT_DELETE_CONFIRM),
             ConfirmKind::ChangePassword => (texts::MODE_CHANGE_PW, texts::HINT_CHANGE_PW_CONFIRM),
             ConfirmKind::NoPassphrase { .. } => (texts::MODE_CONFIRM, texts::HINT_NO_PASSPHRASE),
+            ConfirmKind::ShareNoPassphrase { .. } => {
+                (texts::MODE_CONFIRM, texts::HINT_SHARE_NO_PASSPHRASE)
+            }
         };
         (mode, ElementStyle::ModeConfirmDelete, Cow::Borrowed(hint))
     }
@@ -215,5 +240,24 @@ mod tests {
         let (mode, _, hint) = no_pass.status_parts();
         assert_eq!(mode, texts::MODE_CONFIRM);
         assert_eq!(hint.as_ref(), texts::HINT_NO_PASSPHRASE);
+    }
+
+    #[test]
+    fn accepting_the_passwordless_share_writes_an_empty_password() {
+        let mut confirmation = Confirmation::share_no_passphrase("/tmp/bundle".to_string());
+        assert!(matches!(
+            confirmation.handle_key(key(KeyCode::Enter)),
+            Some(HomeAction::Share { dest, passphrase })
+                if dest == "/tmp/bundle" && passphrase.as_bytes().is_empty()
+        ));
+    }
+
+    #[test]
+    fn declining_the_passwordless_share_returns_to_the_prompt() {
+        let mut confirmation = Confirmation::share_no_passphrase("/tmp/bundle".to_string());
+        assert!(matches!(
+            confirmation.handle_key(key(KeyCode::Esc)),
+            Some(HomeAction::ReopenSharePassphrase { dest }) if dest == "/tmp/bundle"
+        ));
     }
 }
