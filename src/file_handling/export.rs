@@ -5,10 +5,11 @@
 //! [`export_tree`] refuses to overwrite a secret file (see
 //! [ADR 0022](../../docs/adr/0022-user-chosen-export-destination.md)).
 
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use super::format::Format;
+use super::format::{Format, encode_path_segment};
 use super::{FileHandlingError, is_age_file, node_to_json};
 use crate::tree::node::Node;
 
@@ -144,40 +145,49 @@ fn escape_xml(s: &str) -> String {
 
 fn node_to_csv(node: &Node) -> String {
     let mut buf = String::from("path,name,field_type,field_value\n");
-    write_csv_rows(&mut buf, node, "");
+    write_csv_rows(&mut buf, node, "", &encode_path_segment(&node.name));
     buf
 }
 
-fn write_csv_rows(buf: &mut String, node: &Node, parent_path: &str) {
-    let current_name = csv_escape(&node.name);
+/// Writes `node` and its subtree, one row per extra field.
+///
+/// `segment` is `node`'s already-encoded `path` segment. Children get their own
+/// segment, with a `#<n>` occurrence suffix when two siblings share a name, so a
+/// duplicate sibling is never folded into its twin on import (see
+/// [`encode_path_segment`] and [`decode_path_segment`]).
+fn write_csv_rows(buf: &mut String, node: &Node, parent_path: &str, segment: &str) {
     let current_path = if parent_path.is_empty() {
-        current_name.clone()
+        segment.to_string()
     } else {
-        format!("{} > {}", parent_path, current_name)
+        format!("{parent_path} > {segment}")
     };
 
+    // The name column carries the real name, so the reader need not decode the
+    // path's last segment for display; the path is only the structural key.
+    let path = csv_escape(&current_path);
+    let name = csv_escape(&node.name);
+
     if node.extra_fields.is_empty() {
-        buf.push_str(&format!(
-            "{},{},,\n",
-            csv_escape(&current_path),
-            current_name,
-        ));
+        buf.push_str(&format!("{path},{name},,\n"));
     } else {
         for ef in &node.extra_fields {
             let ft = csv_escape(&ef.field_type.wire_label());
             let val = csv_escape(&ef.value);
-            buf.push_str(&format!(
-                "{},{},{},{}\n",
-                csv_escape(&current_path),
-                current_name,
-                ft,
-                val,
-            ));
+            buf.push_str(&format!("{path},{name},{ft},{val}\n"));
         }
     }
 
+    let mut used: HashMap<&str, usize> = HashMap::new();
     for child in &node.children {
-        write_csv_rows(buf, child, &current_path);
+        let count = used.entry(child.name.as_str()).or_insert(0);
+        *count += 1;
+        let encoded = encode_path_segment(&child.name);
+        let child_segment = if *count == 1 {
+            encoded
+        } else {
+            format!("{encoded}#{}", *count)
+        };
+        write_csv_rows(buf, child, &current_path, &child_segment);
     }
 }
 

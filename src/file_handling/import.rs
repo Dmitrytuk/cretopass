@@ -4,7 +4,7 @@ use super::FileHandlingError;
 use super::atomic;
 use super::error::ImportSyntax;
 use super::file_process::MAX_FILE_SIZE;
-use super::format::Format;
+use super::format::{Format, decode_path_segment};
 use crate::tree::node::{ExtraField, FieldType, Node, migrate_legacy_description};
 use uuid::Uuid;
 
@@ -224,7 +224,7 @@ fn parse_xml_fields(input: &str) -> Result<Vec<ExtraField>, FileHandlingError> {
         let field_type_label = attrs
             .iter()
             .find(|(k, _)| k == "type")
-            .map(|(_, v)| v.as_str())
+            .map(|(_, v)| unescape_xml(v))
             .ok_or_else(|| syntax(ImportSyntax::MissingFieldType))?;
         let value = attrs
             .iter()
@@ -232,7 +232,7 @@ fn parse_xml_fields(input: &str) -> Result<Vec<ExtraField>, FileHandlingError> {
             .map(|(_, v)| unescape_xml(v))
             .ok_or_else(|| syntax(ImportSyntax::MissingFieldValue))?;
 
-        let field_type = FieldType::from_wire_label(field_type_label);
+        let field_type = FieldType::from_wire_label(&field_type_label);
 
         fields.push(ExtraField { field_type, value });
     }
@@ -418,7 +418,6 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
         let mut idx_path: Vec<usize> = Vec::new();
 
         for (seg_idx, seg) in segments.iter().enumerate() {
-            let seg_str = seg.to_string();
             let is_last = seg_idx == segments.len() - 1;
 
             let container = if idx_path.is_empty() {
@@ -431,7 +430,10 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
                 c
             };
 
-            let pos = container.iter().position(|n| n.key == seg_str);
+            // The raw segment is the unique structural key; a decode is needed
+            // only for an intermediate node with no row of its own (a legacy
+            // file) — otherwise the `name` column is authoritative.
+            let pos = container.iter().position(|n| n.key.as_str() == *seg);
             if let Some(pos) = pos {
                 if is_last {
                     let node = &mut container[pos];
@@ -442,11 +444,11 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
                 idx_path.push(pos);
             } else {
                 container.push(TreeNode {
-                    key: seg_str.clone(),
+                    key: (*seg).to_string(),
                     name: if is_last {
                         data.name.clone()
                     } else {
-                        seg_str.clone()
+                        decode_path_segment(seg)
                     },
                     description: if is_last {
                         data.description.clone()
@@ -956,6 +958,10 @@ mod tests {
             .zip(imported.extra_fields.iter())
         {
             assert_eq!(a.value, b.value);
+            // The wire label must survive too: a regression in `custom:` handling
+            // would otherwise pass every round-trip assertion. `wire_label`
+            // distinguishes `Login` from `Custom("Login")`, which `label` cannot.
+            assert_eq!(a.field_type.wire_label(), b.field_type.wire_label());
         }
         assert_eq!(original.children.len(), imported.children.len());
         for (a, b) in original.children.iter().zip(imported.children.iter()) {
@@ -1162,6 +1168,55 @@ mod tests {
 
         assert_nodes_match(&original, &imported);
         assert_eq!(imported.children[0].extra_fields[0].value, "before\rafter");
+    }
+
+    /// A name that contains the `" > "` path separator must not be mistaken for
+    /// nesting on import (Blocker B2, case A).
+    #[test]
+    fn csv_roundtrip_preserves_a_name_containing_the_path_separator() {
+        let mut original = Node::with_children("Root > X", vec![Node::new("A > B")]);
+        original.extra_fields = vec![ExtraField::description("root > desc")];
+
+        let csv_path = format!("/tmp/roundtrip_csv_sep_{}.csv", uuid::Uuid::new_v4());
+        export_tree(&original, &csv_path, ExportFormat::Csv).unwrap();
+        let imported = import_tree(&csv_path).unwrap();
+        let _ = std::fs::remove_file(&csv_path);
+
+        assert_nodes_match(&original, &imported);
+        assert_eq!(imported.name, "Root > X");
+        assert_eq!(imported.children.len(), 1);
+        assert_eq!(imported.children[0].name, "A > B");
+    }
+
+    /// Two siblings that share a name must stay two nodes, not collapse into one
+    /// carrying both field sets (Blocker B2, case B).
+    #[test]
+    fn csv_roundtrip_keeps_same_named_siblings_apart() {
+        let mut first = Node::new("Dup");
+        first.extra_fields = vec![ExtraField {
+            field_type: FieldType::Password,
+            value: "first".to_string(),
+        }];
+        let mut second = Node::new("Dup");
+        second.extra_fields = vec![ExtraField {
+            field_type: FieldType::Password,
+            value: "second".to_string(),
+        }];
+        let original = Node::with_children("Root", vec![first, second]);
+
+        let csv_path = format!("/tmp/roundtrip_csv_dup_{}.csv", uuid::Uuid::new_v4());
+        export_tree(&original, &csv_path, ExportFormat::Csv).unwrap();
+        let imported = import_tree(&csv_path).unwrap();
+        let _ = std::fs::remove_file(&csv_path);
+
+        assert_nodes_match(&original, &imported);
+        assert_eq!(
+            imported.children.len(),
+            2,
+            "same-named siblings must not be merged"
+        );
+        assert_eq!(imported.children[0].extra_fields[0].value, "first");
+        assert_eq!(imported.children[1].extra_fields[0].value, "second");
     }
 
     #[test]
