@@ -68,13 +68,18 @@ impl Default for Configuration {
 /// - Windows: `%APPDATA%/cretopass/`
 /// - Fallback: `./.cretopass/`
 ///
-/// When the `CRETOPASS_CONFIG_DIR` environment variable is set, its value is
-/// used instead (primarily for tests).
+/// In debug builds the `CRETOPASS_CONFIG_DIR` environment variable overrides
+/// the location (primarily for tests). The override is compiled out of release
+/// builds so a set-and-forget environment variable can never redirect the
+/// destructive `cretopass remove` path at an arbitrary directory.
 pub fn config_dir() -> PathBuf {
-    if let Ok(val) = std::env::var("CRETOPASS_CONFIG_DIR")
-        && !val.is_empty()
+    #[cfg(debug_assertions)]
     {
-        return PathBuf::from(val);
+        if let Ok(val) = std::env::var("CRETOPASS_CONFIG_DIR")
+            && !val.is_empty()
+        {
+            return PathBuf::from(val);
+        }
     }
     #[cfg(debug_assertions)]
     {

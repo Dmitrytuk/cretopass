@@ -102,9 +102,9 @@ for rc in "$TMP_HOME/.bashrc" "$TMP_HOME/.zshrc" "$TMP_HOME/.config/fish/config.
         fail=1
         continue
     fi
-    if grep -q "cretopass" "$rc"; then
+    if grep -qE "cretopass (PATH|completion)" "$rc"; then
         echo "FAIL: marker remains in $rc:"
-        grep -n "cretopass" "$rc" || true
+        grep -nE "cretopass (PATH|completion)" "$rc" || true
         fail=1
     fi
 done

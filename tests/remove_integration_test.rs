@@ -74,8 +74,8 @@ fn setup_home(tmp: &Path) -> PathBuf {
     home
 }
 
-/// Runs `cretopass remove` inside `home`, answering the prompt with "y".
-fn run_remove(home: &Path) -> std::process::ExitStatus {
+/// Runs `cretopass remove` inside `home`, answering the prompt with `answer`.
+fn run_remove_with_input(home: &Path, answer: &str) -> std::process::ExitStatus {
     let mut child = Command::new(home.join(".local/bin/cretopass"))
         .arg("remove")
         .env("HOME", home)
@@ -87,8 +87,18 @@ fn run_remove(home: &Path) -> std::process::ExitStatus {
         .spawn()
         .unwrap();
 
-    child.stdin.take().unwrap().write_all(b"y\n").unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(answer.as_bytes())
+        .unwrap();
     child.wait().unwrap()
+}
+
+/// Runs `cretopass remove` inside `home`, answering the prompt with "y".
+fn run_remove(home: &Path) -> std::process::ExitStatus {
+    run_remove_with_input(home, "y\n")
 }
 
 /// All file artifacts and the config directory are deleted.
@@ -164,4 +174,30 @@ fn remove_on_clean_home_is_a_noop() {
 
     let status = run_remove(&home);
     assert!(status.success(), "remove exited with {status}");
+}
+
+/// Declining the prompt leaves every artifact intact and exits 0.
+#[test]
+fn remove_abort_leaves_artifacts_intact() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = setup_home(tmp.path());
+
+    let status = run_remove_with_input(&home, "n\n");
+    assert!(status.success(), "remove exited with {status}");
+
+    for rel in artifact_rel_paths() {
+        assert!(
+            home.join(&rel).exists(),
+            "artifact {} was removed despite the abort",
+            rel.display()
+        );
+    }
+    assert!(
+        home.join(".config/cretopass").exists(),
+        "config directory was removed despite the abort"
+    );
+
+    // The marker blocks must still be present in the rc files.
+    let zshrc = fs::read_to_string(home.join(".zshrc")).unwrap();
+    assert!(zshrc.contains("cretopass PATH"), "{zshrc}");
 }
