@@ -100,65 +100,10 @@ pub fn share_tree<'a>(
     let file_path = dest_dir.join(&file_name);
     save_tree(node, &file_path, passphrase)?;
 
-    let instruction = instruction(&file_name, passphrase.as_bytes().is_empty());
+    let instruction = texts::share_instruction(&file_name, passphrase.as_bytes().is_empty());
     super::atomic::write_atomic(&dest_dir.join(SHARE_README_NAME), instruction.as_bytes())?;
 
     Ok(dest_dir.to_path_buf())
-}
-
-/// The `HOW-TO-OPEN.txt` text for a bundle whose secret file is `file_name`.
-///
-/// The password is never part of the text: a protected bundle points the
-/// recipient at a separate channel, and a passwordless one says plainly that no
-/// password is needed.
-fn instruction(file_name: &str, passwordless: bool) -> String {
-    let install_unix = format!("curl -fsSL {} | sh", texts::INSTALL_SH_URL);
-    let install_windows = format!("irm {} | iex", texts::INSTALL_PS1_URL);
-    let step = if passwordless {
-        texts::SHARE_README_STEP_NO_PASSWORD
-    } else {
-        texts::SHARE_README_STEP_PASSWORD
-    };
-
-    let mut lines = vec![
-        texts::SHARE_README_TITLE.to_string(),
-        String::new(),
-        texts::APP_TAGLINE.to_string(),
-        String::new(),
-        format!(
-            "{}{}",
-            texts::SHARE_README_PROJECT_LABEL,
-            texts::PROJECT_URL
-        ),
-        format!("{}{}", texts::SHARE_README_INSTALL_UNIX_LABEL, install_unix),
-        format!(
-            "{}{}",
-            texts::SHARE_README_INSTALL_WINDOWS_LABEL,
-            install_windows
-        ),
-        String::new(),
-        format!("{}{}", texts::SHARE_README_FILE_LABEL, file_name),
-        String::new(),
-        texts::SHARE_README_STEPS_HEADING.to_string(),
-        texts::SHARE_README_STEP_INSTALL.to_string(),
-        texts::SHARE_README_STEP_OPEN.to_string(),
-        step.to_string(),
-    ];
-
-    if !passwordless {
-        lines.push(String::new());
-        lines.push(texts::SHARE_README_PASSWORD_NOTE.to_string());
-    }
-
-    lines.push(String::new());
-    lines.push(format!(
-        "{}{}",
-        texts::SHARE_README_FEEDBACK_LABEL,
-        texts::ISSUES_URL
-    ));
-    lines.push(String::new());
-
-    lines.join("\n")
 }
 
 #[cfg(test)]

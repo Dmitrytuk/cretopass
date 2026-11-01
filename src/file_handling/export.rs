@@ -5,15 +5,12 @@
 //! [`export_tree`] refuses to overwrite a secret file (see
 //! [ADR 0022](../../docs/adr/0022-user-chosen-export-destination.md)).
 
-use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use zeroize::Zeroizing;
-
 use super::error::SerdeContext;
-use super::format::{Format, encode_path_segment};
-use super::{FileHandlingError, is_age_file, node_to_json};
+use super::format::Format;
+use super::{FileHandlingError, csv, is_age_file, node_to_json, xml};
 use crate::tree::node::Node;
 
 /// The formats an exported document may use.
@@ -97,8 +94,8 @@ pub fn export_tree(
             context: SerdeContext::Export,
             source,
         })?,
-        ExportFormat::Xml => node_to_xml(node),
-        ExportFormat::Csv => node_to_csv(node),
+        ExportFormat::Xml => xml::node_to_xml(node),
+        ExportFormat::Csv => csv::node_to_csv(node),
     };
 
     // Write the plaintext export atomically, at owner-only permissions: it
@@ -106,104 +103,6 @@ pub fn export_tree(
     super::atomic::write_atomic_private(&out_path, data.as_bytes())?;
 
     Ok(out_path.to_string_lossy().to_string())
-}
-
-fn node_to_xml(node: &Node) -> Zeroizing<String> {
-    let mut buf = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    write_xml_node(&mut buf, node, 0);
-    Zeroizing::new(buf)
-}
-
-fn write_xml_node(buf: &mut String, node: &Node, depth: usize) {
-    let indent = "  ".repeat(depth);
-    let name_esc = escape_xml(&node.name);
-
-    buf.push_str(&format!("{indent}<node name=\"{name_esc}\">\n"));
-
-    buf.push_str(&format!("{}  <extra_fields>\n", indent));
-    for ef in &node.extra_fields {
-        let ft = escape_xml(&ef.field_type.wire_label());
-        let val = escape_xml(&ef.value);
-        buf.push_str(&format!(
-            "{}    <field type=\"{ft}\" value=\"{val}\"/>\n",
-            indent
-        ));
-    }
-    buf.push_str(&format!("{}  </extra_fields>\n", indent));
-
-    if !node.children.is_empty() {
-        buf.push_str(&format!("{}  <children>\n", indent));
-        for child in &node.children {
-            write_xml_node(buf, child, depth + 2);
-        }
-        buf.push_str(&format!("{}  </children>\n", indent));
-    }
-
-    buf.push_str(&format!("{indent}</node>\n"));
-}
-
-fn escape_xml(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-}
-
-fn node_to_csv(node: &Node) -> Zeroizing<String> {
-    let mut buf = String::from("path,name,field_type,field_value\n");
-    write_csv_rows(&mut buf, node, "", &encode_path_segment(&node.name));
-    Zeroizing::new(buf)
-}
-
-/// Writes `node` and its subtree, one row per extra field.
-///
-/// `segment` is `node`'s already-encoded `path` segment. Children get their own
-/// segment, with a `#<n>` occurrence suffix when two siblings share a name, so a
-/// duplicate sibling is never folded into its twin on import (see
-/// [`encode_path_segment`] and [`super::format::decode_path_segment`]).
-fn write_csv_rows(buf: &mut String, node: &Node, parent_path: &str, segment: &str) {
-    let current_path = if parent_path.is_empty() {
-        segment.to_string()
-    } else {
-        format!("{parent_path} > {segment}")
-    };
-
-    // The name column carries the real name, so the reader need not decode the
-    // path's last segment for display; the path is only the structural key.
-    let path = csv_escape(&current_path);
-    let name = csv_escape(&node.name);
-
-    if node.extra_fields.is_empty() {
-        buf.push_str(&format!("{path},{name},,\n"));
-    } else {
-        for ef in &node.extra_fields {
-            let ft = csv_escape(&ef.field_type.wire_label());
-            let val = csv_escape(&ef.value);
-            buf.push_str(&format!("{path},{name},{ft},{val}\n"));
-        }
-    }
-
-    let mut used: HashMap<&str, usize> = HashMap::new();
-    for child in &node.children {
-        let count = used.entry(child.name.as_str()).or_insert(0);
-        *count += 1;
-        let encoded = encode_path_segment(&child.name);
-        let child_segment = if *count == 1 {
-            encoded
-        } else {
-            format!("{encoded}#{}", *count)
-        };
-        write_csv_rows(buf, child, &current_path, &child_segment);
-    }
-}
-
-fn csv_escape(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
 }
 
 #[cfg(test)]
@@ -368,24 +267,6 @@ mod tests {
 
         let mode = std::fs::metadata(&out).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "a plaintext export must be owner-only");
-    }
-
-    #[test]
-    fn test_csv_escape() {
-        assert_eq!(csv_escape("plain"), "plain");
-        assert_eq!(csv_escape("has,comma"), "\"has,comma\"");
-        assert_eq!(csv_escape("has\"quote"), "\"has\"\"quote\"");
-        assert_eq!(csv_escape("has\nnewline"), "\"has\nnewline\"");
-        assert_eq!(csv_escape("has\rcarriage"), "\"has\rcarriage\"");
-    }
-
-    #[test]
-    fn test_xml_escape() {
-        assert_eq!(
-            escape_xml("a&b<c>d\"e'f"),
-            "a&amp;b&lt;c&gt;d&quot;e&apos;f"
-        );
-        assert_eq!(escape_xml("plain"), "plain");
     }
 
     #[test]

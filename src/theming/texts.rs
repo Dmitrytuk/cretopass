@@ -284,6 +284,50 @@ pub const SHARE_README_PASSWORD_NOTE: &str =
     "The password is never stored in this folder; ask the sender for it over a separate channel.";
 pub const SHARE_README_FEEDBACK_LABEL: &str = "Feedback & bug reports: ";
 
+/// The `HOW-TO-OPEN.txt` text written into a share bundle whose secret file is
+/// `file_name`.
+///
+/// The password is never part of the text: a protected bundle points the
+/// recipient at a separate channel, and a passwordless one says plainly that no
+/// password is needed.
+pub fn share_instruction(file_name: &str, passwordless: bool) -> String {
+    let install_unix = format!("curl -fsSL {INSTALL_SH_URL} | sh");
+    let install_windows = format!("irm {INSTALL_PS1_URL} | iex");
+    let step = if passwordless {
+        SHARE_README_STEP_NO_PASSWORD
+    } else {
+        SHARE_README_STEP_PASSWORD
+    };
+
+    let mut lines = vec![
+        SHARE_README_TITLE.to_string(),
+        String::new(),
+        APP_TAGLINE.to_string(),
+        String::new(),
+        format!("{SHARE_README_PROJECT_LABEL}{PROJECT_URL}"),
+        format!("{SHARE_README_INSTALL_UNIX_LABEL}{install_unix}"),
+        format!("{SHARE_README_INSTALL_WINDOWS_LABEL}{install_windows}"),
+        String::new(),
+        format!("{SHARE_README_FILE_LABEL}{file_name}"),
+        String::new(),
+        SHARE_README_STEPS_HEADING.to_string(),
+        SHARE_README_STEP_INSTALL.to_string(),
+        SHARE_README_STEP_OPEN.to_string(),
+        step.to_string(),
+    ];
+
+    if !passwordless {
+        lines.push(String::new());
+        lines.push(SHARE_README_PASSWORD_NOTE.to_string());
+    }
+
+    lines.push(String::new());
+    lines.push(format!("{SHARE_README_FEEDBACK_LABEL}{ISSUES_URL}"));
+    lines.push(String::new());
+
+    lines.join("\n")
+}
+
 pub const MSG_NOT_IMPLEMENTED: &str = "This feature is not yet implemented";
 pub const MSG_NO_OPEN_FILE: &str = "No file is currently open";
 pub const MSG_CANNOT_DELETE_OPEN: &str = "Cannot delete the currently open file from recent files";

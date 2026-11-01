@@ -25,11 +25,13 @@ audit I/O patterns.
 | `autosave.rs` | `Autosave`: one background writer thread with a latest-wins snapshot slot, generation numbers, `SaveEvent` notifications, panic containment, and flush-on-drop ([ADR 0010](../../../../docs/adr/0010-async-tree-autosave.md)) |
 | `disks.rs` | `DiskInfo` + `list_disks()`: cross-platform mounted-volume enumeration via `sysinfo`, with loop/squashfs filtering |
 | `error.rs` | the composed `FileHandlingError` enum: it is built from the layer-local errors (`atomic::WriteError`, `import::ParseError`, `crypt::CryptError`) plus the gateway's own file-level outcomes (size caps, age-header checks, `AlreadyExists`, export/share refusals); `SerdeContext` tags each JSON failure with the operation that hit it; `#[non_exhaustive]` and free of any imported-value payload |
-| `export.rs` | `ExportFormat` (an alias of `format::Format`), the naming policy (`suggest_export_name` / `output_path`, and the `sanitize` rule `suggest_export_name` shares with the share flow), recursive XML serialization, flattened CSV export |
+| `export.rs` | `ExportFormat` (an alias of `format::Format`), the naming policy (`suggest_export_name` / `output_path`, and the `sanitize` rule `suggest_export_name` shares with the share flow), and `export_tree()` — a dispatcher that hands each format to its owning module |
 | `format.rs` | the shared `Format` enum behind the `ImportFormat` / `ExportFormat` aliases: one extension table for detection and serialisation |
-| `import.rs` | `ImportFormat` detection (an alias of `format::Format`), JSON/XML/CSV import with custom parsers, `build_tree_from_paths()` |
+| `import.rs` | `import_tree()` (an alias `ImportFormat` = `format::Format`), the `ParseError` vocabulary, JSON parsing, and the BOM strip; it dispatches XML and CSV to their owning modules |
+| `xml.rs` | the XML interchange format, both directions: `node_to_xml` (writer + escape) and `import_xml` (reader + unescape), so escape and unescape cannot drift |
+| `csv.rs` | the flattened CSV interchange format, both directions: `node_to_csv` (writer + `csv_escape` + path-segment encoding) and `import_csv` (reader + `parse_csv_records` + `build_tree_from_paths`) |
 | `passphrase.rs` | `Passphrase`: the one bridge between the passphrase bytes the app carries and the `&str` `age` accepts, owning the non-UTF-8 check |
-| `share.rs` | `suggest_share_name` (the bundle-folder name) and `share_tree`: writes a share bundle — a re-encrypted secret file via `save_tree`, then a `HOW-TO-OPEN.txt` instruction ([0023](../../../../docs/adr/0023-sharing-a-vault-subtree.md)) |
+| `share.rs` | `suggest_share_name` (the bundle-folder name) and `share_tree`: writes a share bundle — a re-encrypted secret file via `save_tree`, then a `HOW-TO-OPEN.txt` instruction whose wording [`theming::texts`](../../../theming/texts.rs) owns ([0023](../../../../docs/adr/0023-sharing-a-vault-subtree.md)) |
 
 ## Facade
 
@@ -103,7 +105,7 @@ the module's callers, not its siblings' own imports.
 - `validate_encrypted_file()` enforces a 50MB size cap and scans for the `age-encryption.org` magic header. `import_tree()` shares the same cap.
 - `list_dir()` skips hidden (dot-prefixed) entries; `list_dir_including_hidden()` returns them too. Both sort directories first, then alphabetically.
 - `list_disks()` returns project-owned `DiskInfo` rows sorted by mount point. `sysinfo` excludes pseudo filesystems, tmpfs, optical media, network shares, and loop-backed `squashfs` mounts; a defensive filter also drops `/dev/loop*` and snap mounts. Returns an empty vector when no disks are reported.
-- Import parsers (XML, CSV) are hand-rolled to avoid pulling in parser crates. Max XML nesting depth is 256 and max CSV path depth is also 256.
+- The XML and CSV parsers are hand-rolled to avoid pulling in parser crates; each format lives in one module (`xml.rs`, `csv.rs`) that owns both its reader and its writer, so its escaping cannot drift between the two directions. Max XML nesting depth is 256 and max CSV path depth is also 256.
 - `FileEntry` is the public type for directory listings; `file_browser` re-exports it.
 - `DiskInfo` is the public type for mounted disks; `file_browser` consumes it via `list_disks()`.
 

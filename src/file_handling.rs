@@ -11,6 +11,7 @@
 pub(crate) mod atomic;
 pub(crate) mod autosave;
 pub(crate) mod cancel;
+pub(crate) mod csv;
 pub(crate) mod disks;
 pub(crate) mod error;
 pub(crate) mod export;
@@ -19,6 +20,7 @@ pub(crate) mod format;
 pub(crate) mod import;
 pub(crate) mod passphrase;
 pub(crate) mod share;
+pub(crate) mod xml;
 
 pub use autosave::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent};
 pub use cancel::CancelToken;
