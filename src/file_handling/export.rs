@@ -22,20 +22,22 @@ pub type ExportFormat = Format;
 /// exported, the Node's name when a single Node is exported, and the format's
 /// extension.
 ///
-/// Every character in `node_name` that is not alphanumeric or `-`/`_` becomes
-/// `_`, so the suggestion is always a usable file name.
+/// Every character in the stem and in `node_name` that is not alphanumeric or
+/// `-`/`_` becomes `_`, so the suggestion is always a usable file name.
 pub fn suggest_export_name(
     base_path: Option<&Path>,
     node_name: Option<&str>,
     format: ExportFormat,
 ) -> String {
-    let stem = base_path
-        .and_then(Path::file_stem)
-        .and_then(OsStr::to_str)
-        .unwrap_or("export");
+    let stem = sanitize(
+        base_path
+            .and_then(Path::file_stem)
+            .and_then(OsStr::to_str)
+            .unwrap_or("export"),
+    );
     let name = match node_name {
         Some(node_name) => format!("{stem}_{}", sanitize(node_name)),
-        None => stem.to_string(),
+        None => stem,
     };
     format!("{name}.{}", format.extension())
 }
@@ -420,6 +422,18 @@ mod tests {
                 ExportFormat::Csv
             ),
             "vault_My_Email_Work.csv"
+        );
+    }
+
+    #[test]
+    fn suggest_export_name_sanitises_a_newline_in_the_secret_file_stem() {
+        assert_eq!(
+            suggest_export_name(
+                Some(Path::new("/tmp/va\nult.age")),
+                None,
+                ExportFormat::Json
+            ),
+            "va_ult.json"
         );
     }
 
