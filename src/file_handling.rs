@@ -22,14 +22,14 @@ pub(crate) mod share;
 pub use autosave::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent};
 pub use cancel::CancelToken;
 pub use disks::{DiskInfo, list_disks};
-pub use error::{FileHandlingError, ImportSyntax};
+pub use error::{FileHandlingError, SerdeContext};
 pub use export::{ExportFormat, export_tree, output_path, suggest_export_name};
 pub use file_process::{
     FileEntry, create_dir, create_secret_file, decrypt_to_node, delete_file, is_age_file,
     is_dir_empty, list_dir, list_dir_including_hidden, probe_path_writable, read_file, rename_file,
     save_tree, validate_encrypted_file, write_file,
 };
-pub use import::import_tree;
+pub use import::{ParseError, import_tree};
 pub use share::{share_tree, suggest_share_name};
 
 // `pub(crate) use` marks a crate-internal seam: reached by other modules in the

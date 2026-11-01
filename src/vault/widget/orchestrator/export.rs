@@ -78,10 +78,10 @@ mod tests {
         .unwrap();
 
         match &state.modal {
-            Some(Modal::Alert(alert)) => assert!(
-                alert.message.starts_with(texts::MSG_FILE_ERROR),
-                "the write failure must be reported: {}",
-                alert.message
+            Some(Modal::Alert(alert)) => assert_eq!(
+                alert.message,
+                texts::MSG_CANNOT_WRITE,
+                "the write failure must be reported"
             ),
             _ => panic!("a failed export must be reported in an alert"),
         }

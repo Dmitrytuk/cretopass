@@ -83,7 +83,7 @@ pub fn share_tree(
 ) -> Result<PathBuf, FileHandlingError> {
     if dest_dir.exists() && !dest_dir.is_dir() {
         return Err(FileHandlingError::ShareDestinationNotAFolder {
-            path: dest_dir.display().to_string(),
+            path: dest_dir.to_path_buf(),
         });
     }
 

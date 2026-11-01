@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use zeroize::Zeroizing;
 
+use super::error::SerdeContext;
 use super::format::{Format, encode_path_segment};
 use super::{FileHandlingError, is_age_file, node_to_json};
 use crate::tree::node::Node;
@@ -75,11 +76,12 @@ pub fn output_path(path: &Path, format: ExportFormat) -> PathBuf {
 ///
 /// # Errors
 ///
-/// Returns [`FileHandlingError::ExportSerialization`] when `node` cannot be
-/// serialised, or [`FileHandlingError::ExportOverwritesSecret`] when the
+/// Returns [`FileHandlingError::Serde`] (context `Export`) when `node` cannot
+/// be serialised, or [`FileHandlingError::ExportOverwritesSecret`] when the
 /// destination is a secret file — an export is plain text, so writing it over
 /// an encrypted file would destroy the vault. Returns
-/// [`FileHandlingError::Io`] when the write fails.
+/// [`FileHandlingError::Io`] (or [`FileHandlingError::PathNotWritable`]) when
+/// the write fails.
 pub fn export_tree(
     node: &Node,
     file_path: &str,
@@ -87,13 +89,14 @@ pub fn export_tree(
 ) -> Result<String, FileHandlingError> {
     let out_path = output_path(Path::new(file_path), format);
     if is_age_file(&out_path) {
-        return Err(FileHandlingError::ExportOverwritesSecret {
-            path: out_path.display().to_string(),
-        });
+        return Err(FileHandlingError::ExportOverwritesSecret { path: out_path });
     }
 
     let data = match format {
-        ExportFormat::Json => node_to_json(node).map_err(FileHandlingError::ExportSerialization)?,
+        ExportFormat::Json => node_to_json(node).map_err(|source| FileHandlingError::Serde {
+            context: SerdeContext::Export,
+            source,
+        })?,
         ExportFormat::Xml => node_to_xml(node),
         ExportFormat::Csv => node_to_csv(node),
     };
@@ -340,7 +343,10 @@ mod tests {
             ExportFormat::Json,
         );
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), FileHandlingError::Io(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            FileHandlingError::PathNotWritable(_)
+        ));
     }
 
     #[cfg(unix)]

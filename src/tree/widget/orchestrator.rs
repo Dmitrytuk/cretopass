@@ -271,7 +271,7 @@ mod tests {
 
         match &state.modal {
             Some(Modal::Alert(alert)) => assert!(
-                alert.message.contains("io:"),
+                alert.message.contains("cannot write to path"),
                 "the write failure must be reported: {}",
                 alert.message
             ),

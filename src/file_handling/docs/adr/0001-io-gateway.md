@@ -21,10 +21,10 @@ audit I/O patterns.
 | File | Responsibility |
 |------|---------------|
 | `atomic.rs` | the atomic write layer: an exclusively created temp file + `fsync` + `rename` (replacing), no-clobber `commit_new`, symlink-safe `open_for_read`, owner-only modes, best-effort directory `fsync`, and the per-platform durability statement |
-| `file_process.rs` | JSON serde, raw read/write, encrypted file ops, directory listing (visible or including hidden), path probes, age-header detection, owner-only permissions; every write is delegated to `atomic.rs` |
+| `file_process.rs` | JSON serde, raw read/write, encrypted file ops, a bounded config read (`read_file`, cap `MAX_CONFIG_SIZE`), directory listing (visible or including hidden), path probes, age-header detection, owner-only permissions; every write is delegated to `atomic.rs` |
 | `autosave.rs` | `Autosave`: one background writer thread with a latest-wins snapshot slot, generation numbers, `SaveEvent` notifications, panic containment, and flush-on-drop ([ADR 0010](../../../../docs/adr/0010-async-tree-autosave.md)) |
 | `disks.rs` | `DiskInfo` + `list_disks()`: cross-platform mounted-volume enumeration via `sysinfo`, with loop/squashfs filtering |
-| `error.rs` | `FileHandlingError` enum (+ `crypt::CryptError` for typed encryption/decryption failures) wrapping Io / Serde / typed crypt errors + structured domain errors; `#[non_exhaustive]` and free of any imported-value payload |
+| `error.rs` | the composed `FileHandlingError` enum: it is built from the layer-local errors (`atomic::WriteError`, `import::ParseError`, `crypt::CryptError`) plus the gateway's own file-level outcomes (size caps, age-header checks, `AlreadyExists`, export/share refusals); `SerdeContext` tags each JSON failure with the operation that hit it; `#[non_exhaustive]` and free of any imported-value payload |
 | `export.rs` | `ExportFormat` (an alias of `format::Format`), the naming policy (`suggest_export_name` / `output_path`, and the `sanitize` rule `suggest_export_name` shares with the share flow), recursive XML serialization, flattened CSV export |
 | `format.rs` | the shared `Format` enum behind the `ImportFormat` / `ExportFormat` aliases: one extension table for detection and serialisation |
 | `import.rs` | `ImportFormat` detection (an alias of `format::Format`), JSON/XML/CSV import with custom parsers, `build_tree_from_paths()` |
@@ -44,6 +44,15 @@ the module's callers, not its siblings' own imports.
 
 ## Contracts
 
+- Errors are layered. The atomic write layer reports `atomic::WriteError`
+  (`Io` / `AlreadyExists(path)` / `NotWritable(path)` / `Abandoned`) and the
+  import parsers report `import::ParseError`; both compose into
+  `FileHandlingError` through `From`, so only the atomic layer ever inspects an
+  `std::io::ErrorKind` (the no-clobber rename is the one place that must). The
+  UI matches the domain variant (`AlreadyExists { .. }`), never an `ErrorKind`.
+  A JSON failure is a single `Serde { context, source }` arm whose context is
+  `Load` (a vault that decrypts but does not deserialise — the only "damaged
+  secret"), `Save`, or `Export`.
 - All public functions accept `&str` or `&Path` for paths (not `PathBuf`).
 - `save_tree()` is crash-safe: it writes the ciphertext to an **exclusive**
   temp file (`O_CREAT | O_EXCL`, a random name, mode `0600`) in the target's

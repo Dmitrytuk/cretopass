@@ -7,12 +7,19 @@ use zeroize::Zeroizing;
 use super::FileHandlingError;
 use super::atomic;
 use super::cancel::CancelToken;
+use super::error::SerdeContext;
 use crate::crypt;
 use crate::theming::texts;
 use crate::tree::node::Node;
 
 /// The maximum size (in bytes) of a vault or import the gateway will read.
 pub(crate) const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024;
+/// The maximum size (in bytes) of a plain file [`read_file`] will read.
+///
+/// The only such file is `config.pwd`, which the app itself writes as a few
+/// hundred bytes; the cap is a generous backstop so a corrupt or hostile file
+/// cannot pull the whole thing into memory.
+pub(crate) const MAX_CONFIG_SIZE: u64 = 1024 * 1024;
 /// The age file-format magic header every encrypted vault begins with.
 const AGE_MAGIC: &[u8; 11] = b"age-encrypt";
 /// Mode (Unix) directories the gateway creates are given: owner only.
@@ -57,17 +64,20 @@ pub fn json_to_node(json: &str) -> Result<Node, serde_json::Error> {
 
 // ── Raw I/O ──
 
-/// Reads the whole of `path` into memory, refusing to follow a symlink.
+/// Reads `path` into memory, bounded by a one-mebibyte cap, refusing to follow
+/// a symlink.
+///
+/// The only file this reads is `config.pwd`, which the app writes itself, so the
+/// cap is a backstop rather than a working limit: a config larger than it is
+/// rejected and the caller falls back to defaults.
 ///
 /// # Errors
 ///
-/// Returns [`FileHandlingError::Io`] when `path` cannot be read, is a symlink
+/// Returns [`FileHandlingError::FileTooLarge`] when the file exceeds the cap,
+/// and [`FileHandlingError::Io`] when `path` cannot be read, is a symlink
 /// (Unix), or is not a regular file.
 pub fn read_file(path: &str) -> Result<Vec<u8>, FileHandlingError> {
-    let mut file = atomic::open_for_read(Path::new(path))?;
-    let mut data = Vec::new();
-    file.read_to_end(&mut data).map_err(FileHandlingError::Io)?;
-    Ok(data)
+    read_capped(Path::new(path), MAX_CONFIG_SIZE)
 }
 
 /// Reads at most `max` bytes of `path`, failing when the file is larger.
@@ -78,7 +88,7 @@ pub fn read_file(path: &str) -> Result<Vec<u8>, FileHandlingError> {
 /// recheck catches that. Returns [`FileHandlingError::FileTooLarge`] either way
 /// and [`FileHandlingError::Io`] when `path` cannot be opened or read.
 pub(crate) fn read_capped(path: &Path, max: u64) -> Result<Vec<u8>, FileHandlingError> {
-    let file = atomic::open_for_read(path)?;
+    let file = atomic::open_for_read(path).map_err(FileHandlingError::Io)?;
     let meta = file.metadata().map_err(FileHandlingError::Io)?;
     if meta.len() > max {
         return Err(FileHandlingError::FileTooLarge {
@@ -111,9 +121,11 @@ pub(crate) fn read_capped(path: &Path, max: u64) -> Result<Vec<u8>, FileHandling
 ///
 /// # Errors
 ///
-/// Returns [`FileHandlingError::Io`] when `path` cannot be written.
+/// Returns [`FileHandlingError::PathNotWritable`] when the temp file cannot be
+/// created beside `path`, and [`FileHandlingError::Io`] when it cannot be
+/// written, `fsync`ed or renamed.
 pub fn write_file(path: &str, data: &[u8]) -> Result<(), FileHandlingError> {
-    atomic::write_atomic(Path::new(path), data)
+    atomic::write_atomic(Path::new(path), data).map_err(FileHandlingError::from)
 }
 
 // ── Encrypted file operations ──
@@ -149,13 +161,19 @@ pub fn validate_encrypted_file(path: &str) -> Result<Vec<u8>, FileHandlingError>
 pub fn decrypt_to_node(data: &[u8], passphrase: &str) -> Result<Node, FileHandlingError> {
     // Keep the decrypted plaintext zeroized when it is dropped.
     let json = Zeroizing::new(crypt::decrypt(data, passphrase)?);
-    json_to_node(&json).map_err(FileHandlingError::Serde)
+    json_to_node(&json).map_err(|source| FileHandlingError::Serde {
+        context: SerdeContext::Load,
+        source,
+    })
 }
 
 /// Serialises `node` to JSON (zeroizing the plaintext buffer afterwards) and
 /// encrypts it with `passphrase`.
 fn encrypt_node(node: &Node, passphrase: &str) -> Result<Vec<u8>, FileHandlingError> {
-    let json = node_to_json(node)?;
+    let json = node_to_json(node).map_err(|source| FileHandlingError::Serde {
+        context: SerdeContext::Save,
+        source,
+    })?;
     Ok(crypt::encrypt(&json, passphrase)?)
 }
 
@@ -209,6 +227,7 @@ fn save_tree_cancellable(
     let encrypted = encrypt_node(root, passphrase_str)?;
 
     atomic::write_atomic_cancellable(Path::new(path), &encrypted, cancel)
+        .map_err(FileHandlingError::from)
 }
 
 /// Creates a new encrypted secret file at `path` with a "Secrets" root node.
@@ -222,24 +241,19 @@ fn save_tree_cancellable(
 ///
 /// Returns [`FileHandlingError::PathNotWritable`] when `path` cannot be
 /// created (for example a missing parent directory), and
-/// [`FileHandlingError::Io`] with [`std::io::ErrorKind::AlreadyExists`] when
-/// it already exists. Encryption and serialisation failures surface as
-/// [`FileHandlingError::Crypt`] / [`FileHandlingError::Serde`].
+/// [`FileHandlingError::AlreadyExists`] when it already exists. Encryption and
+/// serialisation failures surface as [`FileHandlingError::Crypt`] /
+/// [`FileHandlingError::Serde`].
 pub fn create_secret_file(path: &str, passphrase: &str) -> Result<Node, FileHandlingError> {
     let node = Node::new(texts::DEFAULT_ROOT_NAME);
     let data = encrypt_node(&node, passphrase)?;
 
-    // `write_atomic_new` can only fail with an `Io` error (encryption has
-    // already succeeded). A lost race maps to `AlreadyExists`; every other
-    // failure — a missing parent, a read-only directory, a full disk, a
-    // filesystem that supports neither a no-clobber rename nor a hard link —
-    // means the path could not be written.
-    atomic::write_atomic_new(Path::new(path), &data).map_err(|error| match error {
-        FileHandlingError::Io(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            FileHandlingError::Io(e)
-        }
-        _ => FileHandlingError::PathNotWritable(path.to_string()),
-    })?;
+    // `write_atomic_new` has already classified its failure (encryption has
+    // succeeded): an occupied target is `AlreadyExists`; a temp file that could
+    // not be created beside it — a missing parent, no permission, a read-only
+    // or full filesystem — is `NotWritable`; anything else (the rename itself
+    // failing) stays `Io`. Each composes into the facade error unchanged.
+    atomic::write_atomic_new(Path::new(path), &data).map_err(FileHandlingError::from)?;
 
     Ok(node)
 }
@@ -371,7 +385,7 @@ pub fn rename_file(from: &Path, to: &Path) -> Result<(), FileHandlingError> {
 /// created beside `path`.
 pub fn probe_path_writable(path: &str) -> Result<(), FileHandlingError> {
     atomic::probe_writable(Path::new(path))
-        .map_err(|_| FileHandlingError::PathNotWritable(path.to_string()))
+        .map_err(|_| FileHandlingError::PathNotWritable(PathBuf::from(path)))
 }
 
 /// Returns `true` when `path` is a directory with no entries at all, including
@@ -610,7 +624,13 @@ mod tests {
 
         let data = fs::read(&path).unwrap();
         let result = decrypt_to_node(&data, "my-pass");
-        assert!(matches!(result, Err(FileHandlingError::Serde(_))));
+        assert!(matches!(
+            result,
+            Err(FileHandlingError::Serde {
+                context: SerdeContext::Load,
+                ..
+            })
+        ));
 
         let _ = fs::remove_file(&path);
     }
@@ -723,8 +743,7 @@ mod tests {
         let result = create_secret_file(&path, "other");
 
         assert!(
-            matches!(result, Err(FileHandlingError::Io(ref e))
-                if e.kind() == std::io::ErrorKind::AlreadyExists),
+            matches!(result, Err(FileHandlingError::AlreadyExists { .. })),
             "a second create must refuse to clobber the first"
         );
         // The vault it refused to clobber still opens with its password.
@@ -1201,5 +1220,19 @@ mod tests {
         write_file(&path, b"hello").unwrap();
 
         assert_eq!(read_file(&path).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn read_file_refuses_a_file_over_its_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.pwd");
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(MAX_CONFIG_SIZE + 1).unwrap();
+        drop(file);
+
+        assert!(matches!(
+            read_file(&path.to_string_lossy()),
+            Err(FileHandlingError::FileTooLarge { .. })
+        ));
     }
 }

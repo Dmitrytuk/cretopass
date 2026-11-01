@@ -36,11 +36,30 @@ use std::path::{Path, PathBuf};
 
 use tempfile::{Builder, NamedTempFile};
 
-use super::FileHandlingError;
 use super::cancel::CancelToken;
 
 /// Mode (Unix) a secret-bearing file is created with: owner only.
 pub(crate) const SECRET_FILE_MODE: u32 = 0o600;
+
+/// A failure this layer can report when writing.
+///
+/// The atomic layer translates the raw OS errors it can act on into domain
+/// outcomes, so no caller outside this module has to match an
+/// [`io::ErrorKind`]. It composes into [`FileHandlingError`](super::FileHandlingError)
+/// through `From`.
+#[derive(Debug)]
+pub(crate) enum WriteError {
+    /// The OS refused the write and this layer could not classify it.
+    Io(io::Error),
+    /// A no-clobber commit found the target already occupied.
+    AlreadyExists(PathBuf),
+    /// A temp file could not be created beside the target, so the target's
+    /// directory is not writable (missing directory, no permission, read-only
+    /// filesystem, or full disk).
+    NotWritable(PathBuf),
+    /// The owner cancelled the write before it committed.
+    Abandoned,
+}
 
 /// A temporary file created exclusively beside its target.
 ///
@@ -61,9 +80,11 @@ impl AtomicFile {
     ///
     /// # Errors
     ///
-    /// Returns [`FileHandlingError::Io`] when no temp file can be created (for
-    /// example when the directory does not exist or is not writable).
-    pub(crate) fn new(target: &Path, mode: u32) -> Result<Self, FileHandlingError> {
+    /// Returns [`WriteError::NotWritable`] when no temp file can be created
+    /// (for example when the directory does not exist or is not writable), and
+    /// [`WriteError::Io`] when the temp file is created but its mode cannot be
+    /// set.
+    pub(crate) fn new(target: &Path, mode: u32) -> Result<Self, WriteError> {
         let dir = parent_dir(target);
         let name = target
             .file_name()
@@ -73,7 +94,7 @@ impl AtomicFile {
             .prefix(&format!(".{name}."))
             .suffix(".tmp")
             .tempfile_in(dir)
-            .map_err(FileHandlingError::Io)?;
+            .map_err(|_| WriteError::NotWritable(target.to_path_buf()))?;
 
         let this = Self {
             temp,
@@ -87,28 +108,25 @@ impl AtomicFile {
     ///
     /// # Errors
     ///
-    /// Returns [`FileHandlingError::Io`] when the write or `fsync` fails.
-    pub(crate) fn write_all_and_sync(&mut self, data: &[u8]) -> Result<(), FileHandlingError> {
-        self.temp.write_all(data).map_err(FileHandlingError::Io)?;
-        self.temp
-            .as_file()
-            .sync_all()
-            .map_err(FileHandlingError::Io)
+    /// Returns [`WriteError::Io`] when the write or `fsync` fails.
+    pub(crate) fn write_all_and_sync(&mut self, data: &[u8]) -> Result<(), WriteError> {
+        self.temp.write_all(data).map_err(WriteError::Io)?;
+        self.temp.as_file().sync_all().map_err(WriteError::Io)
     }
 
     /// Sets the temp file's mode (Unix only; a no-op elsewhere).
     ///
     /// # Errors
     ///
-    /// Returns [`FileHandlingError::Io`] when the mode cannot be set.
-    pub(crate) fn set_mode(&self, mode: u32) -> Result<(), FileHandlingError> {
+    /// Returns [`WriteError::Io`] when the mode cannot be set.
+    pub(crate) fn set_mode(&self, mode: u32) -> Result<(), WriteError> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             self.temp
                 .as_file()
                 .set_permissions(fs::Permissions::from_mode(mode))
-                .map_err(FileHandlingError::Io)?;
+                .map_err(WriteError::Io)?;
         }
         // `mode` is only meaningful on Unix; this keeps it "used" elsewhere.
         let _ = mode;
@@ -120,14 +138,14 @@ impl AtomicFile {
     ///
     /// # Errors
     ///
-    /// Returns [`FileHandlingError::Io`] when the rename fails. The temp file
-    /// is removed in either case.
-    pub(crate) fn commit(self) -> Result<(), FileHandlingError> {
+    /// Returns [`WriteError::Io`] when the rename fails. The temp file is
+    /// removed in either case.
+    pub(crate) fn commit(self) -> Result<(), WriteError> {
         let target = self.target;
         // `PersistError` returns the temp file, which dropping removes.
         self.temp
             .persist(&target)
-            .map_err(|error| FileHandlingError::Io(error.into()))?;
+            .map_err(|error| WriteError::Io(error.into()))?;
         sync_parent_dir(&target);
         Ok(())
     }
@@ -137,14 +155,20 @@ impl AtomicFile {
     ///
     /// # Errors
     ///
-    /// Returns [`FileHandlingError::Io`] with [`io::ErrorKind::AlreadyExists`]
-    /// when `target` exists, and any other [`FileHandlingError::Io`] when the
-    /// rename fails. The temp file is removed in either case.
-    pub(crate) fn commit_new(self) -> Result<(), FileHandlingError> {
+    /// Returns [`WriteError::AlreadyExists`] when `target` exists, and
+    /// [`WriteError::Io`] when the rename fails for any other reason. The temp
+    /// file is removed in either case.
+    pub(crate) fn commit_new(self) -> Result<(), WriteError> {
         let target = self.target;
+        // The no-clobber rename is the only place this layer must interpret an
+        // `io::ErrorKind`: `persist_noclobber` reports an occupied target as
+        // `AlreadyExists`. Everything above this point is `Io`.
         self.temp
             .persist_noclobber(&target)
-            .map_err(|error| FileHandlingError::Io(error.into()))?;
+            .map_err(|error| match error.error.kind() {
+                io::ErrorKind::AlreadyExists => WriteError::AlreadyExists(target.clone()),
+                _ => WriteError::Io(error.error),
+            })?;
         sync_parent_dir(&target);
         Ok(())
     }
@@ -155,9 +179,9 @@ impl AtomicFile {
 ///
 /// # Errors
 ///
-/// Returns [`FileHandlingError::Io`] when the temp file cannot be created,
-/// written, `fsync`ed or renamed.
-pub(crate) fn write_atomic(target: &Path, data: &[u8]) -> Result<(), FileHandlingError> {
+/// Returns [`WriteError::NotWritable`] when the temp file cannot be created,
+/// and [`WriteError::Io`] when it cannot be written, `fsync`ed or renamed.
+pub(crate) fn write_atomic(target: &Path, data: &[u8]) -> Result<(), WriteError> {
     write_atomic_cancellable(target, data, None)
 }
 
@@ -170,21 +194,21 @@ pub(crate) fn write_atomic(target: &Path, data: &[u8]) -> Result<(), FileHandlin
 ///
 /// # Errors
 ///
-/// Returns [`FileHandlingError::WriteAbandoned`] when `cancel` is set by the
-/// time the check runs, and [`FileHandlingError::Io`] when the temp file cannot
-/// be created, written, `fsync`ed or renamed.
+/// Returns [`WriteError::Abandoned`] when `cancel` is set by the time the check
+/// runs, [`WriteError::NotWritable`] when the temp file cannot be created, and
+/// [`WriteError::Io`] when it cannot be written, `fsync`ed or renamed.
 pub(crate) fn write_atomic_cancellable(
     target: &Path,
     data: &[u8],
     cancel: Option<&CancelToken>,
-) -> Result<(), FileHandlingError> {
+) -> Result<(), WriteError> {
     let mut temp = AtomicFile::new(target, SECRET_FILE_MODE)?;
     preserve_target_mode(target, &temp)?;
     temp.write_all_and_sync(data)?;
 
     if cancel.is_some_and(CancelToken::is_cancelled) {
         // Dropping `temp` removes it, so the target is left exactly as it was.
-        return Err(FileHandlingError::WriteAbandoned);
+        return Err(WriteError::Abandoned);
     }
 
     temp.commit()
@@ -196,9 +220,9 @@ pub(crate) fn write_atomic_cancellable(
 ///
 /// # Errors
 ///
-/// Returns [`FileHandlingError::Io`] when the temp file cannot be created,
-/// written, `fsync`ed or renamed.
-pub(crate) fn write_atomic_private(target: &Path, data: &[u8]) -> Result<(), FileHandlingError> {
+/// Returns [`WriteError::NotWritable`] when the temp file cannot be created,
+/// and [`WriteError::Io`] when it cannot be written, `fsync`ed or renamed.
+pub(crate) fn write_atomic_private(target: &Path, data: &[u8]) -> Result<(), WriteError> {
     let mut temp = AtomicFile::new(target, SECRET_FILE_MODE)?;
     temp.write_all_and_sync(data)?;
     temp.commit()
@@ -209,11 +233,10 @@ pub(crate) fn write_atomic_private(target: &Path, data: &[u8]) -> Result<(), Fil
 ///
 /// # Errors
 ///
-/// Returns [`FileHandlingError::Io`] with [`io::ErrorKind::AlreadyExists`] when
-/// `target` exists, [`FileHandlingError::Io`] with [`io::ErrorKind::NotFound`]
-/// when the target's directory is missing, and any other
-/// [`FileHandlingError::Io`] when the write fails.
-pub(crate) fn write_atomic_new(target: &Path, data: &[u8]) -> Result<(), FileHandlingError> {
+/// Returns [`WriteError::AlreadyExists`] when `target` exists,
+/// [`WriteError::NotWritable`] when the target's directory is missing, and any
+/// other [`WriteError::Io`] when the write fails.
+pub(crate) fn write_atomic_new(target: &Path, data: &[u8]) -> Result<(), WriteError> {
     let mut temp = AtomicFile::new(target, SECRET_FILE_MODE)?;
     temp.write_all_and_sync(data)?;
     temp.commit_new()
@@ -224,8 +247,8 @@ pub(crate) fn write_atomic_new(target: &Path, data: &[u8]) -> Result<(), FileHan
 ///
 /// # Errors
 ///
-/// Returns [`FileHandlingError::Io`] when no temp file can be created.
-pub(crate) fn probe_writable(target: &Path) -> Result<(), FileHandlingError> {
+/// Returns [`WriteError::NotWritable`] when no temp file can be created.
+pub(crate) fn probe_writable(target: &Path) -> Result<(), WriteError> {
     AtomicFile::new(target, SECRET_FILE_MODE).map(|_| ())
 }
 
@@ -233,20 +256,20 @@ pub(crate) fn probe_writable(target: &Path) -> Result<(), FileHandlingError> {
 ///
 /// A vault reached *through* a symlink is therefore rejected rather than read.
 /// That is deliberate — a planted link must never redirect a read of a secret —
-/// and surfaces as a [`FileHandlingError::Io`] (`ELOOP` on Unix).
+/// and surfaces as an [`io::Error`] (`ELOOP` on Unix).
 ///
 /// # Errors
 ///
-/// Returns [`FileHandlingError::Io`] when `path` cannot be opened, is a symlink
-/// (Unix), or is not a regular file.
-pub(crate) fn open_for_read(path: &Path) -> Result<File, FileHandlingError> {
-    let file = open_nofollow(path).map_err(FileHandlingError::Io)?;
-    let meta = file.metadata().map_err(FileHandlingError::Io)?;
+/// Returns an [`io::Error`] when `path` cannot be opened, is a symlink (Unix),
+/// or is not a regular file.
+pub(crate) fn open_for_read(path: &Path) -> io::Result<File> {
+    let file = open_nofollow(path)?;
+    let meta = file.metadata()?;
     if !meta.is_file() {
-        return Err(FileHandlingError::Io(io::Error::new(
+        return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "refusing to read a non-regular file",
-        )));
+        ));
     }
     Ok(file)
 }
@@ -307,7 +330,7 @@ fn sync_parent_dir(path: &Path) {
 ///
 /// Uses `symlink_metadata`: a mode is never inherited from a symlink's target,
 /// only from an ordinary existing file.
-fn preserve_target_mode(target: &Path, temp: &AtomicFile) -> Result<(), FileHandlingError> {
+fn preserve_target_mode(target: &Path, temp: &AtomicFile) -> Result<(), WriteError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -339,7 +362,7 @@ mod tests {
         let error =
             write_atomic_cancellable(&target, b"newer contents", Some(&cancel)).unwrap_err();
 
-        assert!(matches!(error, FileHandlingError::WriteAbandoned));
+        assert!(matches!(error, WriteError::Abandoned));
         assert_eq!(fs::read(&target).unwrap(), b"older contents");
         // The abandoned temp file is removed, not left behind. On the vault
         // path it holds ciphertext; on an export it would be plaintext.
@@ -449,8 +472,7 @@ mod tests {
         let result = write_atomic_new(&target, b"clobber");
 
         assert!(
-            matches!(result, Err(FileHandlingError::Io(ref e))
-                if e.kind() == io::ErrorKind::AlreadyExists),
+            matches!(result, Err(WriteError::AlreadyExists(_))),
             "a no-clobber write must refuse an existing file: {result:?}"
         );
         assert_eq!(fs::read(&target).unwrap(), b"keep me");
