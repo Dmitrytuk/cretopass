@@ -47,6 +47,7 @@ impl std::error::Error for FileHandlingError {
         match self {
             Self::Io(e) => Some(e),
             Self::Serde(e) => Some(e),
+            Self::Crypt(e) => Some(e),
             _ => None,
         }
     }
@@ -61,5 +62,29 @@ impl From<std::io::Error> for FileHandlingError {
 impl From<serde_json::Error> for FileHandlingError {
     fn from(e: serde_json::Error) -> Self {
         Self::Serde(e)
+    }
+}
+
+impl From<CryptError> for FileHandlingError {
+    fn from(e: CryptError) -> Self {
+        Self::Crypt(e)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn a_crypt_error_forwards_the_full_cause_chain() {
+        let error = FileHandlingError::Crypt(CryptError::CorruptFile {
+            message: "the ciphertext body is damaged".to_string(),
+            cause: Some(Box::new(std::io::Error::other("unexpected end of file"))),
+        });
+
+        let crypt = error.source().expect("the crypt error is forwarded");
+        let cause = crypt.source().expect("the age/io cause is forwarded");
+        assert_eq!(cause.to_string(), "unexpected end of file");
     }
 }

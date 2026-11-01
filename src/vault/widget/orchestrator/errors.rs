@@ -10,9 +10,10 @@ use crate::theming::texts;
 
 /// The text a Home modal shows for `error`.
 ///
-/// Only the outcomes a user can act on are named: a wrong master password, or a
-/// secret file that will not open. Everything else keeps its raw detail behind a
-/// generic prefix, so an unexpected failure is never shown blank.
+/// Only the outcomes a user can act on are named: a wrong master password, a
+/// secret file that will not open, or one that needs more scrypt work than
+/// this device allows. Everything else keeps its raw detail behind a generic
+/// prefix, so an unexpected failure is never shown blank.
 pub(super) fn message(error: &FileHandlingError) -> String {
     match error {
         FileHandlingError::Crypt(CryptError::WrongPassphrase) => {
@@ -20,13 +21,16 @@ pub(super) fn message(error: &FileHandlingError) -> String {
         }
         // A file that decrypts but does not hold a Node is as unreadable to the
         // user as one whose header is damaged.
-        FileHandlingError::Crypt(CryptError::CorruptFile(_)) | FileHandlingError::Serde(_) => {
+        FileHandlingError::Crypt(CryptError::CorruptFile { .. }) | FileHandlingError::Serde(_) => {
             texts::MSG_DAMAGED_SECRET.to_string()
+        }
+        FileHandlingError::Crypt(CryptError::WorkFactorTooHigh { .. }) => {
+            texts::MSG_WORK_FACTOR_TOO_HIGH.to_string()
         }
         FileHandlingError::NotAnAgeFile | FileHandlingError::FileTooSmall => {
             texts::MSG_NOT_SECRET_FILE.to_string()
         }
-        FileHandlingError::Crypt(CryptError::EncryptionFailed(_)) => {
+        FileHandlingError::Crypt(CryptError::EncryptionFailed { .. }) => {
             format!("{}{error}", texts::MSG_SAVE_FAILED)
         }
         FileHandlingError::PathNotWritable(_) => texts::MSG_CANNOT_WRITE.to_string(),
@@ -53,10 +57,22 @@ mod tests {
     #[test]
     fn a_damaged_ciphertext_is_reported_as_damaged() {
         assert_eq!(
-            message_for(FileHandlingError::Crypt(CryptError::CorruptFile(
-                "header is invalid".to_string()
-            ))),
+            message_for(FileHandlingError::Crypt(CryptError::CorruptFile {
+                message: "header is invalid".to_string(),
+                cause: None,
+            })),
             texts::MSG_DAMAGED_SECRET
+        );
+    }
+
+    #[test]
+    fn a_file_above_the_work_factor_limit_names_the_limit() {
+        assert_eq!(
+            message_for(FileHandlingError::Crypt(CryptError::WorkFactorTooHigh {
+                required: 40,
+                limit: 20,
+            })),
+            texts::MSG_WORK_FACTOR_TOO_HIGH
         );
     }
 
@@ -81,8 +97,10 @@ mod tests {
 
     #[test]
     fn a_failed_encryption_reads_as_a_failed_save() {
-        let error =
-            FileHandlingError::Crypt(CryptError::EncryptionFailed("device full".to_string()));
+        let error = FileHandlingError::Crypt(CryptError::EncryptionFailed {
+            message: "device full".to_string(),
+            cause: None,
+        });
         let expected = format!("{}{}", texts::MSG_SAVE_FAILED, error);
         assert_eq!(message_for(error), expected);
     }

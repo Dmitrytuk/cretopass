@@ -73,7 +73,7 @@ pub fn validate_encrypted_file(path: &str) -> Result<Vec<u8>, FileHandlingError>
 
 /// Decrypts age-encrypted bytes with a passphrase and deserialises into a Node.
 pub fn decrypt_to_node(data: &[u8], passphrase: &str) -> Result<Node, FileHandlingError> {
-    let json = crypt::decrypt(data, passphrase).map_err(FileHandlingError::Crypt)?;
+    let json = crypt::decrypt(data, passphrase)?;
     json_to_node(&json).map_err(FileHandlingError::Serde)
 }
 
@@ -90,7 +90,7 @@ pub fn save_tree(root: &Node, path: &str, passphrase: &[u8]) -> Result<(), FileH
         .map_err(|_| FileHandlingError::InvalidPassphraseEncoding)?;
 
     let json = node_to_json(root)?;
-    let encrypted = crypt::encrypt(&json, passphrase_str).map_err(FileHandlingError::Crypt)?;
+    let encrypted = crypt::encrypt(&json, passphrase_str)?;
 
     let target = Path::new(path);
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
@@ -140,7 +140,7 @@ pub fn create_secret_file(path: &str, passphrase: &str) -> Result<Node, FileHand
 
     let node = Node::new(texts::DEFAULT_ROOT_NAME);
     let json = node_to_json(&node)?;
-    let encrypted = crypt::encrypt(&json, passphrase).map_err(FileHandlingError::Crypt)?;
+    let encrypted = crypt::encrypt(&json, passphrase)?;
     fs::write(path, &encrypted)?;
     Ok(node)
 }

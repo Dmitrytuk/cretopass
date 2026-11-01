@@ -289,7 +289,9 @@ pub const MSG_NO_OPEN_FILE: &str = "No file is currently open";
 pub const MSG_CANNOT_DELETE_OPEN: &str = "Cannot delete the currently open file from recent files";
 pub const MSG_CANNOT_WRITE: &str = "Cannot write to this path";
 pub const MSG_FILE_EXISTS: &str = "A file with that name already exists";
-pub const MSG_WRONG_MASTER_PW: &str = "Wrong master password";
+pub const MSG_WRONG_MASTER_PW: &str = "Wrong master password, or the file was altered";
+pub const MSG_WORK_FACTOR_TOO_HIGH: &str =
+    "This secret file needs more computing power than this device allows";
 pub const MSG_DAMAGED_SECRET: &str = "This secret file is damaged or unreadable";
 pub const MSG_NOT_SECRET_FILE: &str = "Not a cretopass secret file";
 pub const MSG_FILE_ERROR: &str = "File error: ";
