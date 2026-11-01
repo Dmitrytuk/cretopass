@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::Path;
 
 use super::FileHandlingError;
 use super::file_process::{MAX_FILE_SIZE, json_to_node, read_capped};
@@ -105,11 +105,12 @@ impl std::error::Error for ParseError {}
 /// exceeds the shared size cap, [`FileHandlingError::Io`] when it cannot be
 /// read, and [`FileHandlingError::Import`] (a [`ParseError`]) when the document
 /// is malformed.
-pub fn import_tree(path: &str) -> Result<Node, FileHandlingError> {
+pub fn import_tree(path: impl AsRef<Path>) -> Result<Node, FileHandlingError> {
+    let path = path.as_ref();
     let format = ImportFormat::from_path(path)
-        .ok_or_else(|| FileHandlingError::UnsupportedImportFormat(PathBuf::from(path)))?;
+        .ok_or_else(|| FileHandlingError::UnsupportedImportFormat(path.to_path_buf()))?;
 
-    let bytes = read_capped(std::path::Path::new(path), MAX_FILE_SIZE)?;
+    let bytes = read_capped(path, MAX_FILE_SIZE)?;
     let data = String::from_utf8(bytes).map_err(|e| {
         FileHandlingError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     })?;
@@ -711,7 +712,7 @@ mod tests {
         let path = dir.path().join("roundtrip.json");
         std::fs::write(&path, &json).unwrap();
 
-        let imported = import_tree(&path.to_string_lossy()).unwrap();
+        let imported = import_tree(&path).unwrap();
         // IDs are regenerated, so compare structure
         assert_eq!(imported.name, original.name);
         assert_eq!(imported.extra_fields.len(), original.extra_fields.len());
@@ -913,14 +914,21 @@ mod tests {
 
     #[test]
     fn test_import_format_from_path() {
+        let path = std::path::Path::new;
         assert_eq!(
-            ImportFormat::from_path("file.json"),
+            ImportFormat::from_path(path("file.json")),
             Some(ImportFormat::Json)
         );
-        assert_eq!(ImportFormat::from_path("file.xml"), Some(ImportFormat::Xml));
-        assert_eq!(ImportFormat::from_path("file.csv"), Some(ImportFormat::Csv));
-        assert_eq!(ImportFormat::from_path("file.age"), None);
-        assert_eq!(ImportFormat::from_path("file"), None);
+        assert_eq!(
+            ImportFormat::from_path(path("file.xml")),
+            Some(ImportFormat::Xml)
+        );
+        assert_eq!(
+            ImportFormat::from_path(path("file.csv")),
+            Some(ImportFormat::Csv)
+        );
+        assert_eq!(ImportFormat::from_path(path("file.age")), None);
+        assert_eq!(ImportFormat::from_path(path("file")), None);
     }
 
     #[test]
@@ -956,7 +964,7 @@ mod tests {
             let path = dir.path().join(format!("bom.{ext}"));
             std::fs::write(&path, format!("\u{feff}{body}")).unwrap();
 
-            let imported = import_tree(&path.to_string_lossy())
+            let imported = import_tree(&path)
                 .unwrap_or_else(|error| panic!("a {ext} file with a BOM must import: {error}"));
             assert_eq!(imported.name, "Secrets", "{ext}");
             if ext == "json" {
@@ -1228,7 +1236,7 @@ mod tests {
         let path = dir.path().join("broken.json");
         std::fs::write(&path, "{ not json").unwrap();
 
-        let error = import_tree(&path.to_string_lossy()).unwrap_err();
+        let error = import_tree(&path).unwrap_err();
 
         assert!(
             matches!(error, FileHandlingError::Import(ParseError::InvalidJson)),

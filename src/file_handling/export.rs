@@ -84,10 +84,10 @@ pub fn output_path(path: &Path, format: ExportFormat) -> PathBuf {
 /// the write fails.
 pub fn export_tree(
     node: &Node,
-    file_path: &str,
+    file_path: impl AsRef<Path>,
     format: ExportFormat,
 ) -> Result<String, FileHandlingError> {
-    let out_path = output_path(Path::new(file_path), format);
+    let out_path = output_path(file_path.as_ref(), format);
     if is_age_file(&out_path) {
         return Err(FileHandlingError::ExportOverwritesSecret { path: out_path });
     }
@@ -314,7 +314,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vault = dir.path().join("my_vault.age");
         let node = Node::new("X");
-        let result = export_tree(&node, &vault.to_string_lossy(), ExportFormat::Json);
+        let result = export_tree(&node, &vault, ExportFormat::Json);
         assert!(result.is_ok());
         let path = result.unwrap();
         assert_eq!(
@@ -328,7 +328,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vault = dir.path().join("my_vault");
         let node = Node::new("X");
-        let result = export_tree(&node, &vault.to_string_lossy(), ExportFormat::Json);
+        let result = export_tree(&node, &vault, ExportFormat::Json);
         assert!(result.is_ok());
         let path = result.unwrap();
         assert!(path.contains("my_vault.json"));

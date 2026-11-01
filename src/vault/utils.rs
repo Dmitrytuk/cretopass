@@ -169,7 +169,7 @@ fn save_config_to(dir: &Path, config: &Configuration) -> Result<(), ConfigError>
     file_handling::create_private_dir(dir).map_err(ConfigError::Io)?;
     let bytes = rkyv::to_bytes::<rancor::Error>(config)
         .map_err(|e| ConfigError::Serialize(e.to_string()))?;
-    file_handling::write_file(&path.to_string_lossy(), &bytes).map_err(ConfigError::Io)?;
+    file_handling::write_file(&path, &bytes).map_err(ConfigError::Io)?;
     Ok(())
 }
 
@@ -177,7 +177,7 @@ fn save_config_to(dir: &Path, config: &Configuration) -> Result<(), ConfigError>
 fn load_config_from(dir: &Path) -> Configuration {
     let path = config_file_path(dir);
 
-    let bytes = match file_handling::read_file(&path.to_string_lossy()) {
+    let bytes = match file_handling::read_file(&path) {
         Ok(b) => b,
         Err(_) => {
             let defaults = Configuration::default();

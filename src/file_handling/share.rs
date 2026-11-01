@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use super::export::sanitize;
 use super::file_process::create_private_dir;
+use super::passphrase::Passphrase;
 use super::{FileHandlingError, save_tree};
 use crate::theming::texts;
 use crate::tree::node::Node;
@@ -74,13 +75,16 @@ pub fn suggest_share_name(base_path: Option<&Path>, node_name: Option<&str>) -> 
 /// exists as a file (in particular a secret file) instead of a folder. Returns
 /// [`FileHandlingError::Io`] when the folder, the secret file or the instruction
 /// cannot be written.
-pub fn share_tree(
+pub fn share_tree<'a>(
     node: &Node,
-    dest_dir: &Path,
+    dest_dir: impl AsRef<Path>,
     base_path: Option<&Path>,
     node_name: Option<&str>,
-    passphrase: &[u8],
+    passphrase: impl Into<Passphrase<'a>>,
 ) -> Result<PathBuf, FileHandlingError> {
+    let dest_dir = dest_dir.as_ref();
+    let passphrase = passphrase.into();
+
     if dest_dir.exists() && !dest_dir.is_dir() {
         return Err(FileHandlingError::ShareDestinationNotAFolder {
             path: dest_dir.to_path_buf(),
@@ -94,9 +98,9 @@ pub fn share_tree(
         suggest_share_name(base_path, node_name)
     );
     let file_path = dest_dir.join(&file_name);
-    save_tree(node, &file_path.to_string_lossy(), passphrase)?;
+    save_tree(node, &file_path, passphrase)?;
 
-    let instruction = instruction(&file_name, passphrase.is_empty());
+    let instruction = instruction(&file_name, passphrase.as_bytes().is_empty());
     super::atomic::write_atomic(&dest_dir.join(SHARE_README_NAME), instruction.as_bytes())?;
 
     Ok(dest_dir.to_path_buf())
@@ -297,7 +301,7 @@ mod tests {
     fn sharing_refuses_to_replace_a_secret_file() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("vault.age");
-        create_secret_file(&target.to_string_lossy(), "pw").unwrap();
+        create_secret_file(&target, "pw").unwrap();
 
         let result = share_tree(&sample_node(), &target, None, None, b"pw");
 

@@ -28,6 +28,7 @@ audit I/O patterns.
 | `export.rs` | `ExportFormat` (an alias of `format::Format`), the naming policy (`suggest_export_name` / `output_path`, and the `sanitize` rule `suggest_export_name` shares with the share flow), recursive XML serialization, flattened CSV export |
 | `format.rs` | the shared `Format` enum behind the `ImportFormat` / `ExportFormat` aliases: one extension table for detection and serialisation |
 | `import.rs` | `ImportFormat` detection (an alias of `format::Format`), JSON/XML/CSV import with custom parsers, `build_tree_from_paths()` |
+| `passphrase.rs` | `Passphrase`: the one bridge between the passphrase bytes the app carries and the `&str` `age` accepts, owning the non-UTF-8 check |
 | `share.rs` | `suggest_share_name` (the bundle-folder name) and `share_tree`: writes a share bundle — a re-encrypted secret file via `save_tree`, then a `HOW-TO-OPEN.txt` instruction ([0023](../../../../docs/adr/0023-sharing-a-vault-subtree.md)) |
 
 ## Facade
@@ -53,7 +54,19 @@ the module's callers, not its siblings' own imports.
   A JSON failure is a single `Serde { context, source }` arm whose context is
   `Load` (a vault that decrypts but does not deserialise — the only "damaged
   secret"), `Save`, or `Export`.
-- All public functions accept `&str` or `&Path` for paths (not `PathBuf`).
+- The I/O entry points take `impl AsRef<Path>` for paths, so a caller may pass
+  a `&str`, `String`, `&Path` or `PathBuf` without converting and a non-UTF-8
+  path is never lossily mangled. The pure classifiers and naming helpers
+  (`Format::from_path`, `output_path`, `suggest_export_name`,
+  `suggest_share_name`, and `share_tree`'s `base_path`) take `&Path` /
+  `Option<&Path>` instead, since they never open a file. Passphrases are an
+  `impl Into<Passphrase>` over the borrowed shapes `&str`, `&String`, `&[u8]`,
+  `&[u8; N]`, `&Vec<u8>`, `&Zeroizing<Vec<u8>>` and `&Zeroizing<String>`; the
+  non-UTF-8 check happens once, in `Passphrase::as_utf8()`.
+- The config read is bounded and binary. `read_file()` caps at one mebibyte;
+  `config.pwd` is an rkyv *binary* document, not UTF-8 text, so no byte-order
+  mark can arise on this path — the BOM strip in `import_tree()` applies to
+  imports only.
 - `save_tree()` is crash-safe: it writes the ciphertext to an **exclusive**
   temp file (`O_CREAT | O_EXCL`, a random name, mode `0600`) in the target's
   directory, `fsync`s it, `rename`s it over the target, then best-effort

@@ -29,8 +29,8 @@ impl Format {
 
     /// The format a path's extension selects, or `None` when it is not one of
     /// the supported extensions.
-    pub fn from_path(path: &str) -> Option<Self> {
-        let ext = Path::new(path).extension()?.to_str()?.to_lowercase();
+    pub fn from_path(path: &Path) -> Option<Self> {
+        let ext = path.extension()?.to_str()?.to_lowercase();
         match ext.as_str() {
             "json" => Some(Self::Json),
             "xml" => Some(Self::Xml),

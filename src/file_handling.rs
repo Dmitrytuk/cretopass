@@ -17,6 +17,7 @@ pub(crate) mod export;
 pub(crate) mod file_process;
 pub(crate) mod format;
 pub(crate) mod import;
+pub(crate) mod passphrase;
 pub(crate) mod share;
 
 pub use autosave::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent};
@@ -30,6 +31,7 @@ pub use file_process::{
     save_tree, validate_encrypted_file, write_file,
 };
 pub use import::{ParseError, import_tree};
+pub use passphrase::Passphrase;
 pub use share::{share_tree, suggest_share_name};
 
 // `pub(crate) use` marks a crate-internal seam: reached by other modules in the

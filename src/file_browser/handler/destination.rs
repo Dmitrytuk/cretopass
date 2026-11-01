@@ -218,7 +218,7 @@ mod tests {
         // A secret file is recognised by its contents, so it may carry the very
         // name the export would write to.
         let secret = dir.path().join("vault.json");
-        file_handling::create_secret_file(&secret.to_string_lossy(), "pw").unwrap();
+        file_handling::create_secret_file(&secret, "pw").unwrap();
         let mut state = export_state(dir.path(), ExportFormat::Json);
 
         let result = handle_key(key(KeyCode::Char('e')), &mut state);
@@ -234,7 +234,7 @@ mod tests {
     fn test_export_mode_offers_no_rename_or_delete() {
         let dir = tempfile::tempdir().unwrap();
         let secret = dir.path().join("other.age");
-        file_handling::create_secret_file(&secret.to_string_lossy(), "pw").unwrap();
+        file_handling::create_secret_file(&secret, "pw").unwrap();
         let mut state = export_state(dir.path(), ExportFormat::Json);
         state.focus = FocusTarget::List;
         state.selected = state
@@ -410,7 +410,7 @@ mod tests {
     fn test_share_mode_offers_no_rename_or_delete() {
         let dir = tempfile::tempdir().unwrap();
         let secret = dir.path().join("other.age");
-        file_handling::create_secret_file(&secret.to_string_lossy(), "pw").unwrap();
+        file_handling::create_secret_file(&secret, "pw").unwrap();
         let mut state = share_state(dir.path());
         state.selected = state
             .entries
