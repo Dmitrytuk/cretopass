@@ -82,11 +82,12 @@ cretopass deliberately keeps its attack surface small by design:
 - **In-memory editing.** Secrets are decrypted only into process memory.
   Sensitive buffers are zeroized (`zeroize`) when released. Password values
   are masked in the UI except in the field being actively edited.
-- **Atomic writes.** On every save the new ciphertext is written to a
-  temporary file, synced, then atomically renamed over the target, so a
-  crash mid-save never leaves a truncated vault. A transient `{file}.bak`
-  copy of the previous version exists only during the write and is removed
-  once the save succeeds.
+- **Atomic writes.** On every save the new ciphertext is written to an
+  exclusive temporary file (a random name, never following a planted
+  symlink), synced, then atomically renamed over the target, and the
+  containing directory is synced, so a crash mid-save never leaves a
+  truncated vault. New secret files are created owner-only (`0600`), and a
+  plaintext export is always written owner-only.
 - **Clipboard is opt-in and explicit.** Data reaches the system clipboard
   only when you press `Enter` in the detail overlay — never implicitly. Be
   aware that anything placed on the system clipboard may be readable by
@@ -101,7 +102,6 @@ secret file — they are useless to anyone without the passphrase.
 | Path | Purpose |
 |------|---------|
 | `<secret file>` | The age-encrypted secret file (location chosen by you) |
-| `<secret file>.bak` | Transient copy of the previous version; exists only during a save (or after an interrupted one) |
 | `~/.config/cretopass/config.pwd` | App settings and recent files list (rkyv binary) |
 
 ## Feedback & Security

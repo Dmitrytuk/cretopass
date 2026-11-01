@@ -50,7 +50,7 @@ password pair that the Tree and Home share flows both use, and never imports
 1. **I/O gateway** — all filesystem operations go through `file_handling`. No other module imports `std::fs`.
 2. **State-machine UI** — every screen and modal is an enum variant in `InputMode` (tree) or `HomeModal` (vault), carrying its own transient state. Key handlers dispatch by variant.
 3. **DFS flat-list rendering** — the tree view flattens the recursive `Node` tree into a `Vec<VisibleNode>` with indentation. Expansion state is a `HashSet<Uuid>`.
-4. **Asynchronous atomic autosave** — mutations submit a root snapshot to a single background writer. The worker serializes, encrypts, and writes via temp-file + fsync + rename, with a `.bak` backup. A newer snapshot replaces a waiting one; `q`/`H` flush the latest generation before leaving.
+4. **Asynchronous atomic autosave** — mutations submit a root snapshot to a single background writer. The worker serializes, encrypts, and writes via an exclusive temp file + fsync + rename + directory fsync. A newer snapshot replaces a waiting one; `q`/`H` flush the latest generation before leaving.
 5. **Theming as a strict leaf** — all UI strings, styles, icons, and keybindings live in `theming/` and depend on nothing else in the project.
 6. **byte-offset cursor** — all text editing uses byte offsets with explicit UTF-8 boundary checks via `is_char_boundary()` and `len_utf8()`.
 7. **Generator as a strict leaf** — password generation is a pure, TUI-free module. The tree maps a field type to a generator; the module never imports `FieldType` or any TUI code (see [0012](0012-password-generator.md)).

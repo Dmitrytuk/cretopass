@@ -133,7 +133,7 @@ fn config_file_path(dir: &Path) -> PathBuf {
 /// Saves app configuration to the given config directory as binary.
 fn save_config_to(dir: &Path, config: &Configuration) -> Result<(), ConfigError> {
     let path = config_file_path(dir);
-    file_handling::create_dir(dir).map_err(ConfigError::Io)?;
+    file_handling::file_process::create_private_dir(dir).map_err(ConfigError::Io)?;
     let bytes = rkyv::to_bytes::<rancor::Error>(config)
         .map_err(|e| ConfigError::Serialize(e.to_string()))?;
     file_handling::write_file(&path.to_string_lossy(), &bytes).map_err(ConfigError::Io)?;

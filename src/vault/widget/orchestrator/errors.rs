@@ -34,6 +34,11 @@ pub(super) fn message(error: &FileHandlingError) -> String {
             format!("{}{error}", texts::MSG_SAVE_FAILED)
         }
         FileHandlingError::PathNotWritable(_) => texts::MSG_CANNOT_WRITE.to_string(),
+        // `create_secret_file` claims its target with `O_EXCL`, so a lost race
+        // surfaces here instead of the caller-side `Path::exists()` check.
+        FileHandlingError::Io(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            texts::MSG_FILE_EXISTS.to_string()
+        }
         other => format!("{}{other}", texts::MSG_FILE_ERROR),
     }
 }
@@ -109,6 +114,15 @@ mod tests {
     fn a_path_that_cannot_be_written_is_reported_as_such() {
         let error = FileHandlingError::PathNotWritable("/root/vault.age".to_string());
         assert_eq!(message_for(error), texts::MSG_CANNOT_WRITE);
+    }
+
+    #[test]
+    fn an_already_existing_target_is_reported_as_existing() {
+        let error = FileHandlingError::Io(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "File exists",
+        ));
+        assert_eq!(message_for(error), texts::MSG_FILE_EXISTS);
     }
 
     #[test]

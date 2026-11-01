@@ -93,7 +93,9 @@ pub fn export_tree(
         ExportFormat::Csv => node_to_csv(node),
     };
 
-    std::fs::write(&out_path, &data).map_err(FileHandlingError::Io)?;
+    // Write the plaintext export atomically, at owner-only permissions: it
+    // holds decrypted secrets, so it must not be world-readable.
+    crate::file_handling::file_process::write_atomic_private(&out_path, data.as_bytes())?;
 
     Ok(out_path.to_string_lossy().to_string())
 }
@@ -325,6 +327,27 @@ mod tests {
         );
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), FileHandlingError::Io(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn export_is_owner_only_even_over_a_permissive_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.age");
+        let vault = vault.to_string_lossy().to_string();
+        export_tree(&Node::new("X"), &vault, ExportFormat::Json).unwrap();
+
+        // Pre-existing exports may carry a group/world-readable mode; the next
+        // export must not inherit it, because it holds decrypted secrets.
+        let out = dir.path().join("vault.json");
+        std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        export_tree(&sample_node(), &vault, ExportFormat::Json).unwrap();
+
+        let mode = std::fs::metadata(&out).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "a plaintext export must be owner-only");
     }
 
     #[test]

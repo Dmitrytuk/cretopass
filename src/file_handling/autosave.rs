@@ -22,6 +22,8 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use zeroize::Zeroize;
+
 use crate::file_handling::error::FileHandlingError;
 
 /// Bound on waiting for the save worker to finish.
@@ -96,11 +98,12 @@ struct Shared<T> {
 /// Owns the single background writer thread.
 ///
 /// Generic over the snapshot type `T`; the worker treats it as opaque and only
-/// hands it to the save function. Call [`Autosave::shutdown`] to stop the worker
-/// with a bounded wait; the returned error reports only a join timeout.
-/// [`Autosave::detach`] stops without waiting, for a force-quit while a save is
-/// stuck. [`Drop`] repeats a best-effort bounded join as a fallback for callers
-/// that forget.
+/// hands it to the save function. `T` must be [`Zeroize`] so that a snapshot
+/// holding plaintext can be wiped as soon as it is written or replaced.
+/// Call [`Autosave::shutdown`] to stop the worker with a bounded wait; the
+/// returned error reports only a join timeout. [`Autosave::detach`] stops
+/// without waiting, for a force-quit while a save is stuck. [`Drop`] repeats a
+/// best-effort bounded join as a fallback for callers that forget.
 ///
 /// Any snapshot still waiting in the slot is written before the thread exits;
 /// on timeout the thread is detached and left to be reaped at process exit.
@@ -110,7 +113,7 @@ pub struct Autosave<T> {
     next_generation: u64,
 }
 
-impl<T: Send + 'static> Autosave<T> {
+impl<T: Send + Zeroize + 'static> Autosave<T> {
     /// Starts the writer thread.
     ///
     /// `save` is called on the writer thread with the latest submitted snapshot;
@@ -160,8 +163,11 @@ impl<T: Send + 'static> Autosave<T> {
         let replaced = state.slot.replace(Job { generation, root });
         drop(state);
         // Drop the replaced snapshot outside the lock: releasing a large tree
-        // can be expensive and must not block the worker.
-        drop(replaced);
+        // can be expensive and must not block the worker. Zeroize its plaintext
+        // first, since a newer snapshot already supersedes it.
+        if let Some(mut job) = replaced {
+            job.root.zeroize();
+        }
         self.shared.available.notify_one();
 
         generation
@@ -236,11 +242,12 @@ fn join_bounded(handle: JoinHandle<()>, timeout: Duration) -> Result<(), SaveErr
 /// Runs the writer loop until shutdown is requested and the slot is empty.
 fn run_worker<T, F, G>(shared: &Shared<T>, save: &F, on_event: &G)
 where
+    T: Zeroize,
     F: Fn(&T) -> SaveResult,
     G: Fn(SaveEvent),
 {
     loop {
-        let job = {
+        let mut job = {
             let mut state = lock(&shared.state);
             loop {
                 if let Some(job) = state.slot.take() {
@@ -263,6 +270,8 @@ where
             generation: job.generation,
             result,
         };
+        // Wipe the plaintext snapshot now that it has been written.
+        job.root.zeroize();
         // A panicking `on_event` must not leave `submit` accepting jobs that are
         // never attempted and never reported: stop the worker so the app sees a
         // closed event channel (`save_rx.recv() -> None`).
@@ -296,6 +305,65 @@ mod tests {
     /// A synthetic file error for tests that need a `SaveError::Failed`.
     fn failed(message: &str) -> SaveError {
         SaveError::Failed(FileHandlingError::Io(std::io::Error::other(message)))
+    }
+
+    /// A snapshot that records whether it was zeroized, for the wipe test.
+    struct Spy {
+        value: String,
+        zeroized: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Zeroize for Spy {
+        fn zeroize(&mut self) {
+            self.value.zeroize();
+            self.zeroized
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn a_superseded_snapshot_is_zeroized() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let save = move |_: &Spy| {
+            started_tx.send(()).unwrap();
+            release_rx
+                .recv_timeout(TIMEOUT)
+                .map_err(|_| failed("test release timed out"))?;
+            Ok(())
+        };
+        let (events_tx, _events_rx) = mpsc::channel::<SaveEvent>();
+        let mut autosave = Autosave::spawn(save, move |event| {
+            let _ = events_tx.send(event);
+        })
+        .unwrap();
+
+        let replaced = std::sync::Arc::new(AtomicBool::new(false));
+        autosave.submit(Spy {
+            value: "first".to_string(),
+            zeroized: std::sync::Arc::new(AtomicBool::new(false)),
+        });
+        started_rx.recv_timeout(TIMEOUT).unwrap();
+
+        // This snapshot waits in the slot...
+        autosave.submit(Spy {
+            value: "second".to_string(),
+            zeroized: std::sync::Arc::clone(&replaced),
+        });
+        // ...and this one replaces (and so zeroizes) it.
+        autosave.submit(Spy {
+            value: "third".to_string(),
+            zeroized: std::sync::Arc::new(AtomicBool::new(false)),
+        });
+
+        assert!(
+            replaced.load(Ordering::SeqCst),
+            "a superseded plaintext snapshot must be zeroized"
+        );
+
+        release_tx.send(()).unwrap();
     }
 
     #[test]

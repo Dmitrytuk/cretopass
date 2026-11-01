@@ -30,9 +30,10 @@ cryptography work.
 - **A queue of snapshots.** Wastes a full scrypt derivation per queued edit and
   can write an old root after a newer one. A single latest-wins slot gives the
   same durability with at most one redundant save.
-- **`tokio::task::spawn_blocking` per save.** Concurrent saves race on the
-  shared `{path}.tmp`, `{path}.bak` and rename sequence, and completion order is
-  not submission order. One serialized writer avoids both problems.
+- **`tokio::task::spawn_blocking` per save.** Completion order is not
+  submission order, so a newer snapshot could be overwritten by an older one.
+  One serialized writer avoids that; the exclusive random temp name in
+  `save_tree` also keeps concurrent writers from corrupting each other.
 - **A full async filesystem/encryption stack.** age and the atomic-save path are
   blocking APIs; wrapping them in `spawn_blocking` would add complexity without
   changing the serialization requirement. Only input genuinely benefits from

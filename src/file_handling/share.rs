@@ -13,7 +13,8 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use crate::file_handling::export::sanitize;
-use crate::file_handling::{FileHandlingError, create_dir, save_tree};
+use crate::file_handling::file_process::create_private_dir;
+use crate::file_handling::{FileHandlingError, save_tree};
 use crate::theming::texts;
 use crate::tree::node::Node;
 
@@ -81,7 +82,7 @@ pub fn share_tree(
         });
     }
 
-    create_dir(dest_dir)?;
+    create_private_dir(dest_dir)?;
 
     let file_name = format!(
         "{}.{SHARE_FILE_EXT}",
@@ -91,7 +92,10 @@ pub fn share_tree(
     save_tree(node, &file_path.to_string_lossy(), passphrase)?;
 
     let instruction = instruction(&file_name, passphrase.is_empty());
-    std::fs::write(dest_dir.join(SHARE_README_NAME), instruction).map_err(FileHandlingError::Io)?;
+    crate::file_handling::file_process::write_atomic(
+        &dest_dir.join(SHARE_README_NAME),
+        instruction.as_bytes(),
+    )?;
 
     Ok(dest_dir.to_path_buf())
 }
@@ -241,7 +245,7 @@ mod tests {
             decrypt_to_node(&data, "new").is_ok(),
             "the new password must open it"
         );
-        // The atomic save leaves no transient backup behind.
+        // The atomic save leaves no transient artifact behind.
         assert!(!bundle.join("vault.cretopass.bak").exists());
     }
 

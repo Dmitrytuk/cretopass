@@ -2,11 +2,12 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 use crate::theming::texts;
 
 /// The type of an extra field attached to a node.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize)]
 pub enum FieldType {
     Login,
     Password,
@@ -62,7 +63,7 @@ impl FieldType {
 }
 
 /// A single extra field (login, password, or custom) on a node.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize)]
 pub struct ExtraField {
     pub field_type: FieldType,
     pub value: String,
@@ -102,8 +103,9 @@ pub fn migrate_legacy_description(description: Option<&str>, extra_fields: &mut 
 /// The node's description is an ordinary [`ExtraField`]; see
 /// [`ExtraField::description`]. Deserialization migrates a legacy top-level
 /// `description` key into an extra field for backward compatibility.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Zeroize)]
 pub struct Node {
+    #[zeroize(skip)]
     pub id: Uuid,
     pub name: String,
     pub extra_fields: Vec<ExtraField>,
