@@ -37,6 +37,7 @@ use std::path::{Path, PathBuf};
 use tempfile::{Builder, NamedTempFile};
 
 use super::FileHandlingError;
+use super::cancel::CancelToken;
 
 /// Mode (Unix) a secret-bearing file is created with: owner only.
 pub(crate) const SECRET_FILE_MODE: u32 = 0o600;
@@ -157,9 +158,35 @@ impl AtomicFile {
 /// Returns [`FileHandlingError::Io`] when the temp file cannot be created,
 /// written, `fsync`ed or renamed.
 pub(crate) fn write_atomic(target: &Path, data: &[u8]) -> Result<(), FileHandlingError> {
+    write_atomic_cancellable(target, data, None)
+}
+
+/// Writes `data` to `target` atomically unless `cancel` is set.
+///
+/// The cancellation is checked after the temp file is written and `fsync`ed but
+/// immediately before the rename, so an abandoned writer (a force-quit whose
+/// save has stalled) discards its temp file instead of replacing whatever is at
+/// `target` now. Nothing is renamed away before that check.
+///
+/// # Errors
+///
+/// Returns [`FileHandlingError::WriteAbandoned`] when `cancel` is set by the
+/// time the check runs, and [`FileHandlingError::Io`] when the temp file cannot
+/// be created, written, `fsync`ed or renamed.
+pub(crate) fn write_atomic_cancellable(
+    target: &Path,
+    data: &[u8],
+    cancel: Option<&CancelToken>,
+) -> Result<(), FileHandlingError> {
     let mut temp = AtomicFile::new(target, SECRET_FILE_MODE)?;
     preserve_target_mode(target, &temp)?;
     temp.write_all_and_sync(data)?;
+
+    if cancel.is_some_and(CancelToken::is_cancelled) {
+        // Dropping `temp` removes it, so the target is left exactly as it was.
+        return Err(FileHandlingError::WriteAbandoned);
+    }
+
     temp.commit()
 }
 
@@ -299,6 +326,38 @@ fn preserve_target_mode(target: &Path, temp: &AtomicFile) -> Result<(), FileHand
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cancelled_write_leaves_the_target_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("vault.age");
+        fs::write(&target, b"older contents").unwrap();
+
+        let cancel = CancelToken::new();
+        cancel.cancel();
+
+        let error =
+            write_atomic_cancellable(&target, b"newer contents", Some(&cancel)).unwrap_err();
+
+        assert!(matches!(error, FileHandlingError::WriteAbandoned));
+        assert_eq!(fs::read(&target).unwrap(), b"older contents");
+        // The abandoned temp file is removed, not left behind. On the vault
+        // path it holds ciphertext; on an export it would be plaintext.
+        let left: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(left.len(), 1, "only the target must remain");
+    }
+
+    #[test]
+    fn an_uncancelled_write_commits() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("vault.age");
+        let cancel = CancelToken::new();
+
+        write_atomic_cancellable(&target, b"contents", Some(&cancel)).unwrap();
+
+        assert_eq!(fs::read(&target).unwrap(), b"contents");
+        assert!(!cancel.is_cancelled());
+    }
 
     #[test]
     fn write_atomic_replaces_the_previous_file() {

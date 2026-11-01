@@ -135,6 +135,9 @@ pub enum FileHandlingError {
         /// The destination that was not a folder.
         path: String,
     },
+    /// A write was abandoned by its owner before the commit, leaving the target
+    /// untouched.
+    WriteAbandoned,
 }
 
 impl fmt::Display for FileHandlingError {
@@ -168,6 +171,9 @@ impl fmt::Display for FileHandlingError {
             Self::ExportSerialization(e) => write!(f, "export: json serialisation failed: {e}"),
             Self::ShareDestinationNotAFolder { path } => {
                 write!(f, "share: refusing to share into {path}: not a folder")
+            }
+            Self::WriteAbandoned => {
+                write!(f, "write abandoned before commit")
             }
         }
     }
@@ -267,6 +273,7 @@ mod tests {
             FileHandlingError::ShareDestinationNotAFolder {
                 path: "/tmp/notes.txt".to_string(),
             },
+            FileHandlingError::WriteAbandoned,
         ];
 
         for error in variants {

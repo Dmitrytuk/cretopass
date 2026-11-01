@@ -6,6 +6,7 @@ use zeroize::Zeroizing;
 
 use super::FileHandlingError;
 use super::atomic;
+use super::cancel::CancelToken;
 use crate::crypt;
 use crate::theming::texts;
 use crate::tree::node::Node;
@@ -174,12 +175,40 @@ fn encrypt_node(node: &Node, passphrase: &str) -> Result<Vec<u8>, FileHandlingEr
 /// serialised, [`FileHandlingError::Crypt`] when encryption fails, and
 /// [`FileHandlingError::Io`] when the temp file cannot be written or renamed.
 pub fn save_tree(root: &Node, path: &str, passphrase: &[u8]) -> Result<(), FileHandlingError> {
+    save_tree_cancellable(root, path, passphrase, None)
+}
+
+/// [`save_tree`], giving up before the commit when `cancel` is set.
+///
+/// Used by the autosave worker: a force-quit signals `cancel` while a save is
+/// stalled, and the write must then leave whatever is at `path` alone rather
+/// than replace a newer file.
+///
+/// # Errors
+///
+/// As [`save_tree`], plus [`FileHandlingError::WriteAbandoned`] when `cancel`
+/// was set by the time the rename would have happened.
+pub(crate) fn save_tree_guarded(
+    root: &Node,
+    path: &str,
+    passphrase: &[u8],
+    cancel: &CancelToken,
+) -> Result<(), FileHandlingError> {
+    save_tree_cancellable(root, path, passphrase, Some(cancel))
+}
+
+fn save_tree_cancellable(
+    root: &Node,
+    path: &str,
+    passphrase: &[u8],
+    cancel: Option<&CancelToken>,
+) -> Result<(), FileHandlingError> {
     let passphrase_str = std::str::from_utf8(passphrase)
         .map_err(|_| FileHandlingError::InvalidPassphraseEncoding)?;
 
     let encrypted = encrypt_node(root, passphrase_str)?;
 
-    atomic::write_atomic(Path::new(path), &encrypted)
+    atomic::write_atomic_cancellable(Path::new(path), &encrypted, cancel)
 }
 
 /// Creates a new encrypted secret file at `path` with a "Secrets" root node.

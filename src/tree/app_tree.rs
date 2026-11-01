@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 use std::io;
 
-use crate::file_handling::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree};
+use crate::file_handling::{
+    Autosave, CancelToken, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree_guarded,
+};
 use crate::theming::Action;
 use crate::theming::{ElementStyle, SPINNER_TICK, paint_background, render_status_bar, texts};
 use crate::tree::node::Node;
@@ -367,14 +369,21 @@ fn start_autosave(
         return Ok(None);
     };
 
-    let save = move |root: &Node| save_tree(root, &path, &passphrase).map_err(SaveError::Failed);
+    // The worker checks this token immediately before its rename, so a save
+    // that is still running when the user force-quits cannot land on top of a
+    // newer version of the same file.
+    let cancel = CancelToken::new();
+    let save_cancel = cancel.clone();
+    let save = move |root: &Node| {
+        save_tree_guarded(root, &path, &passphrase, &save_cancel).map_err(SaveError::Failed)
+    };
     let on_event = move |event| {
         // The receiver is dropped when the tree screen closes; a late save
         // notification is then expected and intentionally ignored.
         let _ = events.send(event);
     };
 
-    Autosave::spawn(save, on_event).map(Some)
+    Autosave::spawn(cancel, save, on_event).map(Some)
 }
 
 /// Waits until the snapshot with `target` generation has been attempted,

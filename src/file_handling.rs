@@ -10,6 +10,7 @@
 
 pub(crate) mod atomic;
 pub(crate) mod autosave;
+pub(crate) mod cancel;
 pub(crate) mod disks;
 pub(crate) mod error;
 pub(crate) mod export;
@@ -19,6 +20,7 @@ pub(crate) mod import;
 pub(crate) mod share;
 
 pub use autosave::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, SaveResult};
+pub use cancel::CancelToken;
 pub use disks::{DiskInfo, list_disks};
 pub use error::{FileHandlingError, ImportSyntax};
 pub use export::{ExportFormat, export_tree, output_path, suggest_export_name};
@@ -30,6 +32,8 @@ pub use file_process::{
 // Crate-internal only: secret-bearing directory creation, not part of the
 // published surface.
 pub(crate) use file_process::create_private_dir;
+// Crate-internal only: the cancellable vault write the autosave worker uses.
+pub(crate) use file_process::save_tree_guarded;
 pub use format::Format;
 pub use import::{ImportFormat, import_tree};
 pub use share::{SHARE_FILE_EXT, SHARE_README_NAME, share_tree, suggest_share_name};
