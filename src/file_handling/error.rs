@@ -46,6 +46,8 @@ pub enum ImportSyntax {
     NoCsvDataRows,
     /// The CSV document produced no tree.
     NoTree,
+    /// The JSON document was not a valid node.
+    InvalidJson,
 }
 
 impl ImportSyntax {
@@ -70,6 +72,7 @@ impl ImportSyntax {
             Self::MissingCsvHeader => "CSV file is missing its header row",
             Self::NoCsvDataRows => "CSV file has no data rows",
             Self::NoTree => "no data to import",
+            Self::InvalidJson => "not a valid JSON node",
         }
     }
 }

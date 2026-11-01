@@ -69,7 +69,11 @@ pub fn import_tree(path: &str) -> Result<Node, FileHandlingError> {
 }
 
 fn import_json(data: &str) -> Result<Node, FileHandlingError> {
-    serde_json::from_str(data).map_err(FileHandlingError::Serde)
+    // A malformed import is a syntax problem, not a damaged vault: report it in
+    // the import vocabulary so the UI does not tell the user that the secret
+    // file they are reading from is corrupt. The serde detail is dropped
+    // because it can quote the document that failed to parse.
+    serde_json::from_str(data).map_err(|_| syntax(ImportSyntax::InvalidJson))
 }
 
 /// Maximum XML nesting depth accepted during import, guarding against
@@ -1126,6 +1130,23 @@ mod tests {
             result.unwrap_err(),
             FileHandlingError::UnsupportedImportFormat(_)
         ));
+    }
+
+    #[test]
+    fn a_malformed_json_import_is_a_syntax_error_not_a_damaged_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("broken.json");
+        std::fs::write(&path, "{ not json").unwrap();
+
+        let error = import_tree(&path.to_string_lossy()).unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                FileHandlingError::ImportSyntax(ImportSyntax::InvalidJson)
+            ),
+            "a bad import is a syntax error, not a damaged secret: {error:?}"
+        );
     }
 
     // ── Round-trip and hardening tests ──

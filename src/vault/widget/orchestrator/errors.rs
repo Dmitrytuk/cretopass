@@ -126,6 +126,19 @@ mod tests {
     }
 
     #[test]
+    fn a_malformed_import_is_not_shown_as_a_damaged_secret() {
+        // A bad import file is a syntax problem; only a vault that fails to
+        // deserialise after decryption is "damaged".
+        let error =
+            FileHandlingError::ImportSyntax(crate::file_handling::ImportSyntax::InvalidJson);
+
+        let shown = message(&error);
+
+        assert_eq!(shown, format!("{}{}", texts::MSG_FILE_ERROR, error));
+        assert_ne!(shown, texts::MSG_DAMAGED_SECRET);
+    }
+
+    #[test]
     fn an_unexpected_failure_keeps_its_detail_behind_a_prefix() {
         let error = FileHandlingError::Io(std::io::Error::other("disk on fire"));
         let shown = message_for(error);
