@@ -74,40 +74,73 @@ impl Default for Configuration {
 /// destructive `cretopass remove` path at an arbitrary directory.
 pub fn config_dir() -> PathBuf {
     #[cfg(debug_assertions)]
+    let (config_dir_override, environment) = (
+        std::env::var("CRETOPASS_CONFIG_DIR").ok(),
+        std::env::var("CRETOPASS_ENV").ok(),
+    );
+    #[cfg(not(debug_assertions))]
+    let (config_dir_override, environment) = (None, None);
+
+    config_dir_from(
+        config_dir_override,
+        environment,
+        std::env::var("XDG_CONFIG_HOME").ok(),
+        std::env::var("HOME").ok(),
+        std::env::var("APPDATA").ok(),
+    )
+}
+
+/// Resolves the config directory from already-read environment values.
+///
+/// Kept a pure function so the tests can exercise every branch — including the
+/// debug-only overrides — without mutating the process-global environment, which
+/// is undefined behaviour under the default parallel test runner.
+fn config_dir_from(
+    config_dir_override: Option<String>,
+    environment: Option<String>,
+    xdg_config_home: Option<String>,
+    home: Option<String>,
+    appdata: Option<String>,
+) -> PathBuf {
+    #[cfg(debug_assertions)]
     {
-        if let Ok(val) = std::env::var("CRETOPASS_CONFIG_DIR")
+        if let Some(val) = config_dir_override.as_deref()
             && !val.is_empty()
         {
             return PathBuf::from(val);
         }
     }
+    #[cfg(not(debug_assertions))]
+    let _ = config_dir_override;
+
     #[cfg(debug_assertions)]
     {
-        if let Ok(val) = std::env::var("CRETOPASS_ENV")
-            && val == "development"
-        {
+        if environment.as_deref() == Some("development") {
             return PathBuf::from("config_dev");
         }
     }
+    #[cfg(not(debug_assertions))]
+    let _ = environment;
+
     if cfg!(target_os = "linux") {
-        if let Ok(val) = std::env::var("XDG_CONFIG_HOME") {
+        if let Some(val) = xdg_config_home {
             let mut p = PathBuf::from(val);
             p.push("cretopass");
             return p;
         }
-        if let Ok(val) = std::env::var("HOME") {
+        if let Some(val) = home {
             let mut p = PathBuf::from(val);
             p.push(".config/cretopass");
             return p;
         }
     } else if cfg!(target_os = "macos") {
-        if let Ok(val) = std::env::var("HOME") {
+        if let Some(val) = home {
             let mut p = PathBuf::from(val);
             p.push("Library/Application Support/cretopass");
             return p;
         }
     } else if cfg!(target_os = "windows")
-        && let Ok(val) = std::env::var("APPDATA")
+        && let Some(val) = appdata
     {
         let mut p = PathBuf::from(val);
         p.push("cretopass");
@@ -185,69 +218,39 @@ pub fn load_config() -> Configuration {
     load_config_from(&config_dir())
 }
 
-/// Attempts to open an OS-native file-selection dialog.
 /// Inserts or moves `path` to the front of the recent-files list and saves.
+///
 /// Duplicates are removed first.
 pub fn push_recent_secret_file(config: &mut Configuration, path: &str) -> Result<(), ConfigError> {
+    push_recent_secret_file_to(&config_dir(), config, path)
+}
+
+/// [`push_recent_secret_file`] against an explicit directory, so tests can run
+/// without touching the process environment.
+fn push_recent_secret_file_to(
+    dir: &Path,
+    config: &mut Configuration,
+    path: &str,
+) -> Result<(), ConfigError> {
     config.recent_files.retain(|f| f != path);
     config.recent_files.insert(0, path.to_string());
     config.last_opened_file = Some(path.to_string());
-    save_config(config)
+    save_config_to(dir, config)
 }
 
 #[cfg(test)]
-// `std::env::set_var`/`remove_var` are `unsafe` in edition 2024. The crate
-// denies `unsafe_code` everywhere else; this module is the single, test-only
-// exception. The environment is process-global, so every env-mutating test
-// takes `ENV_LOCK` for its whole duration (see the SAFETY notes on each call);
-// `TestConfigDir` holds the guard, and the one test that does not use it locks
-// explicitly.
-#[allow(unsafe_code)]
 mod tests {
-    use std::sync::{Mutex, MutexGuard};
-
     use super::*;
 
-    /// Serialises the tests that mutate the process-global environment, so the
-    /// suite is safe under `cargo test`'s default parallel runner.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    /// Points configuration I/O at an isolated temp directory so tests never touch
-    /// the developer's real `~/.config/cretopass`.
-    ///
-    /// Holds `ENV_LOCK` for its whole lifetime, so only one env-mutating test
-    /// runs at a time.
-    struct TestConfigDir {
-        dir: PathBuf,
-        // Declared last so it is dropped after `Drop` runs `remove_var`.
-        _guard: MutexGuard<'static, ()>,
-    }
-
-    impl TestConfigDir {
-        fn new() -> Self {
-            let guard = ENV_LOCK
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let dir = std::env::temp_dir().join(format!("cretopass-test-{}", uuid::Uuid::new_v4()));
-            std::fs::create_dir_all(&dir).unwrap();
-            // SAFETY: the `ENV_LOCK` guard makes this module's env mutation
-            // single-threaded.
-            unsafe { std::env::set_var("CRETOPASS_CONFIG_DIR", &dir) };
-            Self { dir, _guard: guard }
-        }
-    }
-
-    impl Drop for TestConfigDir {
-        fn drop(&mut self) {
-            // SAFETY: see TestConfigDir::new.
-            unsafe { std::env::remove_var("CRETOPASS_CONFIG_DIR") };
-            let _ = std::fs::remove_dir_all(&self.dir);
-        }
+    /// A temp directory standing in for the config directory, so a test never
+    /// touches the developer's real `~/.config/cretopass`.
+    fn temp_config_dir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("a temp config directory")
     }
 
     #[test]
     fn test_config_save_load() {
-        let _tmp = TestConfigDir::new();
+        let dir = temp_config_dir();
 
         let config = Configuration {
             recent_files: vec![
@@ -259,8 +262,8 @@ mod tests {
             open_last_opened_file_on_startup: true,
             palette_name: crate::theming::SCHEME_LIGHT.to_string(),
         };
-        save_config(&config).unwrap();
-        let loaded = load_config();
+        save_config_to(dir.path(), &config).unwrap();
+        let loaded = load_config_from(dir.path());
 
         assert_eq!(loaded.recent_files.len(), 2);
         assert_eq!(loaded.recent_files[0], "/home/user/vault.age");
@@ -285,11 +288,10 @@ mod tests {
 
     #[test]
     fn test_config_save_empty() {
-        let _tmp = TestConfigDir::new();
+        let dir = temp_config_dir();
 
-        let config = Configuration::default();
-        save_config(&config).unwrap();
-        let loaded = load_config();
+        save_config_to(dir.path(), &Configuration::default()).unwrap();
+        let loaded = load_config_from(dir.path());
         assert!(loaded.recent_files.is_empty());
         assert!(loaded.last_opened_file.is_none());
         assert!(loaded.display_full_path);
@@ -298,21 +300,20 @@ mod tests {
 
     #[test]
     fn test_config_no_file_creates_defaults() {
-        let _tmp = TestConfigDir::new();
+        let dir = temp_config_dir();
 
-        let loaded = load_config();
+        let loaded = load_config_from(dir.path());
 
         assert!(loaded.recent_files.is_empty());
         assert!(loaded.display_full_path);
         assert!(loaded.open_last_opened_file_on_startup);
 
-        let path = config_dir().join(CONFIG_FILE_NAME);
-        assert!(path.exists());
+        assert!(dir.path().join(CONFIG_FILE_NAME).exists());
     }
 
     #[test]
     fn test_push_recent_secret_file_dedup() {
-        let _tmp = TestConfigDir::new();
+        let dir = temp_config_dir();
 
         let mut config = Configuration {
             recent_files: vec![
@@ -325,7 +326,7 @@ mod tests {
             open_last_opened_file_on_startup: true,
             palette_name: crate::theming::SCHEME_DARK.to_string(),
         };
-        push_recent_secret_file(&mut config, "/beta.age").unwrap();
+        push_recent_secret_file_to(dir.path(), &mut config, "/beta.age").unwrap();
 
         assert_eq!(config.recent_files.len(), 3);
         assert_eq!(config.recent_files[0], "/beta.age");
@@ -336,10 +337,10 @@ mod tests {
 
     #[test]
     fn test_push_recent_secret_file_sets_last_opened() {
-        let _tmp = TestConfigDir::new();
+        let dir = temp_config_dir();
 
         let mut config = Configuration::default();
-        push_recent_secret_file(&mut config, "/new.age").unwrap();
+        push_recent_secret_file_to(dir.path(), &mut config, "/new.age").unwrap();
 
         assert_eq!(config.recent_files.len(), 1);
         assert_eq!(config.recent_files[0], "/new.age");
@@ -348,7 +349,7 @@ mod tests {
 
     #[test]
     fn test_config_roundtrip_display_full_path_false() {
-        let _tmp = TestConfigDir::new();
+        let dir = temp_config_dir();
 
         let config = Configuration {
             recent_files: vec!["/a.age".to_string()],
@@ -356,46 +357,60 @@ mod tests {
             open_last_opened_file_on_startup: false,
             ..Default::default()
         };
-        save_config(&config).unwrap();
+        save_config_to(dir.path(), &config).unwrap();
 
-        let loaded = load_config();
+        let loaded = load_config_from(dir.path());
         assert!(!loaded.display_full_path);
         assert!(!loaded.open_last_opened_file_on_startup);
     }
 
+    // ── `config_dir_from`: every environment branch, tested purely ──
+
+    #[cfg(debug_assertions)]
     #[test]
-    fn test_dev_mode_config_dir() {
-        let _guard = ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        // SAFETY: the `ENV_LOCK` guard makes this module's env mutation
-        // single-threaded.
-        unsafe { std::env::set_var("CRETOPASS_ENV", "development") };
-        let dir = config_dir();
-        unsafe { std::env::remove_var("CRETOPASS_ENV") };
+    fn config_dir_uses_the_debug_override_when_set() {
+        let dir = config_dir_from(
+            Some("/custom/config".to_string()),
+            Some("development".to_string()),
+            None,
+            None,
+            None,
+        );
+        assert_eq!(dir, PathBuf::from("/custom/config"));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn config_dir_ignores_an_empty_override() {
+        let dir = config_dir_from(
+            Some(String::new()),
+            Some("development".to_string()),
+            None,
+            None,
+            None,
+        );
         assert_eq!(dir, PathBuf::from("config_dev"));
     }
 
+    #[cfg(debug_assertions)]
     #[test]
-    fn test_dev_mode_falls_through_on_other_value() {
-        let _tmp = TestConfigDir::new();
-        // SAFETY: `TestConfigDir` holds `ENV_LOCK`, making env mutation
-        // single-threaded.
-        unsafe { std::env::set_var("CRETOPASS_ENV", "production") };
-        let dir = config_dir();
-        unsafe { std::env::remove_var("CRETOPASS_ENV") };
+    fn config_dir_dev_mode_selects_the_in_tree_directory() {
+        let dir = config_dir_from(None, Some("development".to_string()), None, None, None);
+        assert_eq!(dir, PathBuf::from("config_dev"));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn config_dir_dev_mode_falls_through_on_other_values() {
+        let dir = config_dir_from(None, Some("production".to_string()), None, None, None);
         assert!(!dir.ends_with("config_dev"));
     }
 
     #[test]
-    fn test_config_dir_override_beats_dev_mode() {
-        let _tmp = TestConfigDir::new();
-        // CRETOPASS_CONFIG_DIR is set by TestConfigDir; dev mode should be ignored.
-        // SAFETY: `TestConfigDir` holds `ENV_LOCK`, making env mutation
-        // single-threaded.
-        unsafe { std::env::set_var("CRETOPASS_ENV", "development") };
-        let dir = config_dir();
-        unsafe { std::env::remove_var("CRETOPASS_ENV") };
-        assert!(!dir.ends_with("config_dev"));
+    fn config_dir_falls_back_to_the_dot_directory_without_any_env() {
+        assert_eq!(
+            config_dir_from(None, None, None, None, None),
+            PathBuf::from("./.cretopass")
+        );
     }
 }

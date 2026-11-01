@@ -133,6 +133,7 @@ pub fn execute<B: Backend>(
             Ok(())
         }
         HomeAction::OpenConfiguration => {
+            state.config_before_modal = state.config.clone();
             state.modal = Some(Modal::Configuration(ConfigurationModal::new()));
             Ok(())
         }
@@ -204,7 +205,7 @@ pub fn execute<B: Backend>(
             Ok(())
         }
         HomeAction::DiscardConfig => {
-            state.config = utils::load_config();
+            state.config = state.config_before_modal.clone();
             // The scheme is applied live on toggle, so discarding the config must
             // restore the colours too (ADR 0019: "Enter persists and Esc reverts").
             set_palette(Palette::from_name(&state.config.palette_name));

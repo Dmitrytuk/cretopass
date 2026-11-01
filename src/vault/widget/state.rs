@@ -13,6 +13,11 @@ use super::modal::{Modal, UnlockPrompt};
 pub struct HomeState {
     pub(super) selected: usize,
     pub config: Configuration,
+    /// `config` as it was when the Configuration dialog was opened. Restored if
+    /// the user cancels, so Esc reverts from memory rather than re-reading the
+    /// file — no disk I/O on Escape, and tests can inject a [`Configuration`]
+    /// without reaching the real config directory.
+    pub(super) config_before_modal: Configuration,
     pub quit: bool,
     pub active_vault: Option<ActiveVaultState>,
     pub(super) modal: Option<Modal>,
@@ -35,7 +40,15 @@ impl Default for HomeState {
 
 impl HomeState {
     pub fn new() -> Self {
-        let config = utils::load_config();
+        Self::with_config(utils::load_config())
+    }
+
+    /// Builds the state from an already-loaded [`Configuration`], skipping the
+    /// config-file read and the environment lookup behind it.
+    ///
+    /// Tests use this so a suite run never depends on — or writes to — the
+    /// developer's real config directory.
+    pub(crate) fn with_config(config: Configuration) -> Self {
         // Apply the persisted colour scheme before the first frame is drawn.
         set_palette(Palette::from_name(&config.palette_name));
         let modal = if config.open_last_opened_file_on_startup {
@@ -49,6 +62,7 @@ impl HomeState {
         };
         Self {
             selected: 0,
+            config_before_modal: config.clone(),
             config,
             quit: false,
             active_vault: None,

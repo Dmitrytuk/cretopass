@@ -140,12 +140,19 @@ mod tests {
     use crate::file_handling;
     use crate::theming::{Palette, texts};
     use crate::vault::active_file::ActiveVaultState;
+    use crate::vault::utils::Configuration;
     use crate::vault::widget::modal::{About, BrowserModal, ConfigurationModal, ExportWizard};
     use crate::vault::widget::render::home_status_parts;
     use crossterm::event::KeyCode;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
     use std::path::PathBuf;
+
+    // Every test below builds its `HomeState` through `with_config`, so it never
+    // reads the process environment or touches the developer's real config
+    // directory. The environment is only ever *read* — nothing in the test suite
+    // calls `env::set_var`, which would be undefined behaviour under the default
+    // parallel runner.
 
     /// Renders the home screen — including any modal `state` carries — into a
     /// test backend, and asserts that no cell falls through to the terminal's own
@@ -172,7 +179,7 @@ mod tests {
 
     #[test]
     fn home_screen_paints_every_cell() {
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         assert_no_terminal_background(&mut state);
     }
 
@@ -180,7 +187,7 @@ mod tests {
     /// styled blocks must keep every cell off the terminal background.
     #[test]
     fn file_browser_modal_paints_every_cell() {
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         let mut browser =
             BrowserModal::new(FileBrowserMode::OpenFile, &FileBrowserSession::default());
         let inner = browser.state_mut();
@@ -195,7 +202,7 @@ mod tests {
     /// block must keep every cell off the terminal background.
     #[test]
     fn about_modal_paints_every_cell() {
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         state.modal = Some(Modal::About(About));
 
         assert_no_terminal_background(&mut state);
@@ -205,7 +212,7 @@ mod tests {
     /// shared status bar, like every other Home mode.
     #[test]
     fn about_modal_status_bar_parts() {
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         state.modal = Some(Modal::About(About));
 
         let (mode, _, hint) = home_status_parts(&state);
@@ -219,7 +226,7 @@ mod tests {
     /// palette on screen until restart.
     #[test]
     fn config_cancel_reverts_the_live_colour_scheme() {
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         state.modal = Some(Modal::Configuration(ConfigurationModal::new()));
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
 
@@ -286,7 +293,7 @@ mod tests {
         std::fs::write(dir.join("note.xml"), IMPORT_FIXTURE_XML).unwrap();
 
         let node = file_handling::create_secret_file(&vault_path, "pw").unwrap();
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         state.active_vault = Some(ActiveVaultState {
             path: Some(vault_path.clone()),
             passphrase: zeroize::Zeroizing::new(b"pw".to_vec()),
@@ -345,7 +352,7 @@ mod tests {
         let vault_path = dir.join("vault.age").to_string_lossy().to_string();
         let node = file_handling::create_secret_file(&vault_path, "pw").unwrap();
 
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         state.active_vault = Some(ActiveVaultState {
             path: Some(vault_path.clone()),
             passphrase: zeroize::Zeroizing::new(b"pw".to_vec()),
@@ -408,7 +415,7 @@ mod tests {
         let vault_path = dir.join("vault.age").to_string_lossy().to_string();
         let node = file_handling::create_secret_file(&vault_path, "pw").unwrap();
 
-        let mut state = HomeState::new();
+        let mut state = HomeState::with_config(Configuration::default());
         state.modal = None;
         state.active_vault = Some(ActiveVaultState {
             path: Some(vault_path.clone()),
