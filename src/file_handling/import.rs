@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::FileHandlingError;
 use super::error::ImportSyntax;
 use super::file_process::{MAX_FILE_SIZE, json_to_node, read_capped};
@@ -262,7 +264,6 @@ fn decode_entity(s: &str) -> Option<(char, usize)> {
     None
 }
 
-#[derive(Default)]
 struct PathData {
     name: String,
     description: Option<String>,
@@ -320,9 +321,11 @@ fn import_csv(data: &str) -> Result<Node, FileHandlingError> {
         idx.and_then(|i| fields.get(i)).cloned()
     };
 
-    // Group by path: collect all extra fields per path
-    // Use a map to track insertion order
-    let mut path_map: Vec<(String, PathData)> = Vec::new();
+    // Group the rows by path: the first row for a path carries its name and
+    // description, and every row contributes an extra field. The `index` map
+    // keeps this linear on a large file; `order` keeps first-seen order.
+    let mut order: Vec<(String, PathData)> = Vec::new();
+    let mut index: HashMap<String, usize> = HashMap::new();
     for (line, fields) in &records {
         if fields.iter().all(|field| field.trim().is_empty()) {
             continue;
@@ -331,50 +334,104 @@ fn import_csv(data: &str) -> Result<Node, FileHandlingError> {
             return Err(FileHandlingError::CsvRowTooFewFields { line: *line });
         }
         let path = fields[cols.path].clone();
-        let name = fields[cols.name].clone();
-        let description = get(fields, cols.description).filter(|d| !d.is_empty());
         let field_type = get(fields, cols.field_type).filter(|ft| !ft.is_empty());
         let field_value = get(fields, cols.field_value).unwrap_or_default();
 
-        if let Some((_, data)) = path_map.iter_mut().find(|(p, _)| *p == path) {
-            if let Some(ft) = field_type {
-                data.extra_fields.push(ExtraField {
-                    field_type: FieldType::from_wire_label(&ft),
-                    value: field_value,
-                });
+        let idx = match index.get(&path).copied() {
+            Some(idx) => idx,
+            None => {
+                let idx = order.len();
+                index.insert(path.clone(), idx);
+                order.push((
+                    path,
+                    PathData {
+                        name: fields[cols.name].clone(),
+                        description: get(fields, cols.description).filter(|d| !d.is_empty()),
+                        extra_fields: Vec::new(),
+                    },
+                ));
+                idx
             }
-        } else {
-            let mut extra_fields = Vec::new();
-            if let Some(ft) = field_type {
-                extra_fields.push(ExtraField {
-                    field_type: FieldType::from_wire_label(&ft),
-                    value: field_value,
-                });
-            }
-            path_map.push((
-                path,
-                PathData {
-                    name,
-                    description,
-                    extra_fields,
-                },
-            ));
+        };
+
+        if let Some(ft) = field_type {
+            order[idx].1.extra_fields.push(ExtraField {
+                field_type: FieldType::from_wire_label(&ft),
+                value: field_value,
+            });
         }
     }
 
     // Build tree from paths
     // Each path is like "Root > Category > Item"
-    build_tree_from_paths(&path_map)
+    build_tree_from_paths(order)
 }
 
-fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHandlingError> {
-    #[derive(Default)]
+/// Builds the tree from `paths`, one entry per CSV path, in first-seen order.
+///
+/// A path is `"Root > Category > Item"`; each segment is a node, created on
+/// first sight and reused after. A `HashMap` per level keys children by their
+/// segment, so a row costs one lookup per segment rather than a scan of its
+/// siblings (see [`super::format::encode_path_segment`] for how a segment that
+/// contains `>` is kept unambiguous).
+fn build_tree_from_paths(paths: Vec<(String, PathData)>) -> Result<Node, FileHandlingError> {
     struct TreeNode {
-        key: String,
         name: String,
         description: Option<String>,
         extra_fields: Vec<ExtraField>,
         children: Vec<TreeNode>,
+        /// Child position by segment, so a repeated segment is found in O(1).
+        child_index: HashMap<String, usize>,
+    }
+
+    /// Descends `segments`, creating nodes as needed, and fills the last one
+    /// with `data`.
+    fn insert_path(
+        children: &mut Vec<TreeNode>,
+        index: &mut HashMap<String, usize>,
+        segments: &[&str],
+        data: PathData,
+    ) {
+        let segment = segments[0];
+        let is_last = segments.len() == 1;
+
+        let pos = match index.get(segment).copied() {
+            Some(pos) => pos,
+            None => {
+                let pos = children.len();
+                children.push(TreeNode {
+                    // An intermediate node with no row of its own (a legacy
+                    // file) decodes its name from the segment; a row sets its
+                    // own name below, so a leaf needs no placeholder.
+                    name: if is_last {
+                        String::new()
+                    } else {
+                        decode_path_segment(segment)
+                    },
+                    description: None,
+                    extra_fields: Vec::new(),
+                    children: Vec::new(),
+                    child_index: HashMap::new(),
+                });
+                index.insert(segment.to_string(), pos);
+                pos
+            }
+        };
+
+        if is_last {
+            let node = &mut children[pos];
+            node.name = data.name;
+            node.description = data.description;
+            node.extra_fields = data.extra_fields;
+        } else {
+            let node = &mut children[pos];
+            insert_path(
+                &mut node.children,
+                &mut node.child_index,
+                &segments[1..],
+                data,
+            );
+        }
     }
 
     fn into_node(tree: TreeNode) -> Node {
@@ -389,62 +446,14 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
     }
 
     let mut roots: Vec<TreeNode> = Vec::new();
+    let mut root_index: HashMap<String, usize> = HashMap::new();
 
-    for (path_str, data) in path_map {
+    for (path_str, data) in paths {
         let segments: Vec<&str> = path_str.split(" > ").collect();
         if segments.len() > MAX_CSV_PATH_DEPTH {
             return Err(syntax(ImportSyntax::CsvPathTooDeep));
         }
-        let mut idx_path: Vec<usize> = Vec::new();
-
-        for (seg_idx, seg) in segments.iter().enumerate() {
-            let is_last = seg_idx == segments.len() - 1;
-
-            let container = if idx_path.is_empty() {
-                &mut roots
-            } else {
-                let mut c = &mut roots;
-                for &i in &idx_path {
-                    c = &mut c[i].children;
-                }
-                c
-            };
-
-            // The raw segment is the unique structural key; a decode is needed
-            // only for an intermediate node with no row of its own (a legacy
-            // file) — otherwise the `name` column is authoritative.
-            let pos = container.iter().position(|n| n.key.as_str() == *seg);
-            if let Some(pos) = pos {
-                if is_last {
-                    let node = &mut container[pos];
-                    node.name = data.name.clone();
-                    node.description = data.description.clone();
-                    node.extra_fields = data.extra_fields.clone();
-                }
-                idx_path.push(pos);
-            } else {
-                container.push(TreeNode {
-                    key: (*seg).to_string(),
-                    name: if is_last {
-                        data.name.clone()
-                    } else {
-                        decode_path_segment(seg)
-                    },
-                    description: if is_last {
-                        data.description.clone()
-                    } else {
-                        None
-                    },
-                    extra_fields: if is_last {
-                        data.extra_fields.clone()
-                    } else {
-                        Vec::new()
-                    },
-                    children: Vec::new(),
-                });
-                idx_path.push(container.len() - 1);
-            }
-        }
+        insert_path(&mut roots, &mut root_index, &segments, data);
     }
 
     if roots.is_empty() {
@@ -452,7 +461,8 @@ fn build_tree_from_paths(path_map: &[(String, PathData)]) -> Result<Node, FileHa
     }
 
     if roots.len() == 1 {
-        Ok(into_node(roots.into_iter().next().unwrap()))
+        let root = roots.pop().expect("just checked there is exactly one root");
+        Ok(into_node(root))
     } else {
         let children: Vec<Node> = roots.into_iter().map(into_node).collect();
         Ok(Node {
@@ -929,6 +939,42 @@ mod tests {
         assert_eq!(node.children[0].name, "Alpha");
         assert_eq!(node.children[0].extra_fields[0].value, "A");
         assert_eq!(node.children[1].name, "Beta");
+    }
+
+    #[test]
+    fn import_csv_groups_rows_that_revisit_a_path() {
+        // A path may reappear after another path; its rows must merge into one
+        // node, and the first row's name/description must win.
+        let data = "path,name,field_type,field_value\n\
+                     Root,A,Login,alice\n\
+                     Other,B,Login,bob\n\
+                     Root,A,Password,secret\n";
+        let node = import_csv(data).unwrap();
+
+        assert_eq!(node.name, "Imported");
+        assert_eq!(node.children.len(), 2);
+        let root = &node.children[0];
+        assert_eq!(root.name, "A");
+        assert_eq!(root.extra_fields.len(), 2);
+        assert_eq!(root.extra_fields[0].value, "alice");
+        assert_eq!(root.extra_fields[1].value, "secret");
+    }
+
+    #[test]
+    fn import_csv_builds_many_sibling_paths() {
+        // A scale smoke test for the linear grouping and child lookup; it does
+        // not assert timing, only that a wide file imports correctly in one
+        // pass (a quadratic pairing would still pass, just slowly).
+        let mut data = String::from("path,name,field_type,field_value\n");
+        for i in 0..5_000 {
+            data.push_str(&format!("Root > n{i},n{i},Login,user{i}\n"));
+        }
+
+        let node = import_csv(&data).unwrap();
+
+        assert_eq!(node.name, "Root");
+        assert_eq!(node.children.len(), 5_000);
+        assert_eq!(node.children[4_999].name, "n4999");
     }
 
     #[test]

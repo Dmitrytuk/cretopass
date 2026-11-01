@@ -372,6 +372,77 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The symmetric failure pin for the `ImportFile` flow: a malformed import
+    /// is reported in an alert and changes nothing — no wrapper node, no save.
+    #[test]
+    fn a_malformed_import_file_is_reported_and_changes_nothing() {
+        let dir =
+            std::env::temp_dir().join(format!("cretopass-import-bad-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let vault_path = dir.join("vault.age").to_string_lossy().to_string();
+        // Well-formed XML around a `<node>` with no `name` attribute.
+        std::fs::write(dir.join("bad.xml"), "<node>no name here</node>").unwrap();
+
+        let node = file_handling::create_secret_file(&vault_path, "pw").unwrap();
+        let mut state = HomeState::with_config(Configuration::default());
+        state.active_vault = Some(ActiveVaultState {
+            path: Some(vault_path.clone()),
+            passphrase: zeroize::Zeroizing::new(b"pw".to_vec()),
+            node: Some(node),
+        });
+
+        let mut browser =
+            BrowserModal::new(FileBrowserMode::ImportFile, &FileBrowserSession::default());
+        {
+            let inner = browser.state_mut();
+            inner.current_dir = dir.clone();
+            inner.entries = file_handling::list_dir(&dir).unwrap();
+            inner.selected = inner
+                .entries
+                .iter()
+                .position(|e| e.name == "bad.xml")
+                .expect("the fixture must be listed");
+        }
+        state.modal = Some(Modal::FileBrowser(Box::new(browser)));
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Enter),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+
+        match &state.modal {
+            Some(Modal::Alert(alert)) => {
+                assert!(
+                    alert.message.contains(texts::MSG_FILE_ERROR),
+                    "a malformed import must be reported: {}",
+                    alert.message
+                );
+                assert_ne!(
+                    alert.message,
+                    texts::MSG_DAMAGED_SECRET,
+                    "a bad import file does not mean the open vault is damaged"
+                );
+            }
+            _ => panic!("a failed import must be reported in an alert"),
+        }
+
+        // Nothing was written: the vault still holds no wrapper node.
+        let data = file_handling::validate_encrypted_file(&vault_path).unwrap();
+        let saved = file_handling::decrypt_to_node(&data, "pw").unwrap();
+        assert!(
+            !saved
+                .children
+                .iter()
+                .any(|n| n.name.starts_with("imported_")),
+            "a failed import must not touch the vault"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The Home export flow: pick a format, name the destination in the File
     /// Browser, and the plain text lands exactly where it was named.
     #[test]

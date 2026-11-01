@@ -158,7 +158,7 @@ fn node_to_csv(node: &Node) -> Zeroizing<String> {
 /// `segment` is `node`'s already-encoded `path` segment. Children get their own
 /// segment, with a `#<n>` occurrence suffix when two siblings share a name, so a
 /// duplicate sibling is never folded into its twin on import (see
-/// [`encode_path_segment`] and [`decode_path_segment`]).
+/// [`encode_path_segment`] and [`super::format::decode_path_segment`]).
 fn write_csv_rows(buf: &mut String, node: &Node, parent_path: &str, segment: &str) {
     let current_path = if parent_path.is_empty() {
         segment.to_string()
