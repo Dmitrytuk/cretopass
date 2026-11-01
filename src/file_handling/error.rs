@@ -86,15 +86,20 @@ impl fmt::Display for ImportSyntax {
 /// Every failure the I/O gateway can report.
 ///
 /// Variants carry only non-sensitive context: a path chosen by the user, a
-/// line number, a fixed syntax reason, or the wrapped cause. A value read from
-/// a secret file is never carried, so `Display` output is safe to show and to
-/// quote in a bug report.
+/// line number, a fixed syntax reason, or the wrapped cause. No imported value
+/// is ever *rendered*: `Display` is safe to show and to quote in a bug report,
+/// and a wrapped cause's raw detail (which may echo the document) stays
+/// reachable only through [`source()`](std::error::Error::source).
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum FileHandlingError {
     /// An underlying I/O failure.
     Io(std::io::Error),
     /// A JSON (de)serialisation failure.
+    ///
+    /// The raw `serde_json` detail can quote the document that failed to parse,
+    /// so it is reachable only through [`source()`](std::error::Error::source);
+    /// `Display` reports a fixed message.
     Serde(serde_json::Error),
     /// An encryption or decryption failure.
     Crypt(CryptError),
@@ -129,6 +134,9 @@ pub enum FileHandlingError {
         path: String,
     },
     /// Serialising the tree for an export failed.
+    ///
+    /// As with [`FileHandlingError::Serde`], the raw detail stays in
+    /// [`source()`](std::error::Error::source) and out of `Display`.
     ExportSerialization(serde_json::Error),
     /// A share destination exists as something other than a folder.
     ShareDestinationNotAFolder {
@@ -144,7 +152,10 @@ impl fmt::Display for FileHandlingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(e) => write!(f, "io: {e}"),
-            Self::Serde(e) => write!(f, "json: {e}"),
+            // The serde detail can quote the document that failed to parse, so
+            // it is deliberately kept out of `Display` and reachable only
+            // through `source()` (see the enum doc).
+            Self::Serde(_) => f.write_str("json: invalid document"),
             Self::Crypt(e) => write!(f, "{e}"),
             Self::FileTooLarge { size, max } => {
                 write!(f, "file too large: {size} bytes (max {max} bytes)")
@@ -168,7 +179,7 @@ impl fmt::Display for FileHandlingError {
             Self::ExportOverwritesSecret { path } => {
                 write!(f, "export: refusing to overwrite the secret file {path}")
             }
-            Self::ExportSerialization(e) => write!(f, "export: json serialisation failed: {e}"),
+            Self::ExportSerialization(_) => f.write_str("export: json serialisation failed"),
             Self::ShareDestinationNotAFolder { path } => {
                 write!(f, "share: refusing to share into {path}: not a folder")
             }
@@ -224,6 +235,27 @@ mod tests {
         let crypt = error.source().expect("the crypt error is forwarded");
         let cause = crypt.source().expect("the age/io cause is forwarded");
         assert_eq!(cause.to_string(), "unexpected end of file");
+    }
+
+    #[test]
+    fn a_serde_error_keeps_the_parsed_value_out_of_display() {
+        // A type mismatch makes serde_json echo the offending value, so this
+        // error's detail carries a document fragment. `Display` must not.
+        let serde =
+            serde_json::from_str::<std::collections::BTreeMap<String, String>>("\"hunter2\"")
+                .unwrap_err();
+        assert!(
+            serde.to_string().contains("hunter2"),
+            "the fixture must embed the value: {serde}"
+        );
+
+        let error = FileHandlingError::Serde(serde);
+        assert_eq!(error.to_string(), "json: invalid document");
+        let cause = error.source().expect("the serde detail stays reachable");
+        assert!(
+            cause.to_string().contains("hunter2"),
+            "source() must still carry the detail: {cause}"
+        );
     }
 
     #[test]

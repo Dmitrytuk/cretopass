@@ -19,21 +19,27 @@ pub(crate) mod format;
 pub(crate) mod import;
 pub(crate) mod share;
 
-pub use autosave::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent, SaveResult};
+pub use autosave::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent};
 pub use cancel::CancelToken;
 pub use disks::{DiskInfo, list_disks};
 pub use error::{FileHandlingError, ImportSyntax};
 pub use export::{ExportFormat, export_tree, output_path, suggest_export_name};
 pub use file_process::{
     FileEntry, create_dir, create_secret_file, decrypt_to_node, delete_file, is_age_file,
-    is_dir_empty, json_to_node, list_dir, list_dir_including_hidden, node_to_json,
-    probe_path_writable, read_file, rename_file, save_tree, validate_encrypted_file, write_file,
+    is_dir_empty, list_dir, list_dir_including_hidden, probe_path_writable, read_file, rename_file,
+    save_tree, validate_encrypted_file, write_file,
 };
-// Crate-internal only: secret-bearing directory creation, not part of the
-// published surface.
+pub use import::import_tree;
+pub use share::{share_tree, suggest_share_name};
+
+// `pub(crate) use` marks a crate-internal seam: reached by other modules in the
+// crate but not published API. A symbol with no caller outside this module is
+// not re-exported here at all, so the gateway can change or drop it without a
+// public-API commitment; submodule items stay reachable inside the module
+// (e.g. `format::Format`).
+// Secret-bearing directory creation (`vault/utils.rs`).
 pub(crate) use file_process::create_private_dir;
-// Crate-internal only: the cancellable vault write the autosave worker uses.
+// The cancellable vault write the autosave worker uses (`tree/app_tree.rs`).
 pub(crate) use file_process::save_tree_guarded;
-pub use format::Format;
-pub use import::{ImportFormat, import_tree};
-pub use share::{SHARE_FILE_EXT, SHARE_README_NAME, share_tree, suggest_share_name};
+// The JSON writer the export path reaches through this facade.
+pub(crate) use file_process::node_to_json;

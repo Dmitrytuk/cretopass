@@ -70,7 +70,7 @@ impl std::error::Error for SaveError {
 }
 
 /// Result of a single background save attempt.
-pub type SaveResult = Result<(), SaveError>;
+pub(crate) type SaveResult = Result<(), SaveError>;
 
 /// Notification emitted after a snapshot has been attempted.
 #[derive(Debug)]

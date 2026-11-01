@@ -8,7 +8,7 @@ use crate::tree::node::{ExtraField, FieldType, Node, migrate_legacy_description}
 use uuid::Uuid;
 
 /// The formats an imported document may use.
-pub type ImportFormat = Format;
+pub(crate) type ImportFormat = Format;
 
 /// Builds a [`FileHandlingError::ImportSyntax`] from `reason`.
 fn syntax(reason: ImportSyntax) -> FileHandlingError {

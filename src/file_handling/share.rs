@@ -58,7 +58,7 @@ pub fn suggest_share_name(base_path: Option<&Path>, node_name: Option<&str>) -> 
 /// folder.
 ///
 /// The bundle holds `<stem>.<SHARE_FILE_EXT>` — `node` re-encrypted under
-/// `passphrase` — and [`SHARE_README_NAME`], where `<stem>` is
+/// `passphrase` — and `SHARE_README_NAME`, where `<stem>` is
 /// [`suggest_share_name`]`(base_path, node_name)`. The secret file is written first
 /// (atomically); the instruction is written after it, so a failure there still
 /// leaves an openable vault. An empty `passphrase` produces a passwordless
