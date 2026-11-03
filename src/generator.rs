@@ -7,8 +7,8 @@
 //! `docs/adr/0012-password-generator.md` and
 //! `docs/adr/0013-login-word-generator.md`.
 
-pub mod login;
-pub mod password;
+mod login;
+mod password;
 
 pub use login::generate_login;
 pub use password::{
