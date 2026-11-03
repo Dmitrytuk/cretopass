@@ -2076,10 +2076,49 @@ mod tests {
 
         assert!(detail(&state).generator().is_some());
         assert!(!detail(&state).is_symbol_checklist());
-        assert!(generator_modal(&state).error.is_some());
+        assert_eq!(
+            generator_modal(&state).error,
+            Some(generator::PasswordLengthError::OutOfRange)
+        );
         let value = &generator_modal(&state).form.node(&state.root).extra_fields[0].value;
         assert_eq!(value, "old");
         assert!(!state.modified);
+    }
+
+    #[test]
+    fn generator_empty_length_shows_the_whole_number_error() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        set_generator_length(&mut state, "");
+        press_generate(&mut state);
+
+        assert_eq!(
+            generator_modal(&state).error,
+            Some(generator::PasswordLengthError::NotANumber)
+        );
+        let text = rendered_text(&mut state);
+        assert!(
+            text.contains("length must be a whole number"),
+            "the modal must render the whole-number error: {text:?}"
+        );
+    }
+
+    #[test]
+    fn generator_out_of_range_length_shows_the_range_error() {
+        let mut state = editing_state_with_password("old");
+        open_generator(&mut state);
+        set_generator_length(&mut state, "999");
+        press_generate(&mut state);
+
+        assert_eq!(
+            generator_modal(&state).error,
+            Some(generator::PasswordLengthError::OutOfRange)
+        );
+        let text = rendered_text(&mut state);
+        assert!(
+            text.contains("length must be between 4 and 128"),
+            "the modal must render the range error: {text:?}"
+        );
     }
 
     #[test]
@@ -2391,6 +2430,22 @@ mod tests {
         }
     }
 
+    /// Renders the whole Tree UI into a test backend and returns the visible
+    /// cells as text, one row per line, so a test can assert on a popup's
+    /// rendered output without matching across a row boundary.
+    fn rendered_text(state: &mut TreeState) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| ui(frame, state)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let width = usize::from(buffer.area.width);
+        buffer
+            .content
+            .chunks(width)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     #[test]
     fn tree_screen_paints_every_cell() {
         let mut state = TreeState::new(crate::build_demo_tree());
@@ -2415,16 +2470,7 @@ mod tests {
         state.save_state = SaveState::Idle;
         state.operation_status = Some(crate::theming::Status::Saving);
 
-        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|f| ui(f, &mut state)).unwrap();
-
-        let content: String = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect();
+        let content = rendered_text(&mut state);
         assert!(
             content.contains(texts::STATUS_SAVING),
             "the title bar must show the operation status: {content:?}"

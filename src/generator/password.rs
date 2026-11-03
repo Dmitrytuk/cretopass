@@ -79,11 +79,14 @@ pub enum PasswordLengthError {
 
 impl fmt::Display for PasswordLengthError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Keep this short enough to fit the generator modal's inner width at a
+        // typical 80-column terminal; the type name already supplies the
+        // "password length" context.
         match self {
-            Self::NotANumber => f.write_str("password length must be a whole number"),
+            Self::NotANumber => f.write_str("length must be a whole number"),
             Self::OutOfRange => write!(
                 f,
-                "password length must be between {} and {}",
+                "length must be between {} and {}",
                 PasswordLength::MIN,
                 PasswordLength::MAX
             ),
