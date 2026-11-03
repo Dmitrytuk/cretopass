@@ -5,9 +5,11 @@
 //! produces, then asserts nothing is left behind after removal.
 
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 /// Every artifact `install.sh` creates on Linux, relative to `$HOME`.
 fn artifact_rel_paths() -> Vec<PathBuf> {
@@ -76,16 +78,17 @@ fn setup_home(tmp: &Path) -> PathBuf {
 
 /// Runs `cretopass remove` inside `home`, answering the prompt with `answer`.
 fn run_remove_with_input(home: &Path, answer: &str) -> std::process::ExitStatus {
-    let mut child = Command::new(home.join(".local/bin/cretopass"))
+    let mut command = Command::new(home.join(".local/bin/cretopass"));
+    command
         .arg("remove")
         .env("HOME", home)
         .env_remove("XDG_CONFIG_HOME")
         .env("CRETOPASS_CONFIG_DIR", home.join(".config/cretopass"))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+        .stderr(Stdio::null());
+
+    let mut child = spawn_retrying_busy(&mut command);
 
     child
         .stdin
@@ -94,6 +97,27 @@ fn run_remove_with_input(home: &Path, answer: &str) -> std::process::ExitStatus 
         .write_all(answer.as_bytes())
         .unwrap();
     child.wait().unwrap()
+}
+
+/// Spawns `command`, retrying the transient `ETXTBSY` failure.
+///
+/// The tests run in parallel, and each stages its own copy of the `cretopass`
+/// binary into a fake home before executing it. A concurrent test's in-flight
+/// `fs::copy` can leave that write handle open across its `fork`, so `execve`
+/// momentarily fails with `ETXTBSY` ("Text file busy"). The handle is closed
+/// almost immediately, so a short bounded retry clears it without serialising
+/// the whole suite.
+fn spawn_retrying_busy(command: &mut Command) -> std::process::Child {
+    for _ in 0..100 {
+        match command.spawn() {
+            Ok(child) => return child,
+            Err(e) if e.kind() == io::ErrorKind::ExecutableFileBusy => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => panic!("failed to spawn cretopass remove: {e}"),
+        }
+    }
+    panic!("failed to spawn cretopass remove: binary stayed busy after retries");
 }
 
 /// Runs `cretopass remove` inside `home`, answering the prompt with "y".
