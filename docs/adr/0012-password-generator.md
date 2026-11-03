@@ -77,6 +77,27 @@ error is raised.
 sampling uniformly from one combined alphabet (cannot guarantee a digit and a
 symbol, and checking budgets per class is harder to explain).
 
+### Entropy of the guaranteed-class budget
+
+The 20% digit and 20% symbol budgets are policy, not an accident, and they cost
+a little entropy: those positions can never be letters. At the default length of
+10 with every symbol selected the alphabet is `52 + 10 + 17 = 79` characters, so
+an unconstrained uniform draw over all 10 positions would carry
+`10 · log2(79) ≈ 63.0` bits. The generator instead fixes the class counts at
+2 digits, 2 symbols and 6 letters and shuffles them, so the number of distinct
+passwords is
+
+```text
+C(10, 2) · C(8, 2) · 10² · 17² · 52⁶ ≈ 7.2 × 10¹⁷
+```
+
+or `log2(7.2 × 10¹⁷) ≈ 59.3` bits — about 4 bits (~6%) below the unconstrained
+draw, with the gap widening as the length (and therefore the budget) grows. The
+structure is public, so an attacker knows how many positions of each class a
+candidate has; the effective figure above is the honest one to quote. No
+behaviour change is implied — this is the price of always yielding a digit and a
+symbol.
+
 ## UI contract
 
 - **Trigger:** `Ctrl+G` at the form's **Input** level only, when the focused row

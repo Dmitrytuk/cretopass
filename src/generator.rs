@@ -6,6 +6,15 @@
 //! passwords, nothing for login words. See
 //! `docs/adr/0012-password-generator.md` and
 //! `docs/adr/0013-login-word-generator.md`.
+//!
+//! # Examples
+//!
+//! ```
+//! use cretopass::generator::{PasswordParams, generate_login, generate_password};
+//!
+//! let password = generate_password(&PasswordParams::default());
+//! let login = generate_login();
+//! ```
 
 mod login;
 mod password;

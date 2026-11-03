@@ -57,6 +57,11 @@ const MAX_ATTEMPTS: usize = 32;
 /// The word is either two or three syllables and is always between 4 and 13
 /// characters: onsets are one or two letters, the core is one vowel and the
 /// coda is optional and at most two letters.
+///
+/// The returned word is checked against the blocklist. If every one of
+/// `MAX_ATTEMPTS` candidates is blocked — astronomically unlikely with the
+/// current list — the final candidate is returned unchecked rather than looping
+/// forever.
 pub fn generate_login() -> String {
     generate_login_with(&mut rand::thread_rng())
 }
