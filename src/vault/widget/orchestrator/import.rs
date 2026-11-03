@@ -106,6 +106,6 @@ pub(super) fn wrapper_name(import_path: &str) -> String {
         .file_stem()
         .map(|stem| stem.to_string_lossy().to_string())
         .unwrap_or_else(|| texts::IMPORT_NAME_FALLBACK.to_string());
-    let stamp = chrono::Local::now().format("%Y-%m-%d_%H%M%S");
-    format!("imported_{stem}_{stamp}")
+    let stamp = chrono::Local::now().format(texts::IMPORT_NAME_STAMP_FORMAT);
+    format!("{}{stem}_{stamp}", texts::IMPORT_NAME_PREFIX)
 }

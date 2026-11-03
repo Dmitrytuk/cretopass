@@ -78,7 +78,12 @@ pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementSt
     };
 
     let hint = if state.search_active {
-        format!("Search: {}█", state.search_query)
+        format!(
+            "{}{}{}",
+            texts::FB_SEARCH_PREFIX,
+            state.search_query,
+            texts::FB_SEARCH_CURSOR
+        )
     } else if state.pending == AddPrefix::Pending {
         texts::FB_PROMPT_NEW.to_string()
     } else if state.focus == FocusTarget::Input {
@@ -259,7 +264,7 @@ mod tests {
         state.search_query = "test".to_string();
         let (_, _, hint) = status_parts(&state);
         assert!(
-            hint.contains("Search: test"),
+            hint.contains(&format!("{}{}", texts::FB_SEARCH_PREFIX, "test")),
             "the search prompt should be the hint: {hint}"
         );
     }

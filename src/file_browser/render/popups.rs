@@ -132,7 +132,12 @@ pub(super) fn render_delete_popup(frame: &mut Frame, area: Rect, state: &FileBro
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
-            format!(" Delete {filename}? "),
+            format!(
+                "{}{}{}",
+                texts::FB_CONFIRM_DELETE_START,
+                filename,
+                texts::FB_CONFIRM_DELETE_END
+            ),
             ElementStyle::ConfirmMessage.style(),
         )),
     ];
@@ -163,7 +168,12 @@ pub(super) fn render_overwrite_popup(frame: &mut Frame, area: Rect, state: &File
     let prompt = if state.mode.is_share_destination() {
         format!("{}{}? ", texts::FB_PROMPT_SHARE_FOLDER, filename)
     } else {
-        format!(" Overwrite {filename}? ")
+        format!(
+            "{}{}{}",
+            texts::FB_CONFIRM_OVERWRITE_START,
+            filename,
+            texts::FB_CONFIRM_OVERWRITE_END
+        )
     };
     let lines = vec![
         Line::from(""),

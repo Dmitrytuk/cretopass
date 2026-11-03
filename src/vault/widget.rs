@@ -380,7 +380,7 @@ mod tests {
         let wrapper = saved
             .children
             .iter()
-            .find(|n| n.name.starts_with("imported_note_"))
+            .find(|n| n.name.starts_with(&format!("{}note_", texts::IMPORT_NAME_PREFIX)))
             .expect("the imported tree must be wrapped under the open root");
         assert_eq!(wrapper.children.len(), 1);
         assert_eq!(wrapper.children[0].name, "Secrets");
@@ -452,7 +452,7 @@ mod tests {
             !saved
                 .children
                 .iter()
-                .any(|n| n.name.starts_with("imported_")),
+                .any(|n| n.name.starts_with(texts::IMPORT_NAME_PREFIX)),
             "a failed import must not touch the vault"
         );
 
