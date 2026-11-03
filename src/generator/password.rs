@@ -69,6 +69,7 @@ impl fmt::Display for PasswordLength {
 
 /// Why a value could not become a [`PasswordLength`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PasswordLengthError {
     /// The input contained no digits or was not a number.
     NotANumber,
