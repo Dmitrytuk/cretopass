@@ -16,7 +16,7 @@ pub(crate) type ImportFormat = Format;
 /// imported file is ever carried here, so an imported secret can never reach a
 /// user through an error's `Display`. This is the import layer's own error; the
 /// gateway composes it into
-/// [`FileHandlingError::Import`](super::FileHandlingError::Import).
+/// [`FileHandlingError::Import`].
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseError {

@@ -4,7 +4,7 @@
 //! and its scroll maths live in [`list`], the status-bar badge and hint in
 //! [`status`], the centered dialogs in [`popups`], and the dialog geometry in
 //! [`chrome`]. Each submodule owns its own tests; the shared fixtures live in
-//! [`fixtures`].
+//! `fixtures`.
 
 #[cfg(test)]
 mod fixtures;

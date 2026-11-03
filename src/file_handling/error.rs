@@ -1,8 +1,8 @@
 //! The I/O gateway's error taxonomy.
 //!
 //! [`FileHandlingError`] is the composed error a caller of the gateway sees. It
-//! is built from the layer-local errors — [`atomic::WriteError`],
-//! [`import::ParseError`] and [`crypt::CryptError`] — plus the file-level
+//! is built from the layer-local errors — [`WriteError`],
+//! [`ParseError`] and [`CryptError`] — plus the file-level
 //! outcomes the gateway itself owns (size caps, age-header checks, export/share
 //! refusals). No arm carries a value read from a document, so `Display` is safe
 //! to show and to quote in a bug report; a wrapped cause's raw detail (which may

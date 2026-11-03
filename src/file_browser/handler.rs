@@ -6,7 +6,7 @@
 //! input or the rename input. Committing a named destination lives in
 //! [`destination`]; the text-editing map shared by the two inputs is
 //! [`text_edit`]. Each submodule owns its own tests; the shared fixtures live in
-//! [`fixtures`].
+//! `fixtures`.
 
 #[cfg(test)]
 mod fixtures;
