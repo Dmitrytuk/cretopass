@@ -122,7 +122,7 @@ fn run_update_windows() -> ExitCode {
 
     // Write a detached helper batch script that waits for the current
     // process to exit, then runs the installer with -Force.
-    let helper_path = tmp.join("_helper.bat");
+    let helper_path = tmp.path().join("_helper.bat");
     if let Err(e) = write_update_helper(&helper_path, &script_path, tmp.path()) {
         eprintln!("cretopass update: failed to write helper script: {e}");
         return ExitCode::FAILURE;

@@ -24,6 +24,7 @@ pub(crate) const MAX_CONFIG_SIZE: u64 = 1024 * 1024;
 /// The age file-format magic header every encrypted vault begins with.
 const AGE_MAGIC: &[u8; 11] = b"age-encrypt";
 /// Mode (Unix) directories the gateway creates are given: owner only.
+#[cfg(unix)]
 const SECRET_DIR_MODE: u32 = 0o700;
 
 /// A single entry in a directory listing.

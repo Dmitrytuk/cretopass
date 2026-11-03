@@ -134,6 +134,7 @@ fn is_cargo_install(exe: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::path::PathBuf;
 
     /// A binary under `$HOME/.local/bin` is self-managed.
