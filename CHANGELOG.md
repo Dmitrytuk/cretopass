@@ -61,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer contains a `description` key.
 - The Home status-bar hint now lists `?:about`, so the new About overlay is
   discoverable from the menu.
+- The `generator` sub-modules are now an implementation detail: password and
+  login generation are reached through the module's re-exports
+  (`cretopass::generator::{…}`) instead of the redundant `generator::password` /
+  `generator::login` paths. No public item was removed.
 
 ### Fixed
 

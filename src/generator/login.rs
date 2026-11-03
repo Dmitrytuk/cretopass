@@ -57,6 +57,11 @@ const MAX_ATTEMPTS: usize = 32;
 /// The word is either two or three syllables and is always between 4 and 13
 /// characters: onsets are one or two letters, the core is one vowel and the
 /// coda is optional and at most two letters.
+///
+/// The returned word is checked against the blocklist. If every one of
+/// `MAX_ATTEMPTS` candidates is blocked — astronomically unlikely with the
+/// current list — the final candidate is returned unchecked rather than looping
+/// forever.
 pub fn generate_login() -> String {
     generate_login_with(&mut rand::thread_rng())
 }
@@ -192,13 +197,21 @@ mod tests {
 
     #[test]
     fn every_word_is_within_the_reachable_length_range() {
-        for word in words(512) {
+        let mut shortest = usize::MAX;
+        let mut longest = 0;
+        for word in words(50_000) {
             let length = word.chars().count();
             assert!(
                 (4..=13).contains(&length),
                 "length {length} out of range for a login word: {word:?}"
             );
+            shortest = shortest.min(length);
+            longest = longest.max(length);
         }
+        // Both bounds are reachable, not merely permitted: a generator narrowed
+        // to a middle band would fail here.
+        assert_eq!(shortest, 4, "the shortest word is never generated");
+        assert_eq!(longest, 13, "the longest word is never generated");
     }
 
     #[test]
@@ -233,6 +246,53 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn pick_coda_never_returns_a_coda_before_a_consonant_cluster() {
+        let onsets = ["b", "br"];
+        let mut rng = rng();
+        for _ in 0..256 {
+            assert_eq!(pick_coda(&mut rng, &onsets, 0), "");
+        }
+    }
+
+    #[test]
+    fn pick_coda_never_doubles_the_next_onset_first_letter() {
+        let onsets = ["b", "l"];
+        let mut rng = rng();
+        for _ in 0..256 {
+            let coda = pick_coda(&mut rng, &onsets, 0);
+            assert!(!coda.ends_with('l'), "coda {coda:?} doubles the next onset");
+        }
+    }
+
+    #[test]
+    fn pick_coda_can_produce_a_legal_medial_coda() {
+        let onsets = ["b", "m"];
+        let mut rng = rng();
+        let saw_coda = (0..256).any(|_| !pick_coda(&mut rng, &onsets, 0).is_empty());
+        assert!(saw_coda, "a medial coda is never produced");
+    }
+
+    #[test]
+    fn inventories_have_no_duplicates_or_empty_entries() {
+        for inventory in [ONSETS, CODAS] {
+            for entry in inventory {
+                assert!(!entry.is_empty(), "empty entry in {inventory:?}");
+            }
+            assert_unique(inventory);
+        }
+        assert!(!VOWELS.is_empty());
+        assert_unique(VOWELS);
+    }
+
+    fn assert_unique<T: Ord + Copy + std::fmt::Debug>(inventory: &[T]) {
+        let mut sorted = inventory.to_vec();
+        sorted.sort_unstable();
+        let before = sorted.len();
+        sorted.dedup();
+        assert_eq!(sorted.len(), before, "duplicate entry in {inventory:?}");
     }
 
     #[test]

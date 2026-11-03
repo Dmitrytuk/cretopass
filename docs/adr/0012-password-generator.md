@@ -17,7 +17,9 @@ context-sensitive `Ctrl+G` action in the Add/Edit form.
 ## Module shape
 
 `src/generator.rs` is a facade over `src/generator/password.rs`; it does not use
-`mod.rs`. The module depends only on `std` and `rand` and never imports
+`mod.rs`. The sub-modules are private and the facade's `pub use` list is the only
+public path, so `generator::password` / `generator::login` are implementation
+details. The module depends only on `std` and `rand` and never imports
 `FieldType`, `theming`, `tree`, or any other project module. This keeps the
 module graph acyclic and makes the generator testable without a terminal.
 
@@ -77,6 +79,27 @@ error is raised.
 sampling uniformly from one combined alphabet (cannot guarantee a digit and a
 symbol, and checking budgets per class is harder to explain).
 
+### Entropy of the guaranteed-class budget
+
+The 20% digit and 20% symbol budgets are policy, not an accident, and they cost
+a little entropy: those positions can never be letters. At the default length of
+10 with every symbol selected the alphabet is `52 + 10 + 17 = 79` characters, so
+an unconstrained uniform draw over all 10 positions would carry
+`10 · log2(79) ≈ 63.0` bits. The generator instead fixes the class counts at
+2 digits, 2 symbols and 6 letters and shuffles them, so the number of distinct
+passwords is
+
+```text
+C(10, 2) · C(8, 2) · 10² · 17² · 52⁶ ≈ 7.2 × 10¹⁷
+```
+
+or `log2(7.2 × 10¹⁷) ≈ 59.3` bits — about 4 bits (~6%) below the unconstrained
+draw, with the gap widening as the length (and therefore the budget) grows. The
+structure is public, so an attacker knows how many positions of each class a
+candidate has; the effective figure above is the honest one to quote. No
+behaviour change is implied — this is the price of always yielding a digit and a
+symbol.
+
 ## UI contract
 
 - **Trigger:** `Ctrl+G` at the form's **Input** level only, when the focused row
@@ -93,9 +116,11 @@ symbol, and checking budgets per class is harder to explain).
   summary row opens the checklist, and on Generate validates and generates;
   `Esc` returns to the form without touching the value.
 - **Length input:** the modal holds raw digits (at most three), so empty and
-  out-of-range values are representable *in the UI* and show an inline
-  `Length must be 4–128` error. Conversion happens only on Generate; the
-  parameters themselves stay valid.
+  out-of-range values are representable *in the UI*. Conversion happens only on
+  Generate; the parameters themselves stay valid. On failure the modal renders
+  `PasswordLengthError`'s `Display` verbatim, so the two variants read
+  differently ("length must be a whole number" for empty input, "length must be
+  between 4 and 128" otherwise) and the message has a single source.
 - **Length editing:** the row opens with the last-used value seeded and a
   "fresh" flag, so the first digit (or `Backspace`/`Delete`) replaces it instead
   of appending — typing `12` over `10` yields `12`. From then on a visible caret

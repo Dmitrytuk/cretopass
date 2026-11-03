@@ -13,11 +13,19 @@ use std::str::FromStr;
 
 use rand::Rng;
 use rand::seq::SliceRandom;
+use zeroize::Zeroize;
 
 /// The canonical special-character alphabet offered by the generator.
 pub const SYMBOLS: [char; 17] = [
     '!', '~', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '=', '-', '/', '<', '>',
 ];
+
+// `SymbolSet` stores the selection in a `u32` bitmask built from
+// `(1u32 << SYMBOLS.len()) - 1`, so the alphabet must stay below 32 entries:
+// shifting a `u32` by 32 overflows. This makes a `SYMBOLS` that outgrows the
+// mask a compile error rather than a panic in debug and a silently empty set in
+// release at `Ctrl+G`.
+const _: () = assert!(SYMBOLS.len() < u32::BITS as usize);
 
 /// Lower- and upper-case ASCII letters, the fallback for every non-symbol,
 /// non-digit position.
@@ -61,6 +69,7 @@ impl fmt::Display for PasswordLength {
 
 /// Why a value could not become a [`PasswordLength`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PasswordLengthError {
     /// The input contained no digits or was not a number.
     NotANumber,
@@ -70,11 +79,14 @@ pub enum PasswordLengthError {
 
 impl fmt::Display for PasswordLengthError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Keep this short enough to fit the generator modal's inner width at a
+        // typical 80-column terminal; the type name already supplies the
+        // "password length" context.
         match self {
-            Self::NotANumber => f.write_str("password length must be a whole number"),
+            Self::NotANumber => f.write_str("length must be a whole number"),
             Self::OutOfRange => write!(
                 f,
-                "password length must be between {} and {}",
+                "length must be between {} and {}",
                 PasswordLength::MIN,
                 PasswordLength::MAX
             ),
@@ -239,7 +251,11 @@ fn generate_with<R: Rng + ?Sized>(params: &PasswordParams, rng: &mut R) -> Strin
         }
     }
     chars.shuffle(rng);
-    chars.into_iter().collect()
+    // The returned `String` is owned by the caller and cannot be wiped here, but
+    // this second full copy of the secret can — and is.
+    let password: String = chars.iter().copied().collect();
+    chars.zeroize();
+    password
 }
 
 /// Splits `length` into `(letters, digits, symbols)` budgets.
@@ -333,6 +349,24 @@ mod tests {
     }
 
     #[test]
+    fn a_single_symbol_set_only_emits_that_symbol() {
+        let mut symbols = SymbolSet::none();
+        symbols.set('#', true);
+        assert_eq!(symbols.len(), 1);
+
+        for _ in 0..64 {
+            let password = generate_with(&params(40, symbols), &mut rng());
+            assert!(
+                password
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '#'),
+                "unexpected character in {password:?}"
+            );
+            assert!(password.chars().any(|c| c == '#'));
+        }
+    }
+
+    #[test]
     fn budget_always_sums_to_length_with_at_least_one_each() {
         for length in PasswordLength::MIN..=PasswordLength::MAX {
             let len = length as usize;
@@ -356,7 +390,7 @@ mod tests {
 
     #[test]
     fn password_length_rejects_out_of_range_and_accepts_bounds() {
-        for bad in [0usize, 3, 129, 200] {
+        for bad in [0usize, 3, 129, 200, 300, usize::MAX] {
             assert_eq!(
                 PasswordLength::try_from(bad),
                 Err(PasswordLengthError::OutOfRange)
@@ -378,6 +412,12 @@ mod tests {
         assert_eq!("128".parse::<PasswordLength>(), Ok(PasswordLength(128)));
         assert_eq!(
             "999".parse::<PasswordLength>(),
+            Err(PasswordLengthError::OutOfRange)
+        );
+        // A digit string too long for `usize` is still all digits, so it is out
+        // of range rather than not-a-number.
+        assert_eq!(
+            "99999999999999999999999".parse::<PasswordLength>(),
             Err(PasswordLengthError::OutOfRange)
         );
         assert_eq!(" 10 ".parse::<PasswordLength>(), Ok(PasswordLength(10)));

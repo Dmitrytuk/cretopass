@@ -1343,9 +1343,9 @@ fn render_generate_password_overlay(frame: &mut Frame, area: Rect, modal: &Gener
         modal.selected == GENERATOR_ROW_GENERATE,
     )));
 
-    if modal.error.is_some() {
+    if let Some(error) = modal.error {
         lines.push(Line::from(Span::styled(
-            texts::ERROR_GENERATOR_LENGTH,
+            error.to_string(),
             ElementStyle::GeneratorError.style(),
         )));
     }
