@@ -345,6 +345,24 @@ mod tests {
     }
 
     #[test]
+    fn a_single_symbol_set_only_emits_that_symbol() {
+        let mut symbols = SymbolSet::none();
+        symbols.set('#', true);
+        assert_eq!(symbols.len(), 1);
+
+        for _ in 0..64 {
+            let password = generate_with(&params(40, symbols), &mut rng());
+            assert!(
+                password
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '#'),
+                "unexpected character in {password:?}"
+            );
+            assert!(password.chars().any(|c| c == '#'));
+        }
+    }
+
+    #[test]
     fn budget_always_sums_to_length_with_at_least_one_each() {
         for length in PasswordLength::MIN..=PasswordLength::MAX {
             let len = length as usize;
@@ -368,7 +386,7 @@ mod tests {
 
     #[test]
     fn password_length_rejects_out_of_range_and_accepts_bounds() {
-        for bad in [0usize, 3, 129, 200] {
+        for bad in [0usize, 3, 129, 200, 300, usize::MAX] {
             assert_eq!(
                 PasswordLength::try_from(bad),
                 Err(PasswordLengthError::OutOfRange)
@@ -390,6 +408,12 @@ mod tests {
         assert_eq!("128".parse::<PasswordLength>(), Ok(PasswordLength(128)));
         assert_eq!(
             "999".parse::<PasswordLength>(),
+            Err(PasswordLengthError::OutOfRange)
+        );
+        // A digit string too long for `usize` is still all digits, so it is out
+        // of range rather than not-a-number.
+        assert_eq!(
+            "99999999999999999999999".parse::<PasswordLength>(),
             Err(PasswordLengthError::OutOfRange)
         );
         assert_eq!(" 10 ".parse::<PasswordLength>(), Ok(PasswordLength(10)));
