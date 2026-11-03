@@ -346,9 +346,13 @@ pub const MSG_CONFIG_SAVED: &str = "Settings saved";
 pub const MSG_SAVE_FAILED: &str = "Failed to save: ";
 pub const MSG_DISCARD_CONFIRM: &str = "Unsaved changes could not be saved. Quit anyway? [y/N]";
 pub const MSG_EXPORT_SUCCESS: &str = "File exported at ";
-pub const MSG_IMPORT_SUCCESS: &str = "File imported successfully.";
+pub const MSG_IMPORT_SUCCESS: &str = "File imported successfully - you can find it in the tree";
 pub const MSG_IMPORT_NO_OPEN_FILE: &str = "Import requires an open file. Open one first.";
 pub const IMPORT_NAME_FALLBACK: &str = "unknown";
+/// Prefix of the wrapper node an imported file is filed under.
+pub const IMPORT_NAME_PREFIX: &str = "imported_";
+/// `chrono` format for the timestamp that keeps repeated imports apart.
+pub const IMPORT_NAME_STAMP_FORMAT: &str = "%Y-%m-%d_%H%M%S";
 pub const MSG_NO_FILE_PATH: &str = "No file path set";
 
 pub const EMPTY_DIR: &str = "  (empty directory)";
@@ -376,6 +380,17 @@ pub const FB_HINT_CONFIRM: &str = "Enter:confirm";
 pub const FB_HINT_CANCEL: &str = "Esc:cancel";
 pub const FB_HINT_DELETE_CONFIRM: &str = "y/Enter:confirm  any key:cancel";
 pub const FB_HINT_OVERWRITE_CONFIRM: &str = "y/Enter:overwrite  any key:cancel";
+/// Search-input prompt prefix; the live query and [`FB_SEARCH_CURSOR`] follow.
+pub const FB_SEARCH_PREFIX: &str = "Search: ";
+/// The block glyph marking the cursor in the search input.
+pub const FB_SEARCH_CURSOR: &str = "█";
+/// Delete-confirmation prompt; the file name sits between `_START` and `_END`
+/// (mirrors [`PROMPT_DELETE_FIELD_START`]).
+pub const FB_CONFIRM_DELETE_START: &str = " Delete ";
+pub const FB_CONFIRM_DELETE_END: &str = "? ";
+/// Overwrite-confirmation prompt; the file name sits between `_START` and `_END`.
+pub const FB_CONFIRM_OVERWRITE_START: &str = " Overwrite ";
+pub const FB_CONFIRM_OVERWRITE_END: &str = "? ";
 pub const FB_HINT_DISKS: &str = " [D]disks ";
 pub const FB_HINT_HIDDEN: &str = " [Ctrl+h]hidden ";
 pub const FB_HINT_LOCATIONS: &str = " j/k:move  Enter:open  Esc:close ";
