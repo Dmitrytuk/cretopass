@@ -13,11 +13,19 @@ use std::str::FromStr;
 
 use rand::Rng;
 use rand::seq::SliceRandom;
+use zeroize::Zeroize;
 
 /// The canonical special-character alphabet offered by the generator.
 pub const SYMBOLS: [char; 17] = [
     '!', '~', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '=', '-', '/', '<', '>',
 ];
+
+// `SymbolSet` stores the selection in a `u32` bitmask built from
+// `(1u32 << SYMBOLS.len()) - 1`, so the alphabet must stay below 32 entries:
+// shifting a `u32` by 32 overflows. This makes a `SYMBOLS` that outgrows the
+// mask a compile error rather than a panic in debug and a silently empty set in
+// release at `Ctrl+G`.
+const _: () = assert!(SYMBOLS.len() < u32::BITS as usize);
 
 /// Lower- and upper-case ASCII letters, the fallback for every non-symbol,
 /// non-digit position.
@@ -239,7 +247,11 @@ fn generate_with<R: Rng + ?Sized>(params: &PasswordParams, rng: &mut R) -> Strin
         }
     }
     chars.shuffle(rng);
-    chars.into_iter().collect()
+    // The returned `String` is owned by the caller and cannot be wiped here, but
+    // this second full copy of the secret can — and is.
+    let password: String = chars.iter().copied().collect();
+    chars.zeroize();
+    password
 }
 
 /// Splits `length` into `(letters, digits, symbols)` budgets.
