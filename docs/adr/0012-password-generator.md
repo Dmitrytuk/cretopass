@@ -17,7 +17,9 @@ context-sensitive `Ctrl+G` action in the Add/Edit form.
 ## Module shape
 
 `src/generator.rs` is a facade over `src/generator/password.rs`; it does not use
-`mod.rs`. The module depends only on `std` and `rand` and never imports
+`mod.rs`. The sub-modules are private and the facade's `pub use` list is the only
+public path, so `generator::password` / `generator::login` are implementation
+details. The module depends only on `std` and `rand` and never imports
 `FieldType`, `theming`, `tree`, or any other project module. This keeps the
 module graph acyclic and makes the generator testable without a terminal.
 
