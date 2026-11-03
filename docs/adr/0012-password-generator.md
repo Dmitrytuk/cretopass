@@ -17,7 +17,9 @@ context-sensitive `Ctrl+G` action in the Add/Edit form.
 ## Module shape
 
 `src/generator.rs` is a facade over `src/generator/password.rs`; it does not use
-`mod.rs`. The module depends only on `std` and `rand` and never imports
+`mod.rs`. The sub-modules are private and the facade's `pub use` list is the only
+public path, so `generator::password` / `generator::login` are implementation
+details. The module depends only on `std` and `rand` and never imports
 `FieldType`, `theming`, `tree`, or any other project module. This keeps the
 module graph acyclic and makes the generator testable without a terminal.
 
@@ -114,9 +116,11 @@ symbol.
   summary row opens the checklist, and on Generate validates and generates;
   `Esc` returns to the form without touching the value.
 - **Length input:** the modal holds raw digits (at most three), so empty and
-  out-of-range values are representable *in the UI* and show an inline
-  `Length must be 4–128` error. Conversion happens only on Generate; the
-  parameters themselves stay valid.
+  out-of-range values are representable *in the UI*. Conversion happens only on
+  Generate; the parameters themselves stay valid. On failure the modal renders
+  `PasswordLengthError`'s `Display` verbatim, so the two variants read
+  differently ("length must be a whole number" for empty input, "length must be
+  between 4 and 128" otherwise) and the message has a single source.
 - **Length editing:** the row opens with the last-used value seeded and a
   "fresh" flag, so the first digit (or `Backspace`/`Delete`) replaces it instead
   of appending — typing `12` over `10` yields `12`. From then on a visible caret

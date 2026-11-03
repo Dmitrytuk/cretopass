@@ -380,7 +380,10 @@ mod tests {
         let wrapper = saved
             .children
             .iter()
-            .find(|n| n.name.starts_with(&format!("{}note_", texts::IMPORT_NAME_PREFIX)))
+            .find(|n| {
+                n.name
+                    .starts_with(&format!("{}note_", texts::IMPORT_NAME_PREFIX))
+            })
             .expect("the imported tree must be wrapped under the open root");
         assert_eq!(wrapper.children.len(), 1);
         assert_eq!(wrapper.children[0].name, "Secrets");

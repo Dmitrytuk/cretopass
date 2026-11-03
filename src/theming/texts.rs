@@ -178,7 +178,6 @@ pub const HINT_FORM_GENERATOR_INPUT: &str = "Type to edit  ^G:generate  Enter/Es
 pub const HINT_GENERATOR: &str =
     "j/k:row  digits:length  ←/→:cursor  Space:all  Enter:ok  Esc:cancel";
 pub const HINT_SYMBOLS: &str = "h/l/j/k:move  Space/Enter:toggle  Esc:done";
-pub const ERROR_GENERATOR_LENGTH: &str = "Length must be 4–128";
 pub const HINT_FIELD_CUT: &str = "d:cut field  Esc:cancel";
 pub const HINT_FIELD_PASTE: &str = "p:after  P:before  Esc:cancel";
 pub const HINT_SELECT_FIELD_TYPE: &str = "j/k:nav  1-9:select  Enter:choose  Esc:cancel";
