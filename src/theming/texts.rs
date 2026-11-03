@@ -346,7 +346,7 @@ pub const MSG_CONFIG_SAVED: &str = "Settings saved";
 pub const MSG_SAVE_FAILED: &str = "Failed to save: ";
 pub const MSG_DISCARD_CONFIRM: &str = "Unsaved changes could not be saved. Quit anyway? [y/N]";
 pub const MSG_EXPORT_SUCCESS: &str = "File exported at ";
-pub const MSG_IMPORT_SUCCESS: &str = "File imported successfully.";
+pub const MSG_IMPORT_SUCCESS: &str = "File imported successfully - you can find it in the tree";
 pub const MSG_IMPORT_NO_OPEN_FILE: &str = "Import requires an open file. Open one first.";
 pub const IMPORT_NAME_FALLBACK: &str = "unknown";
 /// Prefix of the wrapper node an imported file is filed under.
