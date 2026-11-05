@@ -49,6 +49,11 @@ jobs:
       - name: Documentation
         run: cargo doc --no-deps --document-private-items
 
+      - name: Third-party licence summary is current
+        run: |
+          cargo fetch
+          python3 scripts/gen-third-party-licenses.py --check
+
   advisories:
     runs-on: ubuntu-latest
     timeout-minutes: 20
