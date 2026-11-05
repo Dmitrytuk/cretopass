@@ -66,6 +66,9 @@ pub struct FileBrowserState {
     /// Entry name to reselect when the pending listing lands, for a refresh or
     /// a jump whose target is known by name.
     select_on_load: Option<String>,
+    /// A path the user just deleted, awaiting the refreshed listing so the
+    /// browser can tell whether the name actually disappeared.
+    deleted_path: Option<PathBuf>,
 }
 
 impl FileBrowserState {
@@ -159,6 +162,7 @@ impl FileBrowserState {
             disks: DiskLoader::new(),
             previous: None,
             select_on_load: None,
+            deleted_path: None,
         };
         state.loader.request(&dir, state.show_hidden);
         state
@@ -258,6 +262,31 @@ impl FileBrowserState {
         self.begin_listing(dir, selected_name);
     }
 
+    /// Records a path the user just deleted and refreshes the listing.
+    ///
+    /// When the refreshed listing lands, [`Self::reconcile_pending_delete`]
+    /// checks whether the name survived: a sync client (or the OS) that still
+    /// holds the handle keeps it visible — Windows reports the delete as
+    /// "pending" — and the browser explains it rather than appearing to ignore
+    /// the delete.
+    pub fn note_deleted_path(&mut self, path: PathBuf) {
+        self.deleted_path = Some(path);
+        self.refresh_entries();
+    }
+
+    /// Reports a delete that the filesystem has not applied yet.
+    ///
+    /// A no-op unless a delete is awaiting its listing. Called after a listing
+    /// lands.
+    pub(crate) fn reconcile_pending_delete(&mut self) {
+        let Some(deleted) = self.deleted_path.take() else {
+            return;
+        };
+        if self.entries.iter().any(|entry| entry.path == deleted) {
+            self.error = Some(texts::MSG_DELETE_PENDING.to_string());
+        }
+    }
+
     /// Navigates to `dir` and requests its listing, clearing any search.
     ///
     /// `select` names the entry to select once the listing lands (the child the
@@ -315,6 +344,7 @@ impl FileBrowserState {
                         .and_then(|name| self.entries.iter().position(|e| e.name == name))
                         .unwrap_or(0);
                     self.clamp_selection();
+                    self.reconcile_pending_delete();
                 }
                 ListingOutcome::Failed { error, .. } => self.on_listing_failure(format!("{error}")),
                 ListingOutcome::TimedOut { .. } => {
@@ -376,6 +406,7 @@ impl FileBrowserState {
         self.disks.cancel();
         self.previous = None;
         self.select_on_load = None;
+        self.deleted_path = None;
     }
 
     /// Clamps `selected` to a valid filtered index.
@@ -539,6 +570,28 @@ mod tests {
             "the last good listing must survive two overlapping navigations"
         );
         assert!(state.error.is_some());
+    }
+
+    #[test]
+    fn a_delete_that_survives_the_listing_reports_it_through_polling() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("held.age");
+        std::fs::write(&file, b"x").unwrap();
+        let session = FileBrowserSession {
+            last_dir: Some(dir.path().to_path_buf()),
+            show_hidden: false,
+        };
+        let mut state = FileBrowserState::new(FileBrowserMode::OpenFile, &session);
+        state.settle();
+
+        // The file is *not* removed: it stands in for a sync client that still
+        // holds the name, so the refreshed listing still contains it. Driving
+        // this through `settle` (which polls) covers the `poll_listing` ->
+        // `reconcile_pending_delete` wiring, not just the reconcile method.
+        state.note_deleted_path(file.clone());
+        state.settle();
+
+        assert_eq!(state.error.as_deref(), Some(texts::MSG_DELETE_PENDING));
     }
 
     #[test]

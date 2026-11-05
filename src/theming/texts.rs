@@ -398,3 +398,6 @@ pub const MSG_CANNOT_OVERWRITE_SECRET: &str = "Cannot overwrite a secret file";
 pub const MSG_NAME_REQUIRED: &str = "Enter a file name first";
 /// A directory read that did not answer within the listing timeout.
 pub const MSG_DIRECTORY_NOT_RESPONDING: &str = "Directory not responding";
+/// A file the user deleted is still listed: a sync client (or the OS) still
+/// holds the name open, so the delete has not taken effect yet.
+pub const MSG_DELETE_PENDING: &str = "Delete pending: a sync client still holds the file";
