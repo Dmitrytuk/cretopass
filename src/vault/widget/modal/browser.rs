@@ -96,6 +96,12 @@ impl BrowserModal {
         }
     }
 
+    /// Applies pasted `text` to the browser's active text surface (the name or
+    /// rename input, or the search box).
+    pub fn handle_paste(&mut self, text: &str) {
+        file_browser::handle_paste(text, &mut self.state);
+    }
+
     /// What accepting `path` means, which is why the browser was opened.
     fn selected(&self, path: String) -> HomeAction {
         match self.state.mode {

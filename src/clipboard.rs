@@ -1,9 +1,10 @@
 //! Gateway to the system clipboard.
 //!
-//! [`copy_text`] is the single place secrets reach the OS clipboard. It uses
-//! [`arboard`] on every platform (Windows included, via Win32 `CF_UNICODETEXT`,
-//! so non-ASCII text survives), and falls back to the platform's command-line
-//! helper only when arboard cannot provide one.
+//! [`copy_text`] and [`paste_text`] are the only places the app talks to the OS
+//! clipboard, in both directions. Both use [`arboard`] on every platform
+//! (Windows included, via Win32 `CF_UNICODETEXT`, so non-ASCII text survives),
+//! and fall back to the platform's command-line helper only when arboard cannot
+//! provide one.
 //!
 //! Unlike the rest of the app's I/O it does not go through `file_handling`: the
 //! clipboard is not a document. The gateway is nonetheless the one module that
@@ -12,6 +13,8 @@
 use std::fmt;
 use std::io::Write;
 use std::sync::{Mutex, OnceLock};
+
+use zeroize::{Zeroize, Zeroizing};
 
 /// The one cached clipboard handle for the process.
 ///
@@ -118,17 +121,114 @@ fn copy_with_helper(text: &str) -> bool {
     false
 }
 
-/// Why copying to the system clipboard failed.
+/// Reads the system clipboard as text.
 ///
-/// The only project-owned copy, so a caller can render it without naming
-/// `arboard`. The reason strings are arboard's already-rendered messages; they
-/// describe the environment (no display, no server), not the secret.
+/// The value is wrapped in a [`Zeroizing`] buffer: it usually lands in a
+/// password field, so it must be wiped from the heap when the caller is done.
+///
+/// Tries arboard first and the platform helper ladder second. An empty
+/// clipboard is a successful read of the empty string, which a paste policy
+/// then turns into a no-op.
+///
+/// # Errors
+/// Returns [`ClipboardError`] when neither arboard nor a helper could provide
+/// the text. A helper is only tried when arboard fails, and only on
+/// Linux/macOS.
+pub(crate) fn paste_text() -> Result<Zeroizing<String>, ClipboardError> {
+    match paste_with_arboard() {
+        Ok(text) => Ok(text),
+        // arboard failed to read: fall back to the platform helper. If no helper
+        // provides text, report arboard's error, which describes the real cause.
+        Err(error) => match paste_with_helper() {
+            Some(text) => Ok(text),
+            None => Err(error),
+        },
+    }
+}
+
+/// Reads the clipboard through the cached [`arboard::Clipboard`].
+///
+/// A read failure leaves the cached handle in place, unlike a failed write: on
+/// X11 the handle serves the value this process last copied, so dropping it
+/// would silently destroy it.
+fn paste_with_arboard() -> Result<Zeroizing<String>, ClipboardError> {
+    let cell = CELL.get_or_init(|| Mutex::new(None));
+    let mut guard = match cell.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    if guard.is_none() {
+        match arboard::Clipboard::new() {
+            Ok(clipboard) => *guard = Some(clipboard),
+            Err(error) => return Err(ClipboardError::Init(error.to_string())),
+        }
+    }
+
+    guard
+        .as_mut()
+        .expect("a handle was just installed")
+        .get_text()
+        .map(Zeroizing::new)
+        .map_err(|error| ClipboardError::Read(error.to_string()))
+}
+
+/// Reads the clipboard through the platform's helper command, if one exists.
+///
+/// Returns `None` when no helper is configured for the platform or every helper
+/// failed. A helper only counts as a read when it exits zero *and* its output is
+/// valid UTF-8: a present-but-broken helper (a headless `xclip` that cannot open
+/// the display) must not masquerade as an empty clipboard, so the ladder falls
+/// through to the next one.
+fn paste_with_helper() -> Option<Zeroizing<String>> {
+    let cmds: &[&[&str]] = if cfg!(target_os = "macos") {
+        &[&["pbpaste"]]
+    } else if cfg!(target_os = "linux") {
+        &[
+            &["wl-paste", "--no-newline"],
+            &["xclip", "-o", "-selection", "clipboard"],
+            &["xsel", "-b", "-o"],
+        ]
+    } else {
+        return None;
+    };
+
+    for args in cmds {
+        let Ok(output) = std::process::Command::new(args[0])
+            .args(&args[1..])
+            .output()
+        else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        match String::from_utf8(output.stdout) {
+            Ok(text) => return Some(Zeroizing::new(text)),
+            // Not usable text: wipe the bytes we read before trying the next
+            // helper, so raw clipboard contents do not linger.
+            Err(error) => {
+                let mut bytes = error.into_bytes();
+                bytes.zeroize();
+            }
+        }
+    }
+    None
+}
+
+/// Why a clipboard operation failed.
+///
+/// The only project-owned clipboard error, so a caller can render it without
+/// naming `arboard`. The reason strings are arboard's already-rendered messages;
+/// they describe the environment (no display, no server), not the text.
 #[derive(Debug)]
 pub(crate) enum ClipboardError {
     /// The clipboard could not be opened at all (no display or server).
     Init(String),
     /// The clipboard was opened but the value could not be written.
     Write(String),
+    /// The clipboard was opened but the value could not be read.
+    Read(String),
 }
 
 impl fmt::Display for ClipboardError {
@@ -136,6 +236,7 @@ impl fmt::Display for ClipboardError {
         match self {
             Self::Init(reason) => write!(f, "cannot open the system clipboard: {reason}"),
             Self::Write(reason) => write!(f, "cannot write to the system clipboard: {reason}"),
+            Self::Read(reason) => write!(f, "cannot read the system clipboard: {reason}"),
         }
     }
 }
@@ -159,6 +260,14 @@ mod tests {
         assert_eq!(
             ClipboardError::Write("broken pipe".to_string()).to_string(),
             "cannot write to the system clipboard: broken pipe"
+        );
+    }
+
+    #[test]
+    fn a_read_error_names_the_failed_step() {
+        assert_eq!(
+            ClipboardError::Read("no owner".to_string()).to_string(),
+            "cannot read the system clipboard: no owner"
         );
     }
 }

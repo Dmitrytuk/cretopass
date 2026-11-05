@@ -79,6 +79,11 @@ impl ShareDestination {
         self.browser.session()
     }
 
+    /// Applies pasted `text` to the browser's active text surface.
+    pub(crate) fn handle_paste(&mut self, text: &str) {
+        file_browser::handle_paste(text, &mut self.browser);
+    }
+
     /// Whether the browser has a directory listing in flight.
     pub(crate) fn is_loading(&self) -> bool {
         self.browser.is_loading()

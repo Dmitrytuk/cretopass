@@ -73,6 +73,13 @@ impl UnlockPrompt {
         }
     }
 
+    /// Pastes the clipboard's text into the password field, single-line only.
+    pub fn handle_paste(&mut self, text: &str) {
+        if self.fields.paste_clipboard(text) {
+            self.error = None;
+        }
+    }
+
     pub fn render(&self, frame: &mut Frame, area: Rect, display_full_path: bool) {
         let shown_path = display_path(&self.file_path, display_full_path);
 

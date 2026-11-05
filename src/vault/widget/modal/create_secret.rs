@@ -74,6 +74,14 @@ impl CreateSecretPrompt {
         }
     }
 
+    /// Pastes the clipboard's text into the focused password field,
+    /// single-line only.
+    pub fn handle_paste(&mut self, text: &str) {
+        if self.fields.paste_clipboard(text) {
+            self.error = None;
+        }
+    }
+
     /// Validates the pair: empty means "no passphrase" (a separate confirmation),
     /// mismatched re-shows the dialog, anything else can be created.
     fn confirm(&mut self) -> Option<HomeAction> {

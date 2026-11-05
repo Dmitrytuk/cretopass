@@ -65,6 +65,12 @@ impl SharePassphrase {
         }
     }
 
+    /// Pastes the clipboard's text into the focused password field,
+    /// single-line only.
+    pub fn handle_paste(&mut self, text: &str) {
+        self.passphrase.paste(text);
+    }
+
     pub fn render(&self, frame: &mut Frame, area: Rect, display_full_path: bool) {
         let shown_dest = display_path(&self.dest, display_full_path);
         let height = if self.passphrase.error().is_some() {

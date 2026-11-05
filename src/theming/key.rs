@@ -1,5 +1,16 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+/// Whether `key` is the `Ctrl+V` clipboard-paste chord.
+///
+/// Checked once per event loop, before any dispatcher, so the `v` can never
+/// reach a plain-char match that would otherwise type the letter. `Ctrl+Shift+V`
+/// counts too: a shifted `V` arrives uppercase, and terminals report their own
+/// paste that way.
+pub fn is_clipboard_paste(key: &KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Action {
     NavDown,
@@ -683,6 +694,26 @@ mod tests {
 
     fn ctrl(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn ctrl_v_is_the_clipboard_paste_chord() {
+        assert!(is_clipboard_paste(&ctrl(KeyCode::Char('v'))));
+        assert!(
+            is_clipboard_paste(&KeyEvent::new(
+                KeyCode::Char('V'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT
+            )),
+            "a shifted Ctrl+V is still the paste chord"
+        );
+        assert!(
+            !is_clipboard_paste(&key(KeyCode::Char('v'))),
+            "a bare `v` must keep typing"
+        );
+        assert!(
+            !is_clipboard_paste(&ctrl(KeyCode::Char('c'))),
+            "only `v` pastes"
+        );
     }
 
     #[test]

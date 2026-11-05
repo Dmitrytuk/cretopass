@@ -144,4 +144,18 @@ impl Modal {
             Self::SharePassphrase(prompt) => prompt.handle_key(key, state),
         }
     }
+
+    /// Applies pasted `text` to the modal's active text surface, when it has one.
+    ///
+    /// Each modal owns whether it accepts a paste and how it is sanitised; the
+    /// passive Help/Alert modals and the two scope/format wizards change nothing.
+    pub(crate) fn handle_paste(&mut self, text: &str, state: &mut TreeState) {
+        match self {
+            Self::Detail(detail) => detail.handle_paste(text, state),
+            Self::ExportDestination(destination) => destination.handle_paste(text),
+            Self::ShareDestination(destination) => destination.handle_paste(text),
+            Self::SharePassphrase(prompt) => prompt.handle_paste(text),
+            Self::Help(_) | Self::Alert(_) | Self::Export(_) | Self::Share(_) => {}
+        }
+    }
 }

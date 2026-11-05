@@ -14,12 +14,13 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use zeroize::Zeroizing;
 
 use super::TreeAction;
 use super::chrome::{centered_rect, make_overlay_area};
 use crate::cursor::{
-    backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
-    selected_span,
+    PastePolicy, backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at,
+    insert_char_at, insert_str_at, selected_span,
 };
 use crate::generator::{self, PasswordLength, PasswordParams};
 use crate::theming::{Action, ElementStyle, Icon, texts};
@@ -132,6 +133,53 @@ impl Detail {
             DetailPopup::GeneratePassword(_) => Screen::GeneratePassword,
             DetailPopup::SymbolChecklist(_) => Screen::SymbolChecklist,
             DetailPopup::ConfirmDeleteField { .. } => Screen::ConfirmDeleteField,
+        }
+    }
+
+    /// Applies pasted `text` to the modal's active typing surface.
+    ///
+    /// Only the three surfaces that accept typed text take a paste: the Form's
+    /// scratch buffer at its Input level, the Custom field-name prompt, and the
+    /// generator's length row (digits only). Browsing and the passive screens
+    /// ignore it. `state` is part of the modal contract and unused here: every
+    /// surface pastes into buffers the modal already owns.
+    pub(crate) fn handle_paste(&mut self, text: &str, _state: &mut TreeState) {
+        match self.screen() {
+            Screen::Form => {
+                let cleaned = Zeroizing::new(PastePolicy::SingleLine.clean(text).into_owned());
+                if cleaned.is_empty() {
+                    return;
+                }
+                let Some(scratch) = self.form.as_mut().and_then(|form| form.scratch.as_mut())
+                else {
+                    return;
+                };
+                insert_str_at(&mut scratch.text, &mut scratch.cursor, &cleaned);
+            }
+            Screen::CustomFieldName => {
+                let cleaned = PastePolicy::SingleLine.clean(text);
+                if cleaned.is_empty() {
+                    return;
+                }
+                if let DetailPopup::CustomFieldName { input } = &mut self.popup {
+                    input.push_str(&cleaned);
+                }
+            }
+            Screen::GeneratePassword => {
+                let cleaned = PastePolicy::Digits.clean(text);
+                if cleaned.is_empty() {
+                    return;
+                }
+                if let DetailPopup::GeneratePassword(modal) = &mut self.popup
+                    && modal.selected == GENERATOR_ROW_LENGTH
+                {
+                    paste_generator_length(modal, &cleaned);
+                }
+            }
+            Screen::Browse
+            | Screen::SelectFieldType
+            | Screen::SymbolChecklist
+            | Screen::ConfirmDeleteField => {}
         }
     }
 
@@ -1041,6 +1089,25 @@ where
     if let Some(scratch) = form.scratch.as_mut() {
         edit(&mut scratch.text, &mut scratch.cursor);
     }
+}
+
+/// Pastes `digits` into the generator's length field.
+///
+/// Mirrors typing a digit on the length row: a fresh field is replaced rather
+/// than appended to, and the three-digit cap is preserved. `digits` is already
+/// reduced to ASCII digits by [`PastePolicy::Digits`].
+fn paste_generator_length(modal: &mut GeneratorModal, digits: &str) {
+    if modal.length_fresh {
+        modal.length_input.clear();
+        modal.length_cursor = 0;
+        modal.length_fresh = false;
+    }
+    for c in digits.chars() {
+        if modal.length_input.len() < 3 {
+            insert_char_at(&mut modal.length_input, &mut modal.length_cursor, c);
+        }
+    }
+    modal.error = None;
 }
 
 /// Records a committed change on the form's node.

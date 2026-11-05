@@ -22,8 +22,10 @@ mod state;
 
 pub use state::HomeState;
 
+use crate::clipboard;
 use crate::theming::SPINNER_TICK;
 use crate::theming::Status;
+use crate::theming::is_clipboard_paste;
 
 use menu::handle_home_key;
 use modal::Modal;
@@ -50,24 +52,57 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             // stuck behind a stream of keys.
             poll_browser_listing(&mut state);
             if event::poll(SPINNER_TICK)? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind != KeyEventKind::Press {
-                        continue;
-                    }
-                    dispatch_event(key, &mut state, terminal)?;
-                }
+                handle_event(event::read()?, &mut state, terminal)?;
             } else {
                 state.spinner.advance();
             }
             continue;
         }
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind != KeyEventKind::Press {
-                continue;
+        handle_event(event::read()?, &mut state, terminal)?;
+    }
+}
+
+/// Handles one terminal event: a `Ctrl+V` is serviced as a clipboard paste, a
+/// key press goes to the normal dispatcher, and anything else is ignored.
+fn handle_event<B: Backend>(
+    event: Event,
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
+    match event {
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
+            if is_clipboard_paste(&key) {
+                paste_from_clipboard(state);
+            } else {
+                dispatch_event(key, state, terminal)?;
             }
-            dispatch_event(key, &mut state, terminal)?;
         }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Applies pasted `text` to the active modal's focused input, if it has one.
+fn apply_paste(text: &str, state: &mut HomeState) {
+    if let Some(modal) = state.modal.as_mut() {
+        modal.handle_paste(text);
+    }
+}
+
+/// Reads the system clipboard and applies it to the active surface.
+///
+/// An unreadable or empty clipboard is a silent no-op: pasting must never show
+/// a false success or disturb the field. With no modal open — the menu itself
+/// has no text input — the read is skipped entirely: it is synchronous, and a
+/// hung X11 clipboard owner must not freeze the UI for a `Ctrl+V` that provably
+/// does nothing.
+fn paste_from_clipboard(state: &mut HomeState) {
+    if state.modal.is_none() {
+        return;
+    }
+    if let Ok(text) = clipboard::paste_text() {
+        apply_paste(&text, state);
     }
 }
 

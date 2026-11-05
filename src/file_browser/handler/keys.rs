@@ -6,14 +6,15 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::cursor::PastePolicy;
 use crate::file_browser::state::{AddPrefix, FileBrowserAction, FileBrowserState, FocusTarget};
 use crate::file_handling;
 use crate::theming::texts;
 
-use super::input::handle_input_key;
+use super::input::{handle_input_key, handle_input_paste};
 use super::list::handle_list_key;
 use super::locations::{handle_locations_key, is_locations_key, open_locations};
-use super::rename::handle_rename_key;
+use super::rename::{handle_rename_key, handle_rename_paste};
 
 /// Processes a key event and returns an action if the user completed
 /// or cancelled the file browser.  Returns `None` when the browser
@@ -161,6 +162,44 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
         FocusTarget::Locations => None,
     }
 }
+
+/// Applies pasted `text` to the browser's active text surface.
+///
+/// Mirrors [`handle_key`]'s routing: the error popup dismisses on the paste
+/// rather than swallowing it into the field, the transient confirmations and
+/// the Locations overlay own the keyboard and ignore it, and only the two text
+/// inputs and the search box accept text. The list itself has nothing to paste
+/// into.
+pub fn handle_paste(text: &str, state: &mut FileBrowserState) {
+    let cleaned = PastePolicy::SingleLine.clean(text);
+    if cleaned.is_empty() {
+        return;
+    }
+
+    if state.error.is_some() {
+        state.error = None;
+        return;
+    }
+
+    if state.pending == AddPrefix::Pending
+        || state.confirm_delete.is_some()
+        || state.confirm_overwrite.is_some()
+        || state.focus == FocusTarget::Locations
+    {
+        return;
+    }
+
+    match state.focus {
+        FocusTarget::Input => handle_input_paste(state, &cleaned),
+        FocusTarget::Rename => handle_rename_paste(state, &cleaned),
+        FocusTarget::List if state.search_active => {
+            state.search_query.push_str(&cleaned);
+            state.clamp_selection();
+        }
+        FocusTarget::List | FocusTarget::Locations => {}
+    }
+}
+
 /// Ctrl+h toggles hidden entries.  Crossterm reports byte `0x08` (Ctrl+H on
 /// Unix) as `Char('h')` + CONTROL; Windows terminals may deliver it as
 /// `Backspace` + CONTROL instead, so both are accepted.

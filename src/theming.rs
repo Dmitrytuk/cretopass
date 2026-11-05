@@ -17,7 +17,7 @@ use ratatui::style::Color;
 pub use alert::{AlertKind, render_alert};
 pub use background::paint_background;
 pub use icon::Icon;
-pub use key::Action;
+pub use key::{Action, is_clipboard_paste};
 pub use spinner::{SPINNER_TICK, Spinner};
 pub use status::Status;
 pub use status_bar::render_status_bar;

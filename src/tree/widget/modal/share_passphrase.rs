@@ -90,6 +90,17 @@ impl SharePassphrase {
         }
     }
 
+    /// Applies pasted `text` to the focused password field, single-line only.
+    ///
+    /// Ignored while the passwordless confirmation is showing: that screen takes
+    /// only `y`/Enter to confirm or any key to go back.
+    pub(crate) fn handle_paste(&mut self, text: &str) {
+        if self.confirming_empty {
+            return;
+        }
+        self.passphrase.paste(text);
+    }
+
     /// The share request for the typed `passphrase`.
     fn action(&self, passphrase: SharePassword) -> TreeAction {
         TreeAction::Share {

@@ -83,6 +83,14 @@ impl ChangePasswordPrompt {
         }
     }
 
+    /// Pastes the clipboard's text into the focused password field,
+    /// single-line only.
+    pub fn handle_paste(&mut self, text: &str) {
+        if self.fields.paste_clipboard(text) {
+            self.error = None;
+        }
+    }
+
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         let overlay_area = make_overlay(area, if self.error.is_some() { 12 } else { 11 });
         let block = Block::default()

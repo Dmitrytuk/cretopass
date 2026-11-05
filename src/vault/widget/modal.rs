@@ -172,4 +172,24 @@ impl Modal {
             Self::FileBrowser(browser) => browser.handle_key(key),
         }
     }
+
+    /// Applies pasted `text` to the modal's focused text input, when it has one.
+    ///
+    /// Each modal owns whether it accepts a paste and how it is sanitised;
+    /// everywhere else — the confirmations, the format wizard, About and the
+    /// passive alert — a paste changes nothing.
+    pub fn handle_paste(&mut self, text: &str) {
+        match self {
+            Self::Unlock(prompt) => prompt.handle_paste(text),
+            Self::CreateSecret(prompt) => prompt.handle_paste(text),
+            Self::ChangePassword(prompt) => prompt.handle_paste(text),
+            Self::SharePassphrase(prompt) => prompt.handle_paste(text),
+            Self::FileBrowser(browser) => browser.handle_paste(text),
+            Self::About(_)
+            | Self::Alert(_)
+            | Self::Configuration(_)
+            | Self::Confirmation(_)
+            | Self::Export(_) => {}
+        }
+    }
 }

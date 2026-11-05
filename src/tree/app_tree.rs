@@ -1,11 +1,15 @@
 use std::borrow::Cow;
 use std::io;
 
+use crate::clipboard;
+use crate::cursor::PastePolicy;
 use crate::file_handling::{
     Autosave, CancelToken, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree_guarded,
 };
 use crate::theming::Action;
-use crate::theming::{ElementStyle, SPINNER_TICK, paint_background, render_status_bar, texts};
+use crate::theming::{
+    ElementStyle, SPINNER_TICK, is_clipboard_paste, paint_background, render_status_bar, texts,
+};
 use crate::tree::node::Node;
 use crate::tree::widget::{
     AddPosition, Detail, ExportWizard, Help, InputMode, Modal, SaveExit, SaveState, ShareWizard,
@@ -110,7 +114,9 @@ pub fn run_app<B: Backend>(
                                     }
                                 }
                             } else {
-                                if state.modal.is_some() {
+                                if is_clipboard_paste(&key) {
+                                    paste_from_clipboard(state);
+                                } else if state.modal.is_some() {
                                     handle_modal_key(key, state, terminal)?;
                                 } else {
                                     dispatch_key(key, state);
@@ -701,6 +707,59 @@ fn handle_search(key: event::KeyEvent, state: &mut TreeState) {
         }
         _ => {}
     }
+}
+
+/// Appends pasted `text` to the search query, single-line only.
+///
+/// Mirrors the `InsertChar` arm of [`handle_search`], so a paste and typing a
+/// character take the same path.
+fn handle_search_paste(text: &str, state: &mut TreeState) {
+    let cleaned = PastePolicy::SingleLine.clean(text);
+    if cleaned.is_empty() {
+        return;
+    }
+    let mut query = state.search_query.clone();
+    query.push_str(&cleaned);
+    state.set_search(query);
+}
+
+/// Applies pasted `text` to the active surface: the open modal, else the search
+/// box. Everywhere else — Normal navigation or a prefix mode — it changes
+/// nothing.
+///
+/// The modal is taken out for the duration so it can borrow `state`, mirroring
+/// [`handle_modal_key`].
+fn apply_paste(text: &str, state: &mut TreeState) {
+    if let Some(mut modal) = state.modal.take() {
+        modal.handle_paste(text, state);
+        state.modal = Some(modal);
+        return;
+    }
+    if matches!(state.mode, InputMode::Search) {
+        handle_search_paste(text, state);
+    }
+}
+
+/// Reads the system clipboard and applies it to the active surface.
+///
+/// An unreadable or empty clipboard is a silent no-op: pasting must never show
+/// a false success or disturb the field. When no surface can accept a paste the
+/// read is skipped entirely — it is synchronous, and a hung X11 clipboard owner
+/// must not freeze the UI for a `Ctrl+V` that provably does nothing.
+fn paste_from_clipboard(state: &mut TreeState) {
+    if !paste_target(state) {
+        return;
+    }
+    if let Ok(text) = clipboard::paste_text() {
+        apply_paste(&text, state);
+    }
+}
+
+/// Whether the current screen has any surface a paste could land on: an open
+/// modal, or the tree search box. Normal navigation and the prefix modes have
+/// none.
+fn paste_target(state: &TreeState) -> bool {
+    state.modal.is_some() || matches!(state.mode, InputMode::Search)
 }
 
 fn ui(frame: &mut Frame, state: &mut TreeState) {
