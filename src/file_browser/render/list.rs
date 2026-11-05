@@ -77,7 +77,7 @@ pub(super) fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBr
 
             let name_style = if entry.is_dir {
                 ElementStyle::FbDirName.style()
-            } else if entry.is_age_file {
+            } else if entry.looks_like_vault {
                 ElementStyle::FbAgeFileName.style()
             } else {
                 ElementStyle::FbRegularFileName.style()
@@ -89,12 +89,12 @@ pub(super) fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBr
                 name_style
             };
 
-            let marker = if entry.is_age_file && !entry.is_dir && state.mode.allows_entry_actions()
-            {
-                Icon::PwdMarker.as_str()
-            } else {
-                ""
-            };
+            let marker =
+                if entry.looks_like_vault && !entry.is_dir && state.mode.allows_entry_actions() {
+                    Icon::PwdMarker.as_str()
+                } else {
+                    ""
+                };
 
             let marker_style = if is_selected {
                 ElementStyle::FbPwdMarkerSelected.style()
@@ -111,7 +111,9 @@ pub(super) fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBr
         .collect();
 
     if visible.is_empty() {
-        let empty_msg = if state.search_active || !state.search_query.is_empty() {
+        let empty_msg = if state.dir_loading() {
+            texts::FB_LOADING
+        } else if state.search_active || !state.search_query.is_empty() {
             texts::NO_MATCHING_FILES
         } else {
             texts::EMPTY_DIR
@@ -134,6 +136,22 @@ mod tests {
     use crate::file_handling;
 
     // ── Scroll margin (scrolloff) ──
+
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_render_file_list_shows_loading_while_a_listing_is_pending() {
+        let mut state = new_state(FileBrowserMode::OpenFile);
+        // A fresh request leaves the list empty until it lands.
+        state.navigate_to(PathBuf::from("/tmp"), None);
+
+        let text = render_to_text(&mut state);
+
+        assert!(
+            text.contains("Loading"),
+            "a pending listing should show the loading row:\n{text}"
+        );
+    }
 
     #[test]
     fn test_update_scroll_moves_cursor_before_scrolling_down() {

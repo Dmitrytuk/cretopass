@@ -14,7 +14,10 @@ use super::chrome::{centered_popup, centered_popup_sized};
 use super::list::update_scroll;
 
 pub(super) fn render_locations_popup(frame: &mut Frame, area: Rect, state: &mut FileBrowserState) {
-    let row_count = state.locations.len().max(1) as u16;
+    // The Home row shows at once; a `Loading…` row holds the disks' place
+    // until the background enumeration lands.
+    let loading = state.locations_loading();
+    let row_count = (state.locations.len() + usize::from(loading)).max(1) as u16;
     let height = row_count.saturating_add(2); // borders + rows
     let popup_area = centered_popup_sized(area, height, 3, 4, 40);
 
@@ -77,7 +80,12 @@ pub(super) fn render_locations_popup(frame: &mut Frame, area: Rect, state: &mut 
         })
         .collect();
 
-    if rows.is_empty() {
+    if loading {
+        rows.push(Line::from(Span::styled(
+            texts::FB_LOADING,
+            ElementStyle::FbEmptyText.style(),
+        )));
+    } else if rows.is_empty() {
         rows.push(Line::from(Span::styled(
             texts::EMPTY_DIR,
             ElementStyle::FbEmptyText.style(),
@@ -258,6 +266,23 @@ mod tests {
         assert!(
             hint.contains("Enter:open"),
             "the Locations overlay hint should be routed to the status bar: {hint}"
+        );
+    }
+
+    #[test]
+    fn test_render_locations_overlay_shows_loading_while_disks_are_pending() {
+        let mut state = new_state(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+
+        state.begin_locations();
+        state.focus = FocusTarget::Locations;
+
+        let text = render_to_text(&mut state);
+
+        assert!(text.contains("Home"), "the Home row shows at once:\n{text}");
+        assert!(
+            text.contains("Loading"),
+            "the disk enumeration shows a loading row:\n{text}"
         );
     }
 

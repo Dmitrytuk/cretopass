@@ -83,7 +83,12 @@ impl BrowserModal {
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<HomeAction> {
         match file_browser::handle_key(key, &mut self.state) {
             None => None,
-            Some(FileBrowserAction::Cancelled) => Some(HomeAction::Close),
+            Some(FileBrowserAction::Cancelled) => {
+                // Abandon any in-flight listing explicitly; the modal is dropped
+                // next, but this keeps the intent visible.
+                self.state.cancel();
+                Some(HomeAction::Close)
+            }
             Some(FileBrowserAction::Renamed { from, to }) => {
                 Some(HomeAction::RenameFile { from, to })
             }
@@ -100,6 +105,16 @@ impl BrowserModal {
             FileBrowserMode::ExportFile { format } => HomeAction::Export { path, format },
             FileBrowserMode::ShareDestination => HomeAction::ShareDestinationChosen { dest: path },
         }
+    }
+
+    /// Whether a directory listing is in flight.
+    pub fn is_loading(&self) -> bool {
+        self.state.is_loading()
+    }
+
+    /// Applies a completed directory listing, if any.
+    pub fn poll_listing(&mut self) -> bool {
+        self.state.poll_listing()
     }
 
     /// Renders the browser. Its renderer keeps its own viewport offsets, so it

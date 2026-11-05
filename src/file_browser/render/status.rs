@@ -1,9 +1,7 @@
 //! The File Browser's contribution to the unified status bar: its mode badge
 //! and the context hint, rendered by the parent window.
 
-use crate::file_browser::state::{
-    AddPrefix, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget,
-};
+use crate::file_browser::state::{AddPrefix, FileBrowserMode, FileBrowserState, FocusTarget};
 use crate::theming::{ElementStyle, texts};
 
 /// Maps the browser's mode and active overlay to the unified status-bar parts:
@@ -18,8 +16,7 @@ use crate::theming::{ElementStyle, texts};
 /// prefix is armed it is the add-file prompt, and otherwise it is the set of
 /// advertised keys.
 ///
-/// The badge is the browser mode (`OPEN`/`CREATE`/`IMPORT`/`EXPORT`) unless the
-/// PwdKeeper-only filter is active, in which case it is `PWD` in every mode.
+/// The badge is the browser mode (`OPEN`/`CREATE`/`IMPORT`/`EXPORT`/`SHARE`).
 pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementStyle, String) {
     // Overlays are drawn on top of the list and route keys themselves.
     if state.error.is_some() {
@@ -55,26 +52,11 @@ pub(crate) fn status_parts(state: &FileBrowserState) -> (&'static str, ElementSt
     }
 
     let (mode_str, mode_style) = match state.mode {
-        FileBrowserMode::OpenFile => match state.filter {
-            FileFilter::PwdKeeperOnly => (texts::MODE_PWD, ElementStyle::ModeNormal),
-            FileFilter::All => (texts::MODE_OPEN, ElementStyle::ModeSearch),
-        },
-        FileBrowserMode::CreateFile => match state.filter {
-            FileFilter::PwdKeeperOnly => (texts::MODE_PWD, ElementStyle::ModeNormal),
-            FileFilter::All => (texts::MODE_CREATE, ElementStyle::ModeEdit),
-        },
-        FileBrowserMode::ImportFile => match state.filter {
-            FileFilter::PwdKeeperOnly => (texts::MODE_PWD, ElementStyle::ModeNormal),
-            FileFilter::All => (texts::MODE_IMPORT, ElementStyle::ModeSearch),
-        },
-        FileBrowserMode::ExportFile { .. } => match state.filter {
-            FileFilter::PwdKeeperOnly => (texts::MODE_PWD, ElementStyle::ModeNormal),
-            FileFilter::All => (texts::MODE_EXPORT, ElementStyle::ModeEdit),
-        },
-        FileBrowserMode::ShareDestination => match state.filter {
-            FileFilter::PwdKeeperOnly => (texts::MODE_PWD, ElementStyle::ModeNormal),
-            FileFilter::All => (texts::MODE_SHARE, ElementStyle::ModeEdit),
-        },
+        FileBrowserMode::OpenFile => (texts::MODE_OPEN, ElementStyle::ModeSearch),
+        FileBrowserMode::CreateFile => (texts::MODE_CREATE, ElementStyle::ModeEdit),
+        FileBrowserMode::ImportFile => (texts::MODE_IMPORT, ElementStyle::ModeSearch),
+        FileBrowserMode::ExportFile { .. } => (texts::MODE_EXPORT, ElementStyle::ModeEdit),
+        FileBrowserMode::ShareDestination => (texts::MODE_SHARE, ElementStyle::ModeEdit),
     };
 
     let hint = if state.search_active {
@@ -125,7 +107,6 @@ fn fb_hint(state: &FileBrowserState) -> String {
     }
 
     parts.extend([
-        texts::FB_HINT_FILTER,
         texts::FB_HINT_SEARCH,
         texts::FB_HINT_DISKS,
         texts::FB_HINT_HIDDEN,
@@ -135,9 +116,8 @@ fn fb_hint(state: &FileBrowserState) -> String {
         parts.push(texts::FB_HINT_NEW);
     }
 
-    // Rename/delete hints only when a PWD-marked (age) file is selected.
+    // Rename/delete hints only when a non-directory row is selected.
     if let Some(entry) = state.entries.get(state.selected)
-        && entry.is_age_file
         && !entry.is_dir
         && state.mode.allows_entry_actions()
     {
@@ -153,7 +133,7 @@ mod tests {
     use super::super::fixtures::{new_state, populate_tmp, share_state};
     use super::status_parts;
     use crate::file_browser::FileBrowserMode;
-    use crate::file_browser::state::{AddPrefix, FileFilter, FocusTarget};
+    use crate::file_browser::state::{AddPrefix, FocusTarget};
     use crate::file_handling::ExportFormat;
     use crate::theming::texts;
 
@@ -177,7 +157,7 @@ mod tests {
         );
     }
     #[test]
-    fn status_parts_open_file_shows_open_badge_and_filter_hint() {
+    fn status_parts_open_file_shows_open_badge() {
         let mut state = new_state(FileBrowserMode::OpenFile);
         populate_tmp(&mut state);
         let (mode, _, hint) = status_parts(&state);
@@ -187,32 +167,13 @@ mod tests {
             "the OPEN badge should lead the hint"
         );
         assert!(
-            hint.contains("[f]"),
-            "hint should advertise the filter toggle: {hint}"
+            !hint.contains("[f]"),
+            "the removed filter must not be advertised: {hint}"
         );
     }
 
     #[test]
-    fn status_parts_pwd_filter_shows_pwd_badge() {
-        for mode in [
-            FileBrowserMode::OpenFile,
-            FileBrowserMode::CreateFile,
-            FileBrowserMode::ImportFile,
-        ] {
-            let mut state = new_state(mode);
-            populate_tmp(&mut state);
-            state.filter = FileFilter::PwdKeeperOnly;
-            let (mode_label, _, _) = status_parts(&state);
-            assert_eq!(
-                mode_label,
-                texts::MODE_PWD,
-                "the PWD badge should replace the mode badge under the PwdKeeper filter in every mode ({mode:?})"
-            );
-        }
-    }
-
-    #[test]
-    fn status_parts_mode_badge_shown_without_filter() {
+    fn status_parts_mode_badge_shown() {
         let mut create = new_state(FileBrowserMode::CreateFile);
         populate_tmp(&mut create);
         assert_eq!(status_parts(&create).0, texts::MODE_CREATE);

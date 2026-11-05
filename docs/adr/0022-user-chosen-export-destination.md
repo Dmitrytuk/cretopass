@@ -39,11 +39,21 @@ Rules that follow from it:
   raises a confirmation popup inside the browser (`y`/`Enter`), mirroring the
   browser's delete confirmation; the selection is reported only after the
   confirmation.
-- **An export never overwrites a secret file.** A target that is a secret file
-  (content-detected via `is_age_file`) is refused with an alert. The check lives
-  in `export_tree`, so it covers every caller, and it protects any vault — not
-  just the open one. This became reachable precisely because the destination is
-  free now: a secret file may carry any name, including one an export produces.
+- **An export refuses a destination whose name looks like a vault.** A target
+  whose *name* ends in `*.age` (case-insensitive, via `looks_like_vault`) is
+  refused with an alert. The check is name-only: it never opens the target, so
+  naming a destination in a cloud-sync folder triggers no hydration (see
+  [0024](0024-browsing-never-reads-file-contents.md)). Because `output_path`
+  always replaces the extension with the format's (`.json`/`.xml`/`.csv`), no
+  such target can occur through the browser today, so this guard is
+  defence-in-depth for `export_tree` (it would bite only if a future
+  `ExportFormat` used the `age` extension). For every other name the only guard
+  is the browser's overwrite confirmation — a secret file stored with an
+  unrelated name is overwritten once the user confirms. The check lives in
+  `export_tree`, so it covers every caller. It replaced a content-based guard
+  (`is_age_file`) that read the target, because recognising a secret by content
+  is incompatible with hydration-free browsing (Task 2 of the cloud-dir-hang fix,
+  [0024](0024-browsing-never-reads-file-contents.md)).
 - **The Tree hosts the File Browser.** Home already had it as a modal; the Tree
   gained `Modal::ExportDestination`, which carries the chosen scope and format
   across the browser step and reports them together with the path. The browser's

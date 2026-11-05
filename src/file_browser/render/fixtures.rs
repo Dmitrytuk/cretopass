@@ -13,7 +13,11 @@ pub(super) fn make_terminal() -> Terminal<TestBackend> {
 }
 
 pub(super) fn new_state(mode: FileBrowserMode) -> FileBrowserState {
-    FileBrowserState::new(mode, &FileBrowserSession::default())
+    let mut state = FileBrowserState::new(mode, &FileBrowserSession::default());
+    // Settle the constructor's listing so no request is left in flight and the
+    // renderer sees a stable directory.
+    state.settle();
+    state
 }
 
 /// Helper to populate state with entries from /tmp (known to exist).
@@ -42,9 +46,11 @@ pub(super) fn render_to_text(state: &mut FileBrowserState) -> String {
 
 /// A share browser over `dir`, as if opened for the secret file `dir/vault.age`.
 pub(super) fn share_state(dir: &std::path::Path) -> FileBrowserState {
-    FileBrowserState::for_share(
+    let mut state = FileBrowserState::for_share(
         Some(&dir.join("vault.age")),
         None,
         &FileBrowserSession::default(),
-    )
+    );
+    state.settle();
+    state
 }

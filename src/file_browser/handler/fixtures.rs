@@ -26,8 +26,12 @@ pub(super) fn ctrl(code: KeyCode) -> KeyEvent {
 }
 
 /// A browser on `/tmp` (known to exist), with its entries listed.
+///
+/// The constructor's own listing is settled first so no request is left in
+/// flight behind the test's fixture.
 pub(super) fn make_state(mode: FileBrowserMode) -> FileBrowserState {
     let mut state = FileBrowserState::new(mode, &FileBrowserSession::default());
+    state.settle();
     state.current_dir = std::path::PathBuf::from("/tmp");
     state.entries = file_handling::list_dir(std::path::Path::new("/tmp")).unwrap_or_default();
     state.selected = 0;

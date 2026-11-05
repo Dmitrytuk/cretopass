@@ -176,8 +176,12 @@ pub fn run_app<B: Backend>(
                         }
                     }
                 }
-                _ = tick.tick(), if state.save_state.spins() => {
+                // The tick drives the save spinner and also polls the File
+                // Browser's directory listing, so a browser waiting on a slow
+                // filesystem stays responsive and its `Loading…` row is redrawn.
+                _ = tick.tick(), if state.save_state.spins() || browser_loading(state) => {
                     state.spinner.advance();
+                    poll_browser_listing(state);
                 }
             }
 
@@ -505,6 +509,28 @@ fn retained_modal(
         installed.or(Some(produced))
     } else {
         installed
+    }
+}
+
+/// Whether the open export/share destination browser has a listing in flight.
+fn browser_loading(state: &TreeState) -> bool {
+    match &state.modal {
+        Some(Modal::ExportDestination(destination)) => destination.is_loading(),
+        Some(Modal::ShareDestination(destination)) => destination.is_loading(),
+        _ => false,
+    }
+}
+
+/// Applies a completed destination-browser listing, if any.
+fn poll_browser_listing(state: &mut TreeState) {
+    match &mut state.modal {
+        Some(Modal::ExportDestination(destination)) => {
+            destination.poll_listing();
+        }
+        Some(Modal::ShareDestination(destination)) => {
+            destination.poll_listing();
+        }
+        _ => {}
     }
 }
 
@@ -1785,6 +1811,39 @@ mod tests {
         assert!(bundle.join("HOW-TO-OPEN.txt").is_file());
         let data = std::fs::read(&file).unwrap();
         assert!(crate::file_handling::decrypt_to_node(&data, "pw").is_ok());
+    }
+
+    #[test]
+    fn the_tick_guard_opens_while_a_destination_browser_is_loading() {
+        use crate::file_browser::FileBrowserSession;
+        use crate::file_handling::ExportFormat;
+        use crate::tree::widget::ExportDestination;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = TreeState::new(Node::new("Root"));
+        state.modal = Some(Modal::ExportDestination(Box::new(ExportDestination::new(
+            Node::new("Login"),
+            false,
+            ExportFormat::Json,
+            Some(&dir.path().join("vault.age")),
+            &FileBrowserSession::default(),
+        ))));
+
+        assert!(
+            browser_loading(&state),
+            "a fresh browser waits on its listing"
+        );
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while browser_loading(&state) && std::time::Instant::now() < deadline {
+            poll_browser_listing(&mut state);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        assert!(
+            !browser_loading(&state),
+            "the loop helper must apply the completed listing"
+        );
     }
 
     #[test]

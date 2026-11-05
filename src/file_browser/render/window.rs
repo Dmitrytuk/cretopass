@@ -175,7 +175,7 @@ fn format_label(format: ExportFormat) -> &'static str {
 mod tests {
     use super::super::fixtures::{new_state, populate_tmp, render_to_text, share_state};
     use crate::file_browser::FileBrowserMode;
-    use crate::file_browser::state::{FileFilter, FocusTarget};
+    use crate::file_browser::state::FocusTarget;
     use crate::file_handling;
     use crate::file_handling::ExportFormat;
 
@@ -356,23 +356,36 @@ mod tests {
     }
 
     #[test]
-    fn test_render_empty_filtered_list_shows_hint() {
+    fn test_render_empty_list_shows_empty_directory_hint() {
         let mut state = new_state(FileBrowserMode::OpenFile);
-        // Use an empty directory if possible, or filter with PwdKeeperOnly
-        // and search for something that won't match
-        state.current_dir = std::path::PathBuf::from("/tmp");
-        // Create a known empty directory
+        // A known empty directory renders the empty-state message.
         let empty_dir = std::path::Path::new("/tmp/__test_empty_xyz__");
+        let _ = std::fs::remove_dir_all(empty_dir);
         let _ = std::fs::create_dir_all(empty_dir);
+        state.current_dir = empty_dir.to_path_buf();
         state.entries = file_handling::list_dir(empty_dir).unwrap();
-        state.filter = FileFilter::PwdKeeperOnly;
+
         let text = render_to_text(&mut state);
-        // Searching for something non-existent
+
         assert!(
-            text.contains("No matching files") || text.contains("(empty directory)"),
-            "should show empty state message:\n{text}"
+            text.contains("(empty directory)"),
+            "an empty directory should show the empty state message:\n{text}"
         );
         let _ = std::fs::remove_dir(empty_dir);
+    }
+
+    #[test]
+    fn test_render_non_matching_search_shows_no_matching_files_hint() {
+        let mut state = new_state(FileBrowserMode::OpenFile);
+        populate_tmp(&mut state);
+        state.search_query = "no-such-name-xyz".to_string();
+
+        let text = render_to_text(&mut state);
+
+        assert!(
+            text.contains("No matching files"),
+            "a search that matches nothing should show the no-match message:\n{text}"
+        );
     }
     #[test]
     fn test_render_dirs_marked_with_arrow_icon() {

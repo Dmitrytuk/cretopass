@@ -130,7 +130,6 @@ pub const MODE_HELP: &str = "HELP";
 pub const MODE_ABOUT: &str = "ABOUT";
 pub const MODE_MENU: &str = "MENU";
 pub const MODE_OPEN: &str = "OPEN";
-pub const MODE_PWD: &str = "PWD";
 pub const MODE_CREATE: &str = "CREATE";
 pub const MODE_IMPORT: &str = "IMPORT";
 pub const MODE_PASSPHRASE: &str = "PASSPHRASE";
@@ -356,6 +355,8 @@ pub const MSG_NO_FILE_PATH: &str = "No file path set";
 
 pub const EMPTY_DIR: &str = "  (empty directory)";
 pub const NO_MATCHING_FILES: &str = "  No matching files";
+/// Shown in place of the file list while a directory listing is in flight.
+pub const FB_LOADING: &str = "  Loading…";
 pub const ADD_FIELD_BUTTON: &str = "+ Add Field";
 pub const PASSWORD_MASK: &str = "*****";
 pub const COPY_CHECK: &str = "✓ Copied!";
@@ -366,7 +367,6 @@ pub const DEFAULT_ROOT_NAME: &str = "Secrets";
 pub const CUSTOM_FIELD_DEFAULT: &str = "Custom";
 pub const FIELD_LOGIN: &str = "Login";
 pub const FIELD_PASSWORD: &str = "Password";
-pub const FB_HINT_FILTER: &str = " [f] ";
 pub const FB_HINT_IMPORT_TYPES: &str = " [json/csv/xml] ";
 pub const FB_HINT_EXPORT_NAME: &str = " [n]name ";
 pub const FB_HINT_EXPORT: &str = " [e]export ";
@@ -396,3 +396,8 @@ pub const FB_HINT_LOCATIONS: &str = " j/k:move  Enter:open  Esc:close ";
 pub const MSG_CANNOT_DELETE_FILE: &str = "Cannot delete the currently open file";
 pub const MSG_CANNOT_OVERWRITE_SECRET: &str = "Cannot overwrite a secret file";
 pub const MSG_NAME_REQUIRED: &str = "Enter a file name first";
+/// A directory read that did not answer within the listing timeout.
+pub const MSG_DIRECTORY_NOT_RESPONDING: &str = "Directory not responding";
+/// A file the user deleted is still listed: a sync client (or the OS) still
+/// holds the name open, so the delete has not taken effect yet.
+pub const MSG_DELETE_PENDING: &str = "Delete pending: a sync client still holds the file";

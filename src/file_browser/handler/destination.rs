@@ -1,8 +1,10 @@
 //! Committing the typed name as the destination the current mode names.
 //!
 //! The `e` key (and Enter in the share name input) lands here. An export
-//! resolves the format's extension and refuses to overwrite a secret file; a
-//! share names a folder and asks before writing into a non-empty one. Both end
+//! resolves the format's extension, refuses a destination whose name looks like
+//! a vault (by hint — it never reads the target) and asks before overwriting any
+//! other existing file; a share names a folder and asks before writing into a
+//! non-empty one. Both end
 //! in the same [`FileBrowserAction::Selected`], so the browser's callers never
 //! learn which flow produced it.
 
@@ -30,14 +32,15 @@ pub(super) fn begin_destination(state: &mut FileBrowserState) -> Option<FileBrow
 
 /// Starts an export under the typed name, into the directory currently open.
 ///
-/// The format's extension replaces the typed one and an existing secret file is
-/// refused, so a [`FileBrowserAction::Selected`] is reported only once the
-/// destination is known to be writable — an existing plain-text target raises
-/// the overwrite confirmation first.
+/// The format's extension replaces the typed one. A destination whose name
+/// looks like a vault is refused by hint (never by reading the target, so
+/// browsing stays hydration-free), and any other existing target raises the
+/// overwrite confirmation first, so a [`FileBrowserAction::Selected`] is
+/// reported only once the destination is known to be writable.
 fn begin_export(state: &mut FileBrowserState, format: ExportFormat) -> Option<FileBrowserAction> {
     let name = typed_name(state)?;
     let target = output_path(&state.current_dir.join(name), format);
-    if file_handling::is_age_file(&target) {
+    if file_handling::looks_like_vault(&target) {
         state.error = Some(texts::MSG_CANNOT_OVERWRITE_SECRET.to_string());
         return None;
     }
@@ -114,12 +117,14 @@ mod tests {
     /// An export browser over `dir`, as if opened for the secret file
     /// `dir/vault.age`, in `format`.
     fn export_state(dir: &Path, format: ExportFormat) -> FileBrowserState {
-        FileBrowserState::for_export(
+        let mut state = FileBrowserState::for_export(
             format,
             Some(&dir.join("vault.age")),
             None,
             &FileBrowserSession::default(),
-        )
+        );
+        state.settle();
+        state
     }
 
     #[test]
@@ -213,20 +218,22 @@ mod tests {
     }
 
     #[test]
-    fn test_export_refuses_to_overwrite_a_secret_file() {
+    fn test_export_asks_before_overwriting_a_secret_file() {
         let dir = tempfile::tempdir().unwrap();
-        // A secret file is recognised by its contents, so it may carry the very
-        // name the export would write to.
+        // The browser no longer reads the target to recognise a secret file, so
+        // a secret carrying the export's own resolved name (`.json`) is handled
+        // by the ordinary overwrite confirmation rather than refused outright.
         let secret = dir.path().join("vault.json");
         file_handling::create_secret_file(&secret, "pw").unwrap();
         let mut state = export_state(dir.path(), ExportFormat::Json);
 
         let result = handle_key(key(KeyCode::Char('e')), &mut state);
 
-        assert_eq!(result, None);
+        assert_eq!(result, None, "the overwrite must be confirmed first");
+        assert!(state.error.is_none());
         assert_eq!(
-            state.error.as_deref(),
-            Some(texts::MSG_CANNOT_OVERWRITE_SECRET)
+            state.confirm_overwrite.as_deref(),
+            Some(secret.to_string_lossy().as_ref())
         );
     }
 
@@ -313,11 +320,13 @@ mod tests {
     /// A share browser over `dir`, as if opened for the secret file
     /// `dir/vault.age`.
     fn share_state(dir: &Path) -> FileBrowserState {
-        FileBrowserState::for_share(
+        let mut state = FileBrowserState::for_share(
             Some(&dir.join("vault.age")),
             None,
             &FileBrowserSession::default(),
-        )
+        );
+        state.settle();
+        state
     }
 
     #[test]

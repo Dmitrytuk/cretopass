@@ -1,60 +1,43 @@
-//! The directory listing behind the browser and the Locations overlay rows.
+//! The Locations overlay rows.
 
 use std::path::{Path, PathBuf};
 
-use crate::file_handling::{self, FileEntry, FileHandlingError};
+use crate::file_handling;
 use crate::theming::texts;
 
-use super::types::{FileBrowserSession, Location};
+use super::types::Location;
 
-/// Lists `path` honouring the hidden-entry setting.
-pub fn list_entries(path: &Path, show_hidden: bool) -> Result<Vec<FileEntry>, FileHandlingError> {
-    if show_hidden {
-        file_handling::list_dir_including_hidden(path)
-    } else {
-        file_handling::list_dir(path)
-    }
-}
-
-/// Picks the initial directory and its listing for a new browser.
-pub(super) fn initial_location(session: &FileBrowserSession) -> (PathBuf, Vec<FileEntry>) {
-    if let Some(dir) = session.last_dir.as_deref()
-        && let Ok(entries) = list_entries(dir, session.show_hidden)
-    {
-        return (dir.to_path_buf(), entries);
-    }
-
+/// The pinned Home row of the Locations overlay.
+///
+/// The Home row is always present; mounted disks are enumerated in the
+/// background and appended when ready (see
+/// [ADR 0024](../../../docs/adr/0024-browsing-never-reads-file-contents.md)).
+pub(super) fn home_location() -> Location {
     let home = dirs_home();
-    let entries = list_entries(&home, session.show_hidden).unwrap_or_default();
-    (home, entries)
-}
-
-/// Builds the Locations overlay rows: Home first, then mounted disks.
-pub fn build_locations() -> Vec<Location> {
-    let home = dirs_home();
-    let mut locations = Vec::new();
-    locations.push(Location {
+    Location {
         label: texts::LOCATION_HOME.to_string(),
         detail: home.to_string_lossy().to_string(),
         path: home,
         is_home: true,
-    });
-
-    for disk in file_handling::list_disks() {
-        locations.push(Location {
-            label: disk.mount_point.to_string_lossy().to_string(),
-            detail: format_disk_detail(&disk),
-            path: disk.mount_point,
-            is_home: false,
-        });
     }
+}
 
-    locations
+/// The disk rows for `disks`, in the order given.
+pub(super) fn disk_locations(disks: &[file_handling::DiskInfo]) -> Vec<Location> {
+    disks
+        .iter()
+        .map(|disk| Location {
+            label: disk.mount_point.to_string_lossy().to_string(),
+            detail: format_disk_detail(disk),
+            path: disk.mount_point.clone(),
+            is_home: false,
+        })
+        .collect()
 }
 
 /// Selects the most specific location containing `current_dir` (Home wins
 /// when the directory is inside the home tree).  Falls back to the first row.
-pub fn preselect_location(locations: &[Location], current_dir: &Path) -> usize {
+pub(super) fn preselect_location(locations: &[Location], current_dir: &Path) -> usize {
     locations
         .iter()
         .enumerate()
@@ -169,11 +152,22 @@ mod tests {
     }
 
     #[test]
-    fn build_locations_pins_home_first() {
-        let locations = build_locations();
+    fn home_location_is_pinned_first() {
+        let home = home_location();
 
-        assert!(locations[0].is_home);
-        assert_eq!(locations[0].label, texts::LOCATION_HOME);
+        assert!(home.is_home);
+        assert_eq!(home.label, texts::LOCATION_HOME);
+        assert_eq!(home.path, dirs_home());
+    }
+
+    #[test]
+    fn disk_locations_render_each_disk() {
+        let locations = disk_locations(&[disk("/mnt/usb", "vfat")]);
+
+        assert_eq!(locations.len(), 1);
+        assert!(!locations[0].is_home);
+        assert_eq!(locations[0].label, "/mnt/usb");
+        assert!(locations[0].detail.contains("vfat"));
     }
 
     #[test]

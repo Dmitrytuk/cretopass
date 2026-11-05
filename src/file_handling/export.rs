@@ -1,16 +1,19 @@
 //! Exporting a Node tree to plain text — JSON, XML, or CSV.
 //!
 //! The destination is named by the user in the File Browser. [`suggest_export_name`] and
-//! [`output_path`] are the single source of truth for the file name, and
-//! [`export_tree`] refuses to overwrite a secret file (see
-//! [ADR 0022](../../docs/adr/0022-user-chosen-export-destination.md)).
+//! [`output_path`] are the single source of truth for the file name. [`export_tree`]
+//! refuses a destination whose name looks like a vault (a name-only hint, so it
+//! never reads the target — see
+//! [ADR 0022](../../docs/adr/0022-user-chosen-export-destination.md) and
+//! [ADR 0024](../../docs/adr/0024-browsing-never-reads-file-contents.md)); every
+//! other existing target is guarded by the browser's overwrite confirmation.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use super::error::SerdeContext;
 use super::format::Format;
-use super::{FileHandlingError, csv, is_age_file, node_to_json, xml};
+use super::{FileHandlingError, csv, looks_like_vault, node_to_json, xml};
 use crate::tree::node::Node;
 
 /// The formats an exported document may use.
@@ -75,17 +78,23 @@ pub fn output_path(path: &Path, format: ExportFormat) -> PathBuf {
 ///
 /// Returns [`FileHandlingError::Serde`] (context `Export`) when `node` cannot
 /// be serialised, or [`FileHandlingError::ExportOverwritesSecret`] when the
-/// destination is a secret file — an export is plain text, so writing it over
-/// an encrypted file would destroy the vault. Returns
-/// [`FileHandlingError::Io`] (or [`FileHandlingError::PathNotWritable`]) when
-/// the write fails.
+/// destination's name looks like a vault — an export is plain text, so writing
+/// it over an encrypted file would destroy the vault. The check is by name only
+/// (it never opens the target), so a secret file with an unrelated name is
+/// overwritten; the File Browser's overwrite confirmation is the guard for it.
+/// Returns [`FileHandlingError::Io`] (or
+/// [`FileHandlingError::PathNotWritable`]) when the write fails.
 pub fn export_tree(
     node: &Node,
     file_path: impl AsRef<Path>,
     format: ExportFormat,
 ) -> Result<String, FileHandlingError> {
     let out_path = output_path(file_path.as_ref(), format);
-    if is_age_file(&out_path) {
+    // `output_path` replaces the extension with the format's, so `out_path` is
+    // never `.age` for today's formats: this is defence-in-depth for a future
+    // format and for direct callers. A secret stored under an unrelated name is
+    // covered only by the browser's overwrite confirmation (see ADR 0022).
+    if looks_like_vault(&out_path) {
         return Err(FileHandlingError::ExportOverwritesSecret { path: out_path });
     }
 
@@ -333,22 +342,22 @@ mod tests {
     }
 
     #[test]
-    fn export_refuses_to_overwrite_a_secret_file() {
+    fn export_writes_over_a_secret_file_whose_name_is_not_a_vault_hint() {
         let dir = tempfile::tempdir().unwrap();
-        // A secret file is recognised by its contents, so it may carry any
-        // name — even one this very export would produce.
+        // The guard is by name only, so a secret carrying the export's resolved
+        // name (`.json`) is not recognised: the write proceeds as plain text.
+        // The File Browser's overwrite confirmation is the real guard here.
         let vault_path = dir.path().join("vault.json");
         let vault_path = vault_path.to_string_lossy().to_string();
         crate::file_handling::create_secret_file(&vault_path, "pw").unwrap();
 
         let result = export_tree(&Node::new("X"), &vault_path, ExportFormat::Json);
 
-        assert!(matches!(
-            result,
-            Err(FileHandlingError::ExportOverwritesSecret { .. })
-        ));
-        // Untouched: it still decrypts with its master password.
-        let data = crate::file_handling::validate_encrypted_file(&vault_path).unwrap();
-        assert!(crate::file_handling::decrypt_to_node(&data, "pw").is_ok());
+        assert!(result.is_ok());
+        let written = std::fs::read_to_string(&vault_path).unwrap();
+        assert!(
+            written.contains("\"name\"") && written.contains("\"id\""),
+            "the export must have landed as plain text: {written}"
+        );
     }
 }

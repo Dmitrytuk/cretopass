@@ -52,7 +52,9 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
                     if Some(path) == state.active_vault_path.as_deref() {
                         state.error = Some(texts::MSG_CANNOT_DELETE_FILE.to_string());
                     } else if file_handling::delete_file(path).is_ok() {
-                        state.refresh_entries();
+                        // The refreshed listing tells whether the name really
+                        // went away, or a sync client still holds it.
+                        state.note_deleted_path(path.to_path_buf());
                     }
                 }
                 state.confirm_delete = None;
@@ -224,6 +226,7 @@ mod tests {
         assert!(state.creating_name.is_empty());
         let created = state.current_dir.join("myfolder");
         assert!(created.is_dir(), "folder should have been created");
+        state.settle();
         assert_eq!(state.entries.len(), before + 1);
 
         let _ = std::fs::remove_dir(&created);
@@ -388,6 +391,69 @@ mod tests {
     }
     // ── Hidden entries (Ctrl+h) ──
 
+    /// A listed file entry for `path`, for stubbed listing results.
+    fn entry(path: &std::path::Path) -> crate::file_handling::FileEntry {
+        crate::file_handling::FileEntry {
+            name: path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            path: path.to_path_buf(),
+            is_dir: false,
+            looks_like_vault: true,
+        }
+    }
+
+    #[test]
+    fn a_normal_delete_reports_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("gone.age");
+        std::fs::write(&file, b"x").unwrap();
+
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.current_dir = dir.path().to_path_buf();
+        state.entries = vec![entry(&file)];
+        state.selected = 0;
+
+        handle_key(key(KeyCode::Char('d')), &mut state);
+        handle_key(key(KeyCode::Char('y')), &mut state);
+        state.settle();
+
+        assert!(
+            state.error.is_none(),
+            "a completed delete must be silent: {:?}",
+            state.error
+        );
+        assert!(!state.entries.iter().any(|e| e.name == "gone.age"));
+    }
+
+    #[test]
+    fn a_deleted_file_still_listed_reports_that_the_delete_is_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("held.age");
+        std::fs::write(&file, b"x").unwrap();
+
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.current_dir = dir.path().to_path_buf();
+        state.entries = vec![entry(&file)];
+        state.selected = 0;
+
+        handle_key(key(KeyCode::Char('d')), &mut state);
+        handle_key(key(KeyCode::Char('y')), &mut state);
+        assert!(!file.exists(), "the delete itself succeeded");
+
+        // Stubbed listing result: a sync client still holds the name, so the
+        // refreshed directory still lists it.
+        state.entries = vec![entry(&file)];
+        state.reconcile_pending_delete();
+
+        assert_eq!(
+            state.error.as_deref(),
+            Some(texts::MSG_DELETE_PENDING),
+            "a delete that has not taken effect must be explained"
+        );
+    }
+
     #[test]
     fn test_ctrl_h_toggles_hidden_entries() {
         let dir = tempfile::tempdir().unwrap();
@@ -405,6 +471,7 @@ mod tests {
         assert!(!state.show_hidden);
 
         assert_eq!(handle_key(ctrl(KeyCode::Char('h')), &mut state), None);
+        state.settle();
 
         assert!(state.show_hidden);
         assert!(state.entries.iter().any(|e| e.name == ".hidden.txt"));

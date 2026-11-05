@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -36,8 +37,12 @@ pub struct FileEntry {
     pub path: PathBuf,
     /// Whether the entry is a directory.
     pub is_dir: bool,
-    /// Whether the entry is a regular file that carries the age magic header.
-    pub is_age_file: bool,
+    /// Whether the entry's name ends with `.age` (case-insensitive).
+    ///
+    /// A display-only hint (see [`looks_like_vault`]): listing never opens the
+    /// file, so browsing a directory of cloud-sync placeholders triggers no
+    /// hydration. See [ADR 0024](../../docs/adr/0024-browsing-never-reads-file-contents.md).
+    pub looks_like_vault: bool,
 }
 
 // ── JSON helpers ──
@@ -274,7 +279,9 @@ pub fn create_secret_file<'a>(
 /// Lists all visible entries in `path`, sorted directories-first then
 /// alphabetically.  Hidden (dot-prefixed) entries are skipped.
 ///
-/// Each regular file is scanned for the age-encryption magic header.
+/// No file contents are read: each entry's [`FileEntry::looks_like_vault`] is a
+/// name-only hint. Opening every file just to sniff its header hydrates cloud
+/// placeholders (and can raise an OS consent dialog), so browsing must not.
 pub fn list_dir(path: impl AsRef<Path>) -> Result<Vec<FileEntry>, FileHandlingError> {
     list_dir_impl(path.as_ref(), false)
 }
@@ -282,7 +289,7 @@ pub fn list_dir(path: impl AsRef<Path>) -> Result<Vec<FileEntry>, FileHandlingEr
 /// Lists all entries in `path`, including hidden (dot-prefixed) entries,
 /// sorted directories-first then alphabetically.
 ///
-/// Each regular file is scanned for the age-encryption magic header.
+/// No file contents are read (see [`list_dir`]).
 pub fn list_dir_including_hidden(
     path: impl AsRef<Path>,
 ) -> Result<Vec<FileEntry>, FileHandlingError> {
@@ -302,16 +309,15 @@ fn list_dir_impl(path: &Path, include_hidden: bool) -> Result<Vec<FileEntry>, Fi
         }
 
         let path = entry.path();
+        // Only `file_type` is consulted (a metadata read the OS serves from
+        // local cache for a cloud placeholder); the file is never opened.
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        // `is_file` follows symlinks and rejects special files (a FIFO open
-        // would otherwise block the event-loop thread): keep the guard.
-        let is_age_file = !is_dir && path.is_file() && scan_age_header(&path);
 
         entries.push(FileEntry {
+            looks_like_vault: looks_like_vault(&path),
             name,
             path,
             is_dir,
-            is_age_file,
         });
     }
 
@@ -322,7 +328,25 @@ fn list_dir_impl(path: &Path, include_hidden: bool) -> Result<Vec<FileEntry>, Fi
     Ok(entries)
 }
 
+/// Returns `true` when `path`'s file name ends with `.age`, ignoring case.
+///
+/// A display-only hint: it inspects the path string and never opens the file,
+/// so the File Browser can mark a row without hydrating a cloud placeholder
+/// (see [ADR 0024](../../docs/adr/0024-browsing-never-reads-file-contents.md)).
+/// It is deliberately a hint, not proof: a `.age` file with foreign contents is
+/// marked, and a vault stored without the extension is not.
+pub fn looks_like_vault(path: impl AsRef<Path>) -> bool {
+    path.as_ref()
+        .extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("age"))
+}
+
 /// Returns `true` if the file starts with the age-encryption magic header.
+///
+/// Unlike [`looks_like_vault`], this opens the file, so it hydrates a cloud
+/// placeholder. It is for callers that genuinely need the content (tests, and
+/// any future explicit file probe), never for a directory listing.
 pub fn is_age_file(path: impl AsRef<Path>) -> bool {
     let path = path.as_ref();
     if !path.is_file() {
@@ -980,14 +1004,30 @@ mod tests {
     }
 
     #[test]
-    fn test_list_dir_including_hidden_marks_dot_age_file() {
+    fn test_list_dir_marks_a_dot_age_name_as_a_vault_hint() {
         let dir = tempfile::tempdir().unwrap();
-        let data = [AGE_MAGIC.as_slice(), &[0u8, 1, 2, 3]].concat();
-        fs::write(dir.path().join(".secret.age"), &data).unwrap();
+        // Content is irrelevant to the hint: the `.age` name marks the row
+        // without the file ever being opened.
+        fs::write(dir.path().join(".secret.age"), b"not an age file").unwrap();
+        fs::write(dir.path().join("notes.txt"), b"age-encrypt later").unwrap();
 
         let entries = list_dir_including_hidden(dir.path()).unwrap();
-        let entry = entries.iter().find(|e| e.name == ".secret.age").unwrap();
-        assert!(entry.is_age_file);
+        let secret = entries.iter().find(|e| e.name == ".secret.age").unwrap();
+        let notes = entries.iter().find(|e| e.name == "notes.txt").unwrap();
+
+        assert!(secret.looks_like_vault);
+        assert!(!notes.looks_like_vault);
+    }
+
+    #[test]
+    fn looks_like_vault_is_a_case_insensitive_dot_age_hint() {
+        assert!(looks_like_vault(Path::new("/tmp/vault.age")));
+        assert!(looks_like_vault(Path::new("/tmp/vault.AGE")));
+        assert!(looks_like_vault(Path::new("/tmp/vault.Age")));
+        assert!(!looks_like_vault(Path::new("/tmp/vault.txt")));
+        assert!(!looks_like_vault(Path::new("/tmp/vault")));
+        // A backup suffix after `.age` is a different extension.
+        assert!(!looks_like_vault(Path::new("/tmp/vault.age.bak")));
     }
 
     #[test]
@@ -1198,15 +1238,16 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn list_dir_does_not_block_on_a_fifo() {
+    fn list_dir_never_opens_file_contents() {
         use std::process::Command;
         use std::sync::mpsc;
         use std::time::Duration;
 
         let dir = tempfile::tempdir().unwrap();
-        let fifo = dir.path().join("pipe");
-        // Opening a FIFO for reading blocks until a writer appears; `list_dir`
-        // must skip it rather than hang the event-loop thread.
+        // A FIFO named `*.age`: opening it for reading blocks until a writer
+        // appears, so a listing that scanned headers would hang the event-loop
+        // thread. The name-only hint must answer `true` without opening it.
+        let fifo = dir.path().join("pipe.age");
         let created = Command::new("mkfifo").arg(&fifo).status();
         if !matches!(created, Ok(status) if status.success()) {
             return; // `mkfifo` is unavailable here.
@@ -1220,10 +1261,13 @@ mod tests {
 
         let entries = rx
             .recv_timeout(Duration::from_secs(5))
-            .expect("list_dir must not block on a FIFO")
+            .expect("list_dir must not open file contents")
             .unwrap();
-        let entry = entries.iter().find(|e| e.name == "pipe").unwrap();
-        assert!(!entry.is_age_file, "a FIFO must never be scanned");
+        let entry = entries.iter().find(|e| e.name == "pipe.age").unwrap();
+        assert!(
+            entry.looks_like_vault,
+            "the hint must come from the name, not from opening the file"
+        );
     }
 
     #[test]

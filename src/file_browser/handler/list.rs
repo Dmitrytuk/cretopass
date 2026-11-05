@@ -1,11 +1,10 @@
-//! The File Browser's list keys: navigation, entering directories, the filter
-//! toggle, the `a` add prefix and the `r`/`d` file actions.
+//! The File Browser's list keys: navigation, entering directories, the `a` add
+//! prefix and the `r`/`d` file actions.
 
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::file_browser::state::{
-    AddPrefix, FileBrowserAction, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget,
-    list_entries,
+    AddPrefix, FileBrowserAction, FileBrowserMode, FileBrowserState, FocusTarget,
 };
 use crate::file_handling;
 
@@ -22,13 +21,6 @@ pub(super) fn handle_list_key(
             KeyCode::Esc => Some(FileBrowserAction::Cancelled),
             KeyCode::Char('h') | KeyCode::Left => {
                 go_to_parent(state);
-                None
-            }
-            KeyCode::Char('f') => {
-                state.filter = match state.filter {
-                    FileFilter::All => FileFilter::PwdKeeperOnly,
-                    FileFilter::PwdKeeperOnly => FileFilter::All,
-                };
                 None
             }
             KeyCode::Char('a') if state.mode == FileBrowserMode::CreateFile => {
@@ -70,16 +62,9 @@ pub(super) fn handle_list_key(
 
             if is_dir {
                 let path = state.entries.get(idx).map(|entry| entry.path.clone())?;
-                match list_entries(&path, state.show_hidden) {
-                    Ok(new_entries) => {
-                        state.current_dir = path;
-                        state.entries = new_entries;
-                        state.selected = 0;
-                        state.search_active = false;
-                        state.search_query.clear();
-                    }
-                    Err(e) => state.error = Some(format!("{e}")),
-                }
+                // Entering a directory only requests the listing; the event loop
+                // applies it, so a slow directory cannot freeze the UI.
+                state.navigate_to(path, None);
                 return None;
             }
 
@@ -107,14 +92,6 @@ pub(super) fn handle_list_key(
             go_to_parent(state);
             None
         }
-        KeyCode::Char('f') => {
-            state.filter = match state.filter {
-                FileFilter::All => FileFilter::PwdKeeperOnly,
-                FileFilter::PwdKeeperOnly => FileFilter::All,
-            };
-            state.clamp_selection();
-            None
-        }
         KeyCode::Char('a') if state.mode == FileBrowserMode::CreateFile => {
             state.pending = AddPrefix::Pending;
             None
@@ -128,8 +105,9 @@ pub(super) fn handle_list_key(
         }
         KeyCode::Char('e') if state.mode.names_destination() => begin_destination(state),
         KeyCode::Char('r') => {
+            // Any non-directory row may be renamed: the name is not an age
+            // header check (browsing reads no contents).
             if let Some(entry) = state.entries.get(state.selected)
-                && entry.is_age_file
                 && !entry.is_dir
                 && state.mode.allows_entry_actions()
             {
@@ -142,7 +120,6 @@ pub(super) fn handle_list_key(
         }
         KeyCode::Char('d') | KeyCode::Delete => {
             if let Some(entry) = state.entries.get(state.selected)
-                && entry.is_age_file
                 && !entry.is_dir
                 && state.mode.allows_entry_actions()
             {
@@ -162,25 +139,12 @@ fn go_to_parent(state: &mut FileBrowserState) {
         return;
     }
 
-    let prev_dir = state.current_dir.clone();
-    match list_entries(&parent, state.show_hidden) {
-        Ok(new_entries) => {
-            let prev_name = prev_dir
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string());
-
-            state.current_dir = parent;
-            state.entries = new_entries;
-            state.search_active = false;
-            state.search_query.clear();
-
-            state.selected = prev_name
-                .and_then(|name| state.entries.iter().position(|e| e.name == name))
-                .unwrap_or(0);
-            state.clamp_selection();
-        }
-        Err(e) => state.error = Some(format!("{e}")),
-    }
+    // Reselect the directory we came from once the parent listing lands.
+    let prev_name = state
+        .current_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string());
+    state.navigate_to(parent, prev_name);
 }
 /// Creates a directory named `name` in the current directory, refreshes the
 /// listing, and selects the new entry.  Reports I/O errors through the error
@@ -189,16 +153,9 @@ pub(super) fn create_dir_named(state: &mut FileBrowserState, name: &str) {
     let new_path = state.current_dir.join(name);
     match file_handling::create_dir(&new_path) {
         Ok(()) => {
+            // Refresh in the background, selecting the folder just created.
             let dir = state.current_dir.clone();
-            if let Ok(new_entries) = list_entries(&dir, state.show_hidden) {
-                state.entries = new_entries;
-                state.selected = state
-                    .entries
-                    .iter()
-                    .position(|e| e.name == name)
-                    .unwrap_or(0);
-                state.clamp_selection();
-            }
+            state.navigate_to(dir, Some(name.to_string()));
         }
         Err(e) => state.error = Some(format!("{e}")),
     }
@@ -209,9 +166,25 @@ mod tests {
     use crossterm::event::KeyCode;
 
     use super::super::fixtures::{key, make_state};
+    use crate::file_browser::FileBrowserAction;
     use crate::file_browser::FileBrowserMode;
     use crate::file_browser::handle_key;
     use crate::file_browser::state::{AddPrefix, FocusTarget};
+
+    #[test]
+    fn test_esc_closes_immediately_while_a_listing_is_pending() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.navigate_to(std::path::PathBuf::from("/somewhere"), None);
+        assert!(state.is_loading());
+
+        let result = handle_key(key(KeyCode::Esc), &mut state);
+
+        assert_eq!(
+            result,
+            Some(FileBrowserAction::Cancelled),
+            "Esc must not wait for a stuck listing"
+        );
+    }
 
     #[test]
     fn test_a_arms_no_prefix_in_open_file_mode() {
