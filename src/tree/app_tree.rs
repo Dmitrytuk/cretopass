@@ -9,6 +9,7 @@ use crate::file_handling::{
 use crate::theming::Action;
 use crate::theming::{
     ElementStyle, SPINNER_TICK, is_clipboard_paste, paint_background, render_status_bar, texts,
+    wheel_nav_key,
 };
 use crate::tree::node::Node;
 use crate::tree::widget::{
@@ -114,33 +115,17 @@ pub fn run_app<B: Backend>(
                                     }
                                 }
                             } else {
-                                match key_route(&key, state) {
-                                    KeyRoute::Paste => paste_from_clipboard(state),
-                                    KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
-                                    KeyRoute::Navigation => dispatch_key(key, state),
-                                }
-
-                                if let Some(ref mut worker) = autosave {
-                                    match autosave_action(
-                                        state.modified,
-                                        worker.is_running(),
-                                        &state.save_state,
-                                    ) {
-                                        AutosaveAction::Submit => {
-                                            state.modified = false;
-                                            submitted = worker.submit(state.root.clone());
-                                            state.save_state = SaveState::Saving;
-                                        }
-                                        AutosaveAction::ReportWorkerStopped => {
-                                            state.save_state = SaveState::Failed {
-                                                error: SaveError::WorkerStopped,
-                                                acknowledged: false,
-                                            };
-                                        }
-                                        AutosaveAction::Idle => {}
-                                    }
-                                }
+                                handle_key_press(
+                                    key,
+                                    state,
+                                    terminal,
+                                    &mut autosave,
+                                    &mut submitted,
+                                )?;
                             }
+                        }
+                        Some(Ok(Event::Mouse(mouse))) => {
+                            handle_mouse(mouse, state, terminal, &mut autosave, &mut submitted)?;
                         }
                         Some(Ok(Event::Paste(text))) => {
                             // A term-native paste arrives atomically as one event
@@ -483,6 +468,73 @@ fn key_route(key: &event::KeyEvent, state: &TreeState) -> KeyRoute {
     } else {
         KeyRoute::Navigation
     }
+}
+
+/// Runs one key press through routing and the autosave bookkeeping.
+///
+/// Both a real key and a wheel tick arrive here, so the two input devices cannot
+/// diverge: a wheel tick is only an `Up`/`Down` key (see [`wheel_nav_key`]).
+fn handle_key_press<B: Backend>(
+    key: event::KeyEvent,
+    state: &mut TreeState,
+    terminal: &mut Terminal<B>,
+    autosave: &mut Option<Autosave<Node>>,
+    submitted: &mut u64,
+) -> io::Result<()> {
+    match key_route(&key, state) {
+        KeyRoute::Paste => paste_from_clipboard(state),
+        KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
+        KeyRoute::Navigation => dispatch_key(key, state),
+    }
+
+    if let Some(worker) = autosave {
+        match autosave_action(state.modified, worker.is_running(), &state.save_state) {
+            AutosaveAction::Submit => {
+                state.modified = false;
+                *submitted = worker.submit(state.root.clone());
+                state.save_state = SaveState::Saving;
+            }
+            AutosaveAction::ReportWorkerStopped => {
+                state.save_state = SaveState::Failed {
+                    error: SaveError::WorkerStopped,
+                    acknowledged: false,
+                };
+            }
+            AutosaveAction::Idle => {}
+        }
+    }
+    Ok(())
+}
+
+/// Applies a mouse event: a wheel tick scrolls the active list, anything else is
+/// ignored (clicks are hit-tested on each screen, not translated here).
+///
+/// The wheel is skipped while a save overlay owns the screen — its keys answer a
+/// prompt, they do not navigate — and while a dismiss overlay (Help or an Alert)
+/// is open, because the wheel must never be the key that closes it.
+fn handle_mouse<B: Backend>(
+    mouse: event::MouseEvent,
+    state: &mut TreeState,
+    terminal: &mut Terminal<B>,
+    autosave: &mut Option<Autosave<Node>>,
+    submitted: &mut u64,
+) -> io::Result<()> {
+    if state.save_exit != SaveExit::None
+        || state.save_state.overlay_message().is_some()
+        || dismiss_overlay_open(state)
+    {
+        return Ok(());
+    }
+    if let Some(key) = wheel_nav_key(&mouse) {
+        handle_key_press(key, state, terminal, autosave, submitted)?;
+    }
+    Ok(())
+}
+
+/// Whether a modal that closes on any key is open. The wheel must not be that
+/// key.
+fn dismiss_overlay_open(state: &TreeState) -> bool {
+    matches!(state.modal, Some(Modal::Help(_) | Modal::Alert(_)))
 }
 
 /// Dispatches a key event to the handler for the current input mode.
@@ -2750,5 +2802,85 @@ mod tests {
         apply_paste("Ru\r\nst", &mut state);
 
         assert_eq!(state.search_query, "Rust");
+    }
+
+    // ── Mouse wheel routing ──
+
+    /// A wheel event at the top-left; only `kind` matters to the router.
+    fn scroll(kind: event::MouseEventKind) -> event::MouseEvent {
+        event::MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn a_wheel_tick_moves_the_tree_selection() {
+        let mut state = state_with_a_child();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        assert_eq!(state.selected, 0);
+
+        handle_mouse(
+            scroll(event::MouseEventKind::ScrollDown),
+            &mut state,
+            &mut terminal,
+            &mut None,
+            &mut 0,
+        )
+        .unwrap();
+        assert_eq!(state.selected, 1, "the wheel selects the next row");
+
+        handle_mouse(
+            scroll(event::MouseEventKind::ScrollUp),
+            &mut state,
+            &mut terminal,
+            &mut None,
+            &mut 0,
+        )
+        .unwrap();
+        assert_eq!(state.selected, 0, "the wheel selects the previous row");
+    }
+
+    #[test]
+    fn the_wheel_never_closes_help_or_an_alert() {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let scroll_down = scroll(event::MouseEventKind::ScrollDown);
+
+        let mut help = TreeState::new(Node::new("Root"));
+        help.modal = Some(Modal::Help(Help));
+        handle_mouse(scroll_down, &mut help, &mut terminal, &mut None, &mut 0).unwrap();
+        assert!(
+            matches!(help.modal, Some(Modal::Help(_))),
+            "the wheel must not dismiss Help"
+        );
+
+        let mut alert = TreeState::new(Node::new("Root"));
+        alert.modal = Some(Modal::error("boom"));
+        handle_mouse(scroll_down, &mut alert, &mut terminal, &mut None, &mut 0).unwrap();
+        assert!(
+            matches!(alert.modal, Some(Modal::Alert(_))),
+            "the wheel must not dismiss an Alert"
+        );
+    }
+
+    #[test]
+    fn the_wheel_is_a_noop_while_a_save_overlay_is_parked() {
+        let mut state = state_with_a_child();
+        state.save_exit = SaveExit::Blocked;
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        handle_mouse(
+            scroll(event::MouseEventKind::ScrollDown),
+            &mut state,
+            &mut terminal,
+            &mut None,
+            &mut 0,
+        )
+        .unwrap();
+
+        assert_eq!(state.selected, 0, "the parked overlay owns the screen");
+        assert_eq!(state.save_exit, SaveExit::Blocked);
     }
 }

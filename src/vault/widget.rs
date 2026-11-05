@@ -26,7 +26,7 @@ pub use state::HomeState;
 use crate::clipboard;
 use crate::theming::SPINNER_TICK;
 use crate::theming::Status;
-use crate::theming::is_clipboard_paste;
+use crate::theming::{is_clipboard_paste, wheel_nav_key};
 
 use menu::handle_home_key;
 use modal::Modal;
@@ -109,9 +109,45 @@ fn handle_event<B: Backend>(
             let text = Zeroizing::new(text);
             apply_paste(&text, state);
         }
+        Event::Mouse(mouse) => handle_mouse(mouse, state, terminal)?,
         _ => {}
     }
     Ok(())
+}
+
+/// Applies a mouse wheel tick as the `Up`/`Down` navigation key: the menu when
+/// no modal is open, the modal's own list otherwise. Every other mouse event is
+/// ignored (clicks are hit-tested on each screen, not translated here).
+///
+/// Ignored while a dismiss overlay (About or an Alert) is open — the wheel must
+/// never be the key that closes it.
+fn handle_mouse<B: Backend>(
+    mouse: event::MouseEvent,
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
+    if dismiss_overlay_open(state) {
+        return Ok(());
+    }
+    if let Some(key) = wheel_nav_key(&mouse) {
+        match key_route(&key, state) {
+            // A wheel tick carries no modifiers, so it is never the paste chord.
+            KeyRoute::Paste => {}
+            KeyRoute::Menu => handle_home_key(key, state, terminal)?,
+            KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
+        }
+    }
+    Ok(())
+}
+
+/// Whether a modal that closes on any key is open. The wheel must not be that
+/// key: About and the passive Alert dismiss on any key, and a Confirmation
+/// treats every non-`y` key as a decline.
+fn dismiss_overlay_open(state: &HomeState) -> bool {
+    matches!(
+        state.modal,
+        Some(Modal::About(_) | Modal::Alert(_) | Modal::Confirmation(_))
+    )
 }
 
 /// Applies pasted `text` to the active modal's focused input, if it has one.
@@ -261,7 +297,7 @@ mod tests {
     use crate::vault::active_file::ActiveVaultState;
     use crate::vault::utils::Configuration;
     use crate::vault::widget::modal::{
-        About, BrowserModal, ConfigurationModal, ExportWizard, UnlockPrompt,
+        About, BrowserModal, ConfigurationModal, Confirmation, ExportWizard, UnlockPrompt,
     };
     use crate::vault::widget::render::home_status_parts;
     use crossterm::event::KeyCode;
@@ -831,5 +867,87 @@ mod tests {
         let menu = HomeState::with_config(Configuration::default());
         assert_eq!(key_route(&paste_key(), &menu), KeyRoute::Paste);
         assert_eq!(key_route(&bare_v(), &menu), KeyRoute::Menu);
+    }
+
+    // ── Mouse wheel routing ──
+
+    /// A wheel event at the top-left; only `kind` matters to the router.
+    fn scroll(kind: event::MouseEventKind) -> event::MouseEvent {
+        event::MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers: event::KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn a_wheel_tick_moves_the_menu_selection() {
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        assert_eq!(state.selected, 0);
+
+        handle_mouse(
+            scroll(event::MouseEventKind::ScrollDown),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        assert_eq!(state.selected, 1, "the wheel selects the next menu item");
+
+        handle_mouse(
+            scroll(event::MouseEventKind::ScrollUp),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        assert_eq!(
+            state.selected, 0,
+            "the wheel selects the previous menu item"
+        );
+    }
+
+    #[test]
+    fn the_wheel_never_dismisses_about_or_an_alert() {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let scroll_down = scroll(event::MouseEventKind::ScrollDown);
+
+        let mut about = HomeState::with_config(Configuration::default());
+        about.modal = Some(Modal::About(About));
+        handle_mouse(scroll_down, &mut about, &mut terminal).unwrap();
+        assert!(
+            matches!(about.modal, Some(Modal::About(_))),
+            "the wheel must not dismiss About"
+        );
+
+        let mut alert = HomeState::with_config(Configuration::default());
+        alert.modal = Some(Modal::error("boom"));
+        handle_mouse(scroll_down, &mut alert, &mut terminal).unwrap();
+        assert!(
+            matches!(alert.modal, Some(Modal::Alert(_))),
+            "the wheel must not dismiss an Alert"
+        );
+    }
+
+    #[test]
+    fn the_wheel_never_declines_a_confirmation() {
+        // A confirmation treats every non-`y` key as a decline, so a wheel tick
+        // must not reach it: scrolling past the prompt would silently answer
+        // "no".
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Confirmation(Confirmation::change_password()));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        handle_mouse(
+            scroll(event::MouseEventKind::ScrollDown),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+
+        assert!(
+            matches!(state.modal, Some(Modal::Confirmation(_))),
+            "the wheel must not be read as declining"
+        );
     }
 }
