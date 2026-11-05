@@ -216,11 +216,11 @@ mod tests {
     use crossterm::event::KeyCode;
 
     use super::super::fixtures::{ctrl, key, make_state};
-    use crate::file_browser::handle_key;
     use crate::file_browser::state::{AddPrefix, FocusTarget};
     use crate::file_browser::{
         FileBrowserAction, FileBrowserMode, FileBrowserSession, FileBrowserState,
     };
+    use crate::file_browser::{handle_key, handle_paste};
     use crate::file_handling;
     use crate::theming::texts;
 
@@ -553,5 +553,86 @@ mod tests {
 
         assert!(!state.show_hidden);
         assert_eq!(state.search_query, "abc");
+    }
+
+    // ── Clipboard paste ──
+
+    #[test]
+    fn paste_into_the_name_input_joins_lines() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.focus = FocusTarget::Input;
+        state.creating_name.clear();
+        state.creating_cursor = 0;
+
+        handle_paste("a\r\nb", &mut state);
+
+        assert_eq!(state.creating_name, "ab");
+        assert_eq!(state.creating_cursor, 2);
+    }
+
+    #[test]
+    fn paste_into_the_rename_input_joins_lines() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.focus = FocusTarget::Rename;
+        state.rename_name.clear();
+        state.rename_cursor = 0;
+
+        handle_paste("x\r\ny", &mut state);
+
+        assert_eq!(state.rename_name, "xy");
+        assert_eq!(state.rename_cursor, 2);
+    }
+
+    #[test]
+    fn paste_into_the_search_box_appends() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.focus = FocusTarget::List;
+        state.search_active = true;
+        state.search_query.clear();
+
+        handle_paste("ab", &mut state);
+
+        assert_eq!(state.search_query, "ab");
+    }
+
+    #[test]
+    fn paste_is_ignored_while_the_locations_overlay_is_open() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.focus = FocusTarget::Locations;
+        // A live search box, which the paste would otherwise fill: the overlay
+        // must own the keyboard and swallow it. (The guard and the `Locations`
+        // match arm both ignore a paste here; the test pins the observable
+        // outcome, not which of the two did it.)
+        state.search_active = true;
+        state.search_query = "keep".to_string();
+
+        handle_paste("x", &mut state);
+
+        assert_eq!(state.search_query, "keep");
+    }
+
+    #[test]
+    fn a_paste_dismisses_an_error_without_leaking_into_the_field() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.focus = FocusTarget::Input;
+        state.creating_name = "taken.age".to_string();
+        state.creating_cursor = state.creating_name.len();
+        state.error = Some(texts::MSG_FILE_EXISTS.to_string());
+
+        handle_paste("x", &mut state);
+
+        assert_eq!(state.error, None);
+        assert_eq!(state.creating_name, "taken.age", "the draft is preserved");
+    }
+
+    #[test]
+    fn a_paste_on_the_list_without_a_search_changes_nothing() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.focus = FocusTarget::List;
+        assert!(!state.search_active);
+
+        handle_paste("x", &mut state);
+
+        assert!(state.search_query.is_empty());
     }
 }

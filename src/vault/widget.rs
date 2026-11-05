@@ -64,22 +64,45 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     }
 }
 
+/// Where a key press goes once it has been read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeyRoute {
+    /// Read the system clipboard and paste it.
+    Paste,
+    /// Hand the key to the Home menu.
+    Menu,
+    /// Hand the key to the active modal.
+    Modal,
+}
+
+/// Classifies a key press before it reaches any handler.
+///
+/// The clipboard-paste chord is checked first, so `Ctrl+V` can never fall
+/// through to a text field and type the letter `v`.
+fn key_route(key: &event::KeyEvent, state: &HomeState) -> KeyRoute {
+    if is_clipboard_paste(key) {
+        KeyRoute::Paste
+    } else if state.modal.is_none() {
+        KeyRoute::Menu
+    } else {
+        KeyRoute::Modal
+    }
+}
+
 /// Handles one terminal event: a `Ctrl+V` is serviced as a clipboard paste, a
 /// term-native (bracketed) paste is applied to the active input, a key press
-/// goes to the normal dispatcher, and anything else is ignored.
+/// goes to the menu or the active modal, and anything else is ignored.
 fn handle_event<B: Backend>(
     event: Event,
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     match event {
-        Event::Key(key) if key.kind == KeyEventKind::Press => {
-            if is_clipboard_paste(&key) {
-                paste_from_clipboard(state);
-            } else {
-                dispatch_event(key, state, terminal)?;
-            }
-        }
+        Event::Key(key) if key.kind == KeyEventKind::Press => match key_route(&key, state) {
+            KeyRoute::Paste => paste_from_clipboard(state),
+            KeyRoute::Menu => handle_home_key(key, state, terminal)?,
+            KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
+        },
         Event::Paste(text) => {
             // The event buffer can hold a secret; wipe it on drop, like the
             // `Ctrl+V` source does.
@@ -99,31 +122,27 @@ fn apply_paste(text: &str, state: &mut HomeState) {
 }
 
 /// Reads the system clipboard and applies it to the active surface.
+fn paste_from_clipboard(state: &mut HomeState) {
+    paste_into(state, clipboard::paste_text);
+}
+
+/// Applies the result of `read` to the active surface.
 ///
 /// An unreadable or empty clipboard is a silent no-op: pasting must never show
 /// a false success or disturb the field. With no modal open — the menu itself
 /// has no text input — the read is skipped entirely: it is synchronous, and a
 /// hung X11 clipboard owner must not freeze the UI for a `Ctrl+V` that provably
-/// does nothing.
-fn paste_from_clipboard(state: &mut HomeState) {
+/// does nothing. Taking the read as an argument is what lets the skip and the
+/// failure path be tested without a display.
+fn paste_into(
+    state: &mut HomeState,
+    read: impl FnOnce() -> Result<Zeroizing<String>, clipboard::ClipboardError>,
+) {
     if state.modal.is_none() {
         return;
     }
-    if let Ok(text) = clipboard::paste_text() {
+    if let Ok(text) = read() {
         apply_paste(&text, state);
-    }
-}
-
-/// Routes a key to the menu or the active modal.
-fn dispatch_event<B: Backend>(
-    key: event::KeyEvent,
-    state: &mut HomeState,
-    terminal: &mut Terminal<B>,
-) -> io::Result<()> {
-    if state.modal.is_none() {
-        handle_home_key(key, state, terminal)
-    } else {
-        handle_modal_key(key, state, terminal)
     }
 }
 
@@ -241,7 +260,9 @@ mod tests {
     use crate::theming::{Palette, texts};
     use crate::vault::active_file::ActiveVaultState;
     use crate::vault::utils::Configuration;
-    use crate::vault::widget::modal::{About, BrowserModal, ConfigurationModal, ExportWizard};
+    use crate::vault::widget::modal::{
+        About, BrowserModal, ConfigurationModal, ExportWizard, UnlockPrompt,
+    };
     use crate::vault::widget::render::home_status_parts;
     use crossterm::event::KeyCode;
     use ratatui::backend::TestBackend;
@@ -734,5 +755,81 @@ mod tests {
         assert!(file_handling::decrypt_to_node(&data, "pw").is_ok());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── Clipboard paste routing ──
+
+    /// Both paste sources — a `Ctrl+V` read and a bracketed `Event::Paste` —
+    /// funnel through [`apply_paste`], which hands the text to the open modal.
+    #[test]
+    fn a_paste_lands_in_the_open_unlock_prompt() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Unlock(UnlockPrompt::new(
+            "/tmp/vault.age".to_string(),
+            vec![1, 2, 3],
+        )));
+
+        apply_paste("pw\r\nsecret", &mut state);
+
+        match &state.modal {
+            Some(Modal::Unlock(prompt)) => assert_eq!(prompt.typed().as_str(), "pwsecret"),
+            _ => panic!("the unlock prompt must stay open"),
+        }
+    }
+
+    #[test]
+    fn a_paste_with_no_modal_skips_the_clipboard_read() {
+        let mut state = HomeState::with_config(Configuration::default());
+        assert!(state.modal.is_none());
+        let mut read = false;
+
+        paste_into(&mut state, || {
+            read = true;
+            Ok(Zeroizing::new("ignored".to_string()))
+        });
+
+        assert!(!read, "the synchronous read must be skipped with no modal");
+    }
+
+    #[test]
+    fn a_failed_clipboard_read_leaves_the_prompt_untouched() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Unlock(UnlockPrompt::new(
+            "/tmp/vault.age".to_string(),
+            vec![1],
+        )));
+
+        paste_into(&mut state, || {
+            Err(clipboard::ClipboardError::Read("no display".to_string()))
+        });
+
+        match &state.modal {
+            Some(Modal::Unlock(prompt)) => assert_eq!(prompt.typed().as_str(), ""),
+            _ => panic!("the unlock prompt must stay open"),
+        }
+    }
+
+    fn paste_key() -> event::KeyEvent {
+        event::KeyEvent::new(KeyCode::Char('v'), event::KeyModifiers::CONTROL)
+    }
+
+    fn bare_v() -> event::KeyEvent {
+        event::KeyEvent::from(KeyCode::Char('v'))
+    }
+
+    #[test]
+    fn ctrl_v_classifies_as_paste_on_the_home_screen() {
+        let mut with_modal = HomeState::with_config(Configuration::default());
+        with_modal.modal = Some(Modal::Unlock(UnlockPrompt::new(
+            "/tmp/vault.age".to_string(),
+            vec![1],
+        )));
+
+        assert_eq!(key_route(&paste_key(), &with_modal), KeyRoute::Paste);
+        assert_eq!(key_route(&bare_v(), &with_modal), KeyRoute::Modal);
+
+        let menu = HomeState::with_config(Configuration::default());
+        assert_eq!(key_route(&paste_key(), &menu), KeyRoute::Paste);
+        assert_eq!(key_route(&bare_v(), &menu), KeyRoute::Menu);
     }
 }

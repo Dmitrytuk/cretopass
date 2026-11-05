@@ -1572,4 +1572,118 @@ mod tests {
                 .is_none()
         );
     }
+
+    // ── Clipboard paste per surface ──
+
+    fn ctrl(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    fn editing_password(value: &str) -> (Detail, TreeState) {
+        let mut node = Node::new("Root");
+        node.extra_fields.push(ExtraField {
+            field_type: FieldType::Password,
+            value: value.to_string(),
+        });
+        let detail = Detail::editing(&node);
+        (detail, TreeState::new(node))
+    }
+
+    fn scratch_text(detail: &Detail) -> Option<&str> {
+        detail
+            .form()
+            .and_then(|form| form.scratch.as_ref())
+            .map(|scratch| scratch.text.as_str())
+    }
+
+    #[test]
+    fn form_paste_joins_lines_into_the_input_scratch() {
+        let node = Node::new("Root");
+        let mut detail = Detail::editing(&node);
+        let mut state = TreeState::new(node);
+        let _ = detail.handle_key(key(KeyCode::Char('i')), &mut state); // Nav -> Input
+
+        detail.handle_paste("ab\r\ncd\nef", &mut state);
+
+        assert_eq!(scratch_text(&detail), Some("Rootabcdef"));
+    }
+
+    #[test]
+    fn a_paste_that_cleans_away_to_nothing_changes_nothing() {
+        let node = Node::new("Root");
+        let mut detail = Detail::editing(&node);
+        let mut state = TreeState::new(node);
+        let _ = detail.handle_key(key(KeyCode::Char('i')), &mut state);
+
+        detail.handle_paste("\r\n", &mut state);
+
+        assert_eq!(scratch_text(&detail), Some("Root"));
+    }
+
+    #[test]
+    fn custom_field_name_paste_appends_single_line_text() {
+        let mut detail = Detail::browse();
+        let mut state = TreeState::new(Node::new("Root"));
+        detail.popup = DetailPopup::CustomFieldName {
+            input: "Web".to_string(),
+        };
+
+        detail.handle_paste("Site\r\nLogin", &mut state);
+
+        match &detail.popup {
+            DetailPopup::CustomFieldName { input } => assert_eq!(input, "WebSiteLogin"),
+            other => panic!("expected the custom-name prompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn generator_length_paste_keeps_only_digits() {
+        let (mut detail, mut state) = editing_password("old");
+        detail.form_mut().select_row(&state.root, 1); // the Password field
+        let _ = detail.handle_key(key(KeyCode::Char('i')), &mut state); // Nav -> Input
+        let _ = detail.handle_key(ctrl(KeyCode::Char('g')), &mut state); // open the generator
+
+        detail.handle_paste("1a2b3", &mut state);
+
+        match &detail.popup {
+            DetailPopup::GeneratePassword(modal) => assert_eq!(modal.length_input, "123"),
+            other => panic!("expected the password generator, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn generator_length_paste_is_capped_at_three_digits() {
+        let (mut detail, mut state) = editing_password("old");
+        detail.form_mut().select_row(&state.root, 1);
+        let _ = detail.handle_key(key(KeyCode::Char('i')), &mut state);
+        let _ = detail.handle_key(ctrl(KeyCode::Char('g')), &mut state);
+
+        detail.handle_paste("12345", &mut state);
+
+        match &detail.popup {
+            DetailPopup::GeneratePassword(modal) => assert_eq!(modal.length_input, "123"),
+            other => panic!("expected the password generator, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn generator_paste_on_another_row_changes_nothing() {
+        let (mut detail, mut state) = editing_password("old");
+        detail.form_mut().select_row(&state.root, 1);
+        let _ = detail.handle_key(key(KeyCode::Char('i')), &mut state);
+        let _ = detail.handle_key(ctrl(KeyCode::Char('g')), &mut state);
+        // Move off the length row onto the symbols row.
+        let _ = detail.handle_key(key(KeyCode::Char('j')), &mut state);
+        let before = match &detail.popup {
+            DetailPopup::GeneratePassword(modal) => modal.length_input.clone(),
+            other => panic!("expected the password generator, got {other:?}"),
+        };
+
+        detail.handle_paste("123", &mut state);
+
+        match &detail.popup {
+            DetailPopup::GeneratePassword(modal) => assert_eq!(modal.length_input, before),
+            other => panic!("expected the password generator, got {other:?}"),
+        }
+    }
 }
