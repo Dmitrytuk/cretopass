@@ -29,8 +29,8 @@ pub use error::{FileHandlingError, SerdeContext};
 pub use export::{ExportFormat, export_tree, output_path, suggest_export_name};
 pub use file_process::{
     FileEntry, create_dir, create_secret_file, decrypt_to_node, delete_file, is_age_file,
-    is_dir_empty, list_dir, list_dir_including_hidden, probe_path_writable, read_file, rename_file,
-    save_tree, validate_encrypted_file, write_file,
+    is_dir_empty, list_dir, list_dir_including_hidden, looks_like_vault, probe_path_writable,
+    read_file, rename_file, save_tree, validate_encrypted_file, write_file,
 };
 pub use import::{ParseError, import_tree};
 pub use passphrase::Passphrase;

@@ -116,9 +116,8 @@ fn fb_hint(state: &FileBrowserState) -> String {
         parts.push(texts::FB_HINT_NEW);
     }
 
-    // Rename/delete hints only when a PWD-marked (age) file is selected.
+    // Rename/delete hints only when a non-directory row is selected.
     if let Some(entry) = state.entries.get(state.selected)
-        && entry.is_age_file
         && !entry.is_dir
         && state.mode.allows_entry_actions()
     {

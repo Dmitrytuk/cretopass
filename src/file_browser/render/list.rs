@@ -77,7 +77,7 @@ pub(super) fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBr
 
             let name_style = if entry.is_dir {
                 ElementStyle::FbDirName.style()
-            } else if entry.is_age_file {
+            } else if entry.looks_like_vault {
                 ElementStyle::FbAgeFileName.style()
             } else {
                 ElementStyle::FbRegularFileName.style()
@@ -89,12 +89,12 @@ pub(super) fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBr
                 name_style
             };
 
-            let marker = if entry.is_age_file && !entry.is_dir && state.mode.allows_entry_actions()
-            {
-                Icon::PwdMarker.as_str()
-            } else {
-                ""
-            };
+            let marker =
+                if entry.looks_like_vault && !entry.is_dir && state.mode.allows_entry_actions() {
+                    Icon::PwdMarker.as_str()
+                } else {
+                    ""
+                };
 
             let marker_style = if is_selected {
                 ElementStyle::FbPwdMarkerSelected.style()

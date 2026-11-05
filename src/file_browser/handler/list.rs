@@ -112,8 +112,9 @@ pub(super) fn handle_list_key(
         }
         KeyCode::Char('e') if state.mode.names_destination() => begin_destination(state),
         KeyCode::Char('r') => {
+            // Any non-directory row may be renamed: the name is not an age
+            // header check (browsing reads no contents).
             if let Some(entry) = state.entries.get(state.selected)
-                && entry.is_age_file
                 && !entry.is_dir
                 && state.mode.allows_entry_actions()
             {
@@ -126,7 +127,6 @@ pub(super) fn handle_list_key(
         }
         KeyCode::Char('d') | KeyCode::Delete => {
             if let Some(entry) = state.entries.get(state.selected)
-                && entry.is_age_file
                 && !entry.is_dir
                 && state.mode.allows_entry_actions()
             {
