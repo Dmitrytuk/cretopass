@@ -193,7 +193,7 @@ EOF
   <key>CFBundleExecutable</key><string>cretopass</string>
   <key>CFBundleIconFile</key><string>cretopass</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>${NEW_VERSION:-1.0.0}</string>
+  <key>CFBundleShortVersionString</key><string>${NEW_VERSION:-1.1.0}</string>
 </dict>
 </plist>
 EOF

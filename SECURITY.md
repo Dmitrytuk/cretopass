@@ -22,9 +22,9 @@ If you can, include:
 
 ## Supported versions
 
-cretopass is pre-1.0 and distributed as a single binary. Only the latest
-release is supported, so please reproduce against the newest version before
-reporting.
+cretopass ships as a single binary and follows Semantic Versioning. Only the
+latest `1.x` release is supported, so please reproduce against the newest
+version before reporting.
 
 ## Scope
 
