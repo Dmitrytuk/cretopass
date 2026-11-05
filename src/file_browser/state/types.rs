@@ -2,13 +2,6 @@
 
 use std::path::PathBuf;
 
-/// Filter controlling which entries are shown in the file list.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum FileFilter {
-    All,
-    PwdKeeperOnly,
-}
-
 /// Which part of the browser the user is currently interacting with.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FocusTarget {

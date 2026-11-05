@@ -7,7 +7,7 @@ use crate::file_handling::{ExportFormat, output_path, suggest_export_name, sugge
 
 use super::locations::{initial_location, list_entries};
 use super::mode::FileBrowserMode;
-use super::types::{AddPrefix, FileBrowserSession, FileFilter, FocusTarget, Location};
+use super::types::{AddPrefix, FileBrowserSession, FocusTarget, Location};
 
 /// Full state of the file browser modal.
 #[derive(Debug, Clone)]
@@ -16,7 +16,6 @@ pub struct FileBrowserState {
     pub current_dir: PathBuf,
     pub entries: Vec<FileEntry>,
     pub selected: usize,
-    pub filter: FileFilter,
     pub search_query: String,
     pub search_active: bool,
     pub creating_name: String,
@@ -64,7 +63,6 @@ impl FileBrowserState {
             current_dir,
             entries,
             selected: 0,
-            filter: FileFilter::All,
             search_query: String::new(),
             search_active: false,
             creating_name: String::new(),
@@ -194,25 +192,18 @@ impl FileBrowserState {
         }
     }
 
-    /// Number of entries after applying the current filter and search query.
+    /// Number of entries after applying the current search query.
     pub fn filtered_len(&self) -> usize {
         self.filtered_indices().len()
     }
 
-    /// Returns indices into `self.entries` that pass the current filter + search.
+    /// Returns indices into `self.entries` that pass the current search.
     pub fn filtered_indices(&self) -> Vec<usize> {
         let query = self.search_query.to_lowercase();
         self.entries
             .iter()
             .enumerate()
-            .filter(|(_, e)| {
-                let passes_filter = match self.filter {
-                    FileFilter::All => true,
-                    FileFilter::PwdKeeperOnly => e.is_age_file,
-                };
-                let passes_search = query.is_empty() || e.name.to_lowercase().contains(&query);
-                passes_filter && passes_search
-            })
+            .filter(|(_, e)| query.is_empty() || e.name.to_lowercase().contains(&query))
             .map(|(i, _)| i)
             .collect()
     }

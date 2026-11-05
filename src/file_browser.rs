@@ -7,5 +7,5 @@ pub use handler::handle_key;
 pub use render::render_file_browser;
 pub(crate) use render::status_parts;
 pub use state::{
-    FileBrowserAction, FileBrowserMode, FileBrowserSession, FileBrowserState, FileFilter, Location,
+    FileBrowserAction, FileBrowserMode, FileBrowserSession, FileBrowserState, Location,
 };

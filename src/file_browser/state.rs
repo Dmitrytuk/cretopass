@@ -13,6 +13,4 @@ mod types;
 pub use browser::FileBrowserState;
 pub use locations::{build_locations, list_entries, preselect_location};
 pub use mode::FileBrowserMode;
-pub use types::{
-    AddPrefix, FileBrowserAction, FileBrowserSession, FileFilter, FocusTarget, Location,
-};
+pub use types::{AddPrefix, FileBrowserAction, FileBrowserSession, FocusTarget, Location};

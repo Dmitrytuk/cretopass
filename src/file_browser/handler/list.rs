@@ -1,11 +1,10 @@
-//! The File Browser's list keys: navigation, entering directories, the filter
-//! toggle, the `a` add prefix and the `r`/`d` file actions.
+//! The File Browser's list keys: navigation, entering directories, the `a` add
+//! prefix and the `r`/`d` file actions.
 
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::file_browser::state::{
-    AddPrefix, FileBrowserAction, FileBrowserMode, FileBrowserState, FileFilter, FocusTarget,
-    list_entries,
+    AddPrefix, FileBrowserAction, FileBrowserMode, FileBrowserState, FocusTarget, list_entries,
 };
 use crate::file_handling;
 
@@ -22,13 +21,6 @@ pub(super) fn handle_list_key(
             KeyCode::Esc => Some(FileBrowserAction::Cancelled),
             KeyCode::Char('h') | KeyCode::Left => {
                 go_to_parent(state);
-                None
-            }
-            KeyCode::Char('f') => {
-                state.filter = match state.filter {
-                    FileFilter::All => FileFilter::PwdKeeperOnly,
-                    FileFilter::PwdKeeperOnly => FileFilter::All,
-                };
                 None
             }
             KeyCode::Char('a') if state.mode == FileBrowserMode::CreateFile => {
@@ -105,14 +97,6 @@ pub(super) fn handle_list_key(
         }
         KeyCode::Char('h') | KeyCode::Left => {
             go_to_parent(state);
-            None
-        }
-        KeyCode::Char('f') => {
-            state.filter = match state.filter {
-                FileFilter::All => FileFilter::PwdKeeperOnly,
-                FileFilter::PwdKeeperOnly => FileFilter::All,
-            };
-            state.clamp_selection();
             None
         }
         KeyCode::Char('a') if state.mode == FileBrowserMode::CreateFile => {
