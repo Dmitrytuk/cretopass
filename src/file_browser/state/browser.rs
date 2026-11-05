@@ -264,8 +264,8 @@ impl FileBrowserState {
 
     /// Records a path the user just deleted and refreshes the listing.
     ///
-    /// When the refreshed listing lands, [`Self::reconcile_pending_delete`]
-    /// checks whether the name survived: a sync client (or the OS) that still
+    /// When the refreshed listing lands, `reconcile_pending_delete` checks
+    /// whether the name survived: a sync client (or the OS) that still
     /// holds the handle keeps it visible — Windows reports the delete as
     /// "pending" — and the browser explains it rather than appearing to ignore
     /// the delete.

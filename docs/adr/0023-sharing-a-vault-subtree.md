@@ -57,7 +57,9 @@ Rules that follow from it:
 - **The extension is a label.** The bundle's file is written with `.cretopass`
   rather than `.age`; detection is content-based (the age magic header), so the
   extension only tells a human which app opens it. The create-new-file flow is
-  unchanged.
+  unchanged. (The File Browser's row hint is name-only and `.age`-based
+  ([0024](0024-browsing-never-reads-file-contents.md)), so a `.cretopass` bundle
+  is not highlighted in the list; opening it is still content-detected.)
 
 **Rejected alternatives:**
 
