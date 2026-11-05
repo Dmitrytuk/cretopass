@@ -5,7 +5,7 @@
 //! (see [`super::modal`]); this module performs what they cannot — anything
 //! outside the process or the modal.
 
-use std::io::{self, Write};
+use std::io;
 use std::path::Path;
 
 use ratatui::Frame;
@@ -15,6 +15,7 @@ use ratatui::backend::Backend;
 use super::busy::run_with_busy;
 use super::modal::TreeAction;
 use super::{ExportDestination, Modal, ShareDestination, SharePassphrase, TreeState};
+use crate::clipboard::{ClipboardError, copy_text};
 use crate::file_handling::share_tree;
 use crate::file_handling::{ExportFormat, export_tree};
 use crate::share::SharePassword;
@@ -36,7 +37,7 @@ pub(crate) fn execute<B: Backend>(
     match action {
         TreeAction::Close => Ok(()),
         TreeAction::CopyToClipboard { text } => {
-            copy_to_clipboard(&text);
+            report_copy(state, copy_text(&text));
             Ok(())
         }
         TreeAction::BeginExportDestination {
@@ -209,43 +210,24 @@ fn share<B: Backend>(
     Ok(())
 }
 
-/// Copies `text` to the system clipboard, trying the platform's helper in turn.
+/// Reports a clipboard copy's outcome as a result modal.
 ///
-/// A missing helper (headless, or a platform without one) is silently ignored:
-/// the copy is a best-effort convenience, not a failure the user must handle.
-fn copy_to_clipboard(text: &str) {
-    let cmds: &[&[&str]] = if cfg!(target_os = "macos") {
-        &[&["pbcopy"]]
-    } else if cfg!(target_os = "linux") {
-        &[
-            &["wl-copy"],
-            &["xclip", "-selection", "clipboard"],
-            &["xsel", "-b"],
-        ]
-    } else {
-        return;
-    };
-    for args in cmds {
-        if let Ok(mut child) = std::process::Command::new(args[0])
-            .args(&args[1..])
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-        {
-            // Take the pipe out of the child and let it drop at the end of the
-            // block: the helper (xclip/xsel) reads stdin to EOF before it takes
-            // the selection, so the write end must be closed before `wait`.
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(text.as_bytes());
-            }
-            let _ = child.wait();
-            break;
-        }
-    }
+/// Copying is the one clipboard action the Tree takes, and it is synchronous
+/// (`set_text` does not block), so no busy runner is needed. The produced alert
+/// replaces the Detail modal that asked for the copy: the verdict is the only
+/// thing left on screen, and a failure can no longer be mistaken for the old
+/// unconditional "✓ Copied!".
+fn report_copy(state: &mut TreeState, result: Result<(), ClipboardError>) {
+    state.modal = Some(match result {
+        Ok(()) => Modal::success(texts::COPY_CHECK.to_string()),
+        Err(error) => Modal::error(format!("{}{error}", texts::MSG_COPY_FAILED)),
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theming::AlertKind;
     use ratatui::backend::TestBackend;
 
     /// A renderer that does nothing: the export test only cares that the write
@@ -281,5 +263,45 @@ mod tests {
             state.operation_status.is_none(),
             "the busy status is cleared once the write finishes"
         );
+    }
+
+    #[test]
+    fn a_successful_copy_is_reported_as_success() {
+        let mut state = TreeState::new(Node::new("Root"));
+        report_copy(&mut state, Ok(()));
+
+        match &state.modal {
+            Some(Modal::Alert(alert)) => {
+                assert_eq!(alert.message, texts::COPY_CHECK);
+                assert_eq!(alert.kind, AlertKind::Success);
+            }
+            _ => panic!("a successful copy must be reported in a success alert"),
+        }
+    }
+
+    #[test]
+    fn a_failed_copy_is_reported_as_an_error_with_its_reason() {
+        let mut state = TreeState::new(Node::new("Root"));
+        report_copy(
+            &mut state,
+            Err(ClipboardError::Write("no clipboard server".to_string())),
+        );
+
+        match &state.modal {
+            Some(Modal::Alert(alert)) => {
+                assert!(
+                    alert.message.starts_with(texts::MSG_COPY_FAILED),
+                    "the failure prefix must lead the message: {}",
+                    alert.message
+                );
+                assert!(
+                    alert.message.contains("no clipboard server"),
+                    "the underlying reason must be shown: {}",
+                    alert.message
+                );
+                assert_eq!(alert.kind, AlertKind::Error);
+            }
+            _ => panic!("a failed copy must be reported in an error alert"),
+        }
     }
 }

@@ -59,3 +59,5 @@ map and cross-module data flow.
 - [0021 — Home modals report intents](./src/vault/docs/adr/0021-home-intent-contract.md) — Home modals are pure input returning a `HomeAction`; a single orchestrator performs the I/O and screen transitions
 - [0022 — User-chosen export destination](./docs/adr/0022-user-chosen-export-destination.md) — the File Browser names where an export is written, in both the Home and Tree flows; the export never overwrites a secret file
 - [0023 — Sharing a vault subtree](./docs/adr/0023-sharing-a-vault-subtree.md) — a share bundle: a re-encrypted node (with or without its children) or whole file plus a `HOW-TO-OPEN.txt` instruction, named by the File Browser and written atomically
+- [0024 — Browsing never reads file contents](./docs/adr/0024-browsing-never-reads-file-contents.md) — name-only listing and background directory/disk loaders so a slow or hung filesystem cannot freeze the TUI
+- [0025 — Clipboard gateway](./docs/adr/0025-clipboard-gateway.md) — `arboard` on every platform with a command-line helper fallback, a process-wide keep-alive handle, and an honest copy verdict
