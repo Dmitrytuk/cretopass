@@ -12,6 +12,7 @@ use std::time::Duration;
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::Terminal;
 use ratatui::backend::Backend;
+use zeroize::Zeroizing;
 
 mod chrome;
 mod menu;
@@ -64,7 +65,8 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 }
 
 /// Handles one terminal event: a `Ctrl+V` is serviced as a clipboard paste, a
-/// key press goes to the normal dispatcher, and anything else is ignored.
+/// term-native (bracketed) paste is applied to the active input, a key press
+/// goes to the normal dispatcher, and anything else is ignored.
 fn handle_event<B: Backend>(
     event: Event,
     state: &mut HomeState,
@@ -77,6 +79,12 @@ fn handle_event<B: Backend>(
             } else {
                 dispatch_event(key, state, terminal)?;
             }
+        }
+        Event::Paste(text) => {
+            // The event buffer can hold a secret; wipe it on drop, like the
+            // `Ctrl+V` source does.
+            let text = Zeroizing::new(text);
+            apply_paste(&text, state);
         }
         _ => {}
     }

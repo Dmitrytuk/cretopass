@@ -144,6 +144,20 @@ pub fn run_app<B: Backend>(
                                 }
                             }
                         }
+                        Some(Ok(Event::Paste(text))) => {
+                            // A term-native paste arrives atomically as one event
+                            // once bracketed paste is enabled. It takes the same
+                            // path as `Ctrl+V`, but is ignored while a save
+                            // overlay owns the screen, exactly like a key press.
+                            if state.save_exit == SaveExit::None
+                                && state.save_state.overlay_message().is_none()
+                            {
+                                // The event buffer can hold a secret; wipe it on
+                                // drop, like the `Ctrl+V` source does.
+                                let text = Zeroizing::new(text);
+                                apply_paste(&text, state);
+                            }
+                        }
                         Some(Ok(Event::Resize(_, _))) => {}
                         Some(Ok(_)) => continue,
                         Some(Err(e)) => return Err(e),
