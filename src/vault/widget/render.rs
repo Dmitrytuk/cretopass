@@ -5,6 +5,7 @@
 
 use std::borrow::Cow;
 
+use crossterm::event::MouseButton;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
@@ -13,23 +14,27 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use crate::theming::{ElementStyle, Icon, paint_background, render_status_bar, texts};
 
 use super::modal::Modal;
-use super::state::HomeState; // ── Rendering ──
+use super::state::{HomeHit, HomeState}; // ── Rendering ──
 
 pub fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
     // Own the background: paint SURFACE across the whole screen first so the
     // terminal's own background never shows through.
     paint_background(frame, area);
 
+    state.hits.clear();
     render_home_window(frame, area, state);
 
-    // The File Browser renderer keeps its own viewport offsets, so it needs
-    // mutable access before the remaining modal arms borrow the state.
-    if let Some(Modal::FileBrowser(browser)) = &mut state.modal {
+    // The modal is taken out for the frame: its renderer keeps its own viewport
+    // offsets (the File Browser) and records its own clickable rows, so it needs
+    // mutable access.
+    let mut modal = state.modal.take();
+    if let Some(Modal::FileBrowser(browser)) = &mut modal {
         browser.render(frame, area);
+        state.modal = modal;
         return;
     }
 
-    match &state.modal {
+    match &mut modal {
         Some(Modal::FileBrowser(_)) => {}
         Some(Modal::Alert(alert)) => alert.render(frame, area),
         Some(Modal::About(about)) => about.render(frame, area),
@@ -46,9 +51,10 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
         }
         None => {}
     }
+    state.modal = modal;
 }
 
-pub(super) fn render_home_window(frame: &mut Frame, area: Rect, state: &HomeState) {
+pub(super) fn render_home_window(frame: &mut Frame, area: Rect, state: &mut HomeState) {
     let layout = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
 
     let base_title = state
@@ -142,6 +148,34 @@ pub(super) fn render_home_window(frame: &mut Frame, area: Rect, state: &HomeStat
             format!("{}{}", prefix, display),
             style,
         )));
+    }
+
+    // Record the menu and recent rows. They sit one blank line below the block's
+    // top: menu item `i` on line `1 + i`, and the recents after a blank, the
+    // section header, and another blank. Only rows inside the drawn window can
+    // be clicked.
+    let menu_len = texts::MENU_ITEMS.len();
+    let visible_menu = menu_len.min(inner.height.saturating_sub(1) as usize);
+    for i in 0..visible_menu {
+        let rect = Rect::new(inner.x, inner.y + 1 + i as u16, inner.width, 1);
+        state
+            .hits
+            .push(rect, MouseButton::Left, HomeHit::MenuItem(i));
+    }
+    let recent_rows = inner
+        .height
+        .saturating_sub(4 + u16::try_from(menu_len).unwrap_or(u16::MAX));
+    let visible_recent = state.config.recent_files.len().min(recent_rows as usize);
+    for j in 0..visible_recent {
+        let rect = Rect::new(
+            inner.x,
+            inner.y + 4 + menu_len as u16 + j as u16,
+            inner.width,
+            1,
+        );
+        state
+            .hits
+            .push(rect, MouseButton::Left, HomeHit::MenuItem(menu_len + j));
     }
 
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);

@@ -13,4 +13,5 @@ mod types;
 
 pub use browser::FileBrowserState;
 pub use mode::FileBrowserMode;
+pub(crate) use types::BrowserHit;
 pub use types::{AddPrefix, FileBrowserAction, FileBrowserSession, FocusTarget, Location};

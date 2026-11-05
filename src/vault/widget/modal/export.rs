@@ -6,7 +6,7 @@
 
 use std::borrow::Cow;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
@@ -14,6 +14,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
 use crate::file_handling::ExportFormat;
+use crate::hitbox::{HitMap, is_left};
 use crate::theming::{Action, ElementStyle, Icon, texts};
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
 
@@ -24,12 +25,17 @@ const FORMATS: [ExportFormat; 3] = [ExportFormat::Json, ExportFormat::Xml, Expor
 pub struct ExportWizard {
     /// Focused row of the [`texts::EXPORT_TYPE_ITEMS`] list.
     index: usize,
+    /// The clickable format rows recorded by the renderer.
+    hits: HitMap<usize>,
 }
 
 impl ExportWizard {
     /// A wizard with the first format highlighted.
     pub fn new() -> Self {
-        Self { index: 0 }
+        Self {
+            index: 0,
+            hits: HitMap::default(),
+        }
     }
 
     /// `j`/`k` and `1`-`9` move through the formats, and `Enter` asks for the
@@ -57,8 +63,30 @@ impl ExportWizard {
         }
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
-        render_format_list(frame, area, self.index);
+    /// A left click on a format row selects it, or on a repeat chooses it.
+    pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) -> Option<HomeAction> {
+        if !is_left(button) {
+            return None;
+        }
+        let row = self.hits.hit(x, y, button)?;
+        let count = FORMATS.len();
+        if row >= count {
+            return None;
+        }
+        let was_selected = self.index == row;
+        self.index = row;
+        if was_selected {
+            Some(HomeAction::BeginExportDestination {
+                format: FORMATS[row],
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+        self.hits.clear();
+        render_format_list(frame, area, self.index, &mut self.hits);
     }
 
     pub fn status_parts(&self) -> (&'static str, ElementStyle, Cow<'_, str>) {
@@ -70,7 +98,7 @@ impl ExportWizard {
     }
 }
 
-fn render_format_list(frame: &mut Frame, area: Rect, selected: usize) {
+fn render_format_list(frame: &mut Frame, area: Rect, selected: usize, hits: &mut HitMap<usize>) {
     let overlay_area = make_overlay(area, 9);
     let block = Block::default()
         .title(texts::EXPORT_SELECT_TITLE)
@@ -99,6 +127,15 @@ fn render_format_list(frame: &mut Frame, area: Rect, selected: usize) {
     }
 
     lines.push(Line::from(""));
+
+    let inner = block.inner(overlay_area);
+    let visible = texts::EXPORT_TYPE_ITEMS
+        .len()
+        .min(inner.height.saturating_sub(1) as usize);
+    for i in 0..visible {
+        let rect = Rect::new(inner.x, inner.y + 1 + i as u16, inner.width, 1);
+        hits.push(rect, MouseButton::Left, i);
+    }
 
     paint_overlay(
         frame,

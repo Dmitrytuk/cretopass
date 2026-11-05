@@ -31,7 +31,7 @@ pub use export::ExportWizard;
 pub use share::SharePassphrase;
 pub use unlock::UnlockPrompt;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton};
 
 use crate::file_handling::ExportFormat;
 use crate::share::SharePassword;
@@ -190,6 +190,39 @@ impl Modal {
             | Self::Configuration(_)
             | Self::Confirmation(_)
             | Self::Export(_) => {}
+        }
+    }
+
+    /// Applies a click at `(x, y)`: the modal hit-tests it against the regions
+    /// its renderer recorded and reports what the user asked for, exactly as
+    /// [`Modal::handle_key`] does.
+    ///
+    /// A password prompt only moves the focus between its fields, and a
+    /// confirmation takes no clicks at all, so both report `None`.
+    pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) -> Option<HomeAction> {
+        match self {
+            Self::About(about) => about.handle_click(button, x, y),
+            Self::Alert(alert) => alert.handle_click(button, x, y),
+            Self::Unlock(prompt) => {
+                prompt.handle_click(button, x, y);
+                None
+            }
+            Self::CreateSecret(prompt) => {
+                prompt.handle_click(button, x, y);
+                None
+            }
+            Self::ChangePassword(prompt) => {
+                prompt.handle_click(button, x, y);
+                None
+            }
+            Self::SharePassphrase(prompt) => {
+                prompt.handle_click(button, x, y);
+                None
+            }
+            Self::Configuration(modal) => modal.handle_click(button, x, y),
+            Self::Export(wizard) => wizard.handle_click(button, x, y),
+            Self::Confirmation(_) => None,
+            Self::FileBrowser(browser) => browser.handle_click(button, x, y),
         }
     }
 }

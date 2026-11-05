@@ -96,6 +96,13 @@ impl Passphrase {
         &self.fields
     }
 
+    /// Focuses the field at `index`, ignoring an out-of-range index.
+    ///
+    /// Used by the screens to turn a click on a field row into a focus change.
+    pub fn focus(&mut self, index: usize) {
+        self.fields.focus(index);
+    }
+
     /// Applies a dispatched key that edits the fields or moves between them.
     ///
     /// Cancel and Confirm are the screen's to interpret, so they are ignored

@@ -9,7 +9,7 @@
 use std::io;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, Event, KeyEventKind, MouseButton, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 use zeroize::Zeroizing;
@@ -24,6 +24,7 @@ mod state;
 pub use state::HomeState;
 
 use crate::clipboard;
+use crate::hitbox::is_left;
 use crate::theming::SPINNER_TICK;
 use crate::theming::Status;
 use crate::theming::{is_clipboard_paste, wheel_nav_key};
@@ -31,6 +32,7 @@ use crate::theming::{is_clipboard_paste, wheel_nav_key};
 use menu::handle_home_key;
 use modal::Modal;
 use render::render;
+use state::HomeHit;
 
 pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let mut state = HomeState::new();
@@ -115,27 +117,70 @@ fn handle_event<B: Backend>(
     Ok(())
 }
 
-/// Applies a mouse wheel tick as the `Up`/`Down` navigation key: the menu when
-/// no modal is open, the modal's own list otherwise. Every other mouse event is
-/// ignored (clicks are hit-tested on each screen, not translated here).
+/// Applies a mouse event.
 ///
-/// Ignored while a dismiss overlay (About or an Alert) is open — the wheel must
-/// never be the key that closes it.
+/// A wheel tick moves the menu or the modal's own list; a left click is
+/// hit-tested. Ignored while a dismiss overlay (About or an Alert) is open only
+/// for the wheel — the wheel must never be the key that closes it, while a click
+/// *does* dismiss it.
 fn handle_mouse<B: Backend>(
     mouse: event::MouseEvent,
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
-    if dismiss_overlay_open(state) {
+    match mouse.kind {
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            if dismiss_overlay_open(state) {
+                return Ok(());
+            }
+            if let Some(key) = wheel_nav_key(&mouse) {
+                match key_route(&key, state) {
+                    // A wheel tick carries no modifiers, so it is never the paste chord.
+                    KeyRoute::Paste => {}
+                    KeyRoute::Menu => handle_home_key(key, state, terminal)?,
+                    KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
+                }
+            }
+        }
+        MouseEventKind::Down(button) => {
+            handle_click(button, mouse.column, mouse.row, state, terminal)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Turns a left click into the action it stands for.
+///
+/// The active modal owns the screen: a click goes to it, or does nothing. With
+/// no modal, a menu or recent-file row is selected and activated in one gesture,
+/// matching the keyboard's `Enter`.
+fn handle_click<B: Backend>(
+    button: MouseButton,
+    x: u16,
+    y: u16,
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
+    if let Some(mut modal) = state.modal.take() {
+        return match modal.handle_click(button, x, y) {
+            None => {
+                state.modal = Some(modal);
+                Ok(())
+            }
+            Some(action) => orchestrator::execute(state, terminal, action, Some(modal)),
+        };
+    }
+    if !is_left(button) {
         return Ok(());
     }
-    if let Some(key) = wheel_nav_key(&mouse) {
-        match key_route(&key, state) {
-            // A wheel tick carries no modifiers, so it is never the paste chord.
-            KeyRoute::Paste => {}
-            KeyRoute::Menu => handle_home_key(key, state, terminal)?,
-            KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
-        }
+    if let Some(HomeHit::MenuItem(index)) = state.hits.hit(x, y, button) {
+        state.selected = index;
+        handle_home_key(
+            event::KeyEvent::new(event::KeyCode::Enter, event::KeyModifiers::NONE),
+            state,
+            terminal,
+        )?;
     }
     Ok(())
 }
@@ -949,5 +994,62 @@ mod tests {
             matches!(state.modal, Some(Modal::Confirmation(_))),
             "the wheel must not be read as declining"
         );
+    }
+
+    #[test]
+    fn a_click_on_a_menu_row_selects_and_activates_it() {
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, &mut state);
+            })
+            .unwrap();
+
+        // Row 2 is "Configuration", which opens a modal without any I/O.
+        let (x, y) = (0..24u16)
+            .flat_map(|y| (0..80u16).map(move |x| (x, y)))
+            .find(|&(x, y)| {
+                state.hits.hit(x, y, event::MouseButton::Left) == Some(HomeHit::MenuItem(2))
+            })
+            .expect("the Configuration row must be clickable");
+
+        handle_click(event::MouseButton::Left, x, y, &mut state, &mut terminal).unwrap();
+
+        assert_eq!(state.selected, 2, "the click moved the menu cursor");
+        assert!(
+            matches!(state.modal, Some(Modal::Configuration(_))),
+            "a single click activates the row"
+        );
+    }
+
+    #[test]
+    fn a_short_home_window_records_no_hits_outside_it() {
+        // A window with far more menu/recent rows than fit on a 6-row terminal:
+        // the rows off the window are never drawn, and must not be clickable.
+        let config = Configuration {
+            recent_files: (0..20).map(|i| format!("/tmp/r{i}.age")).collect(),
+            ..Configuration::default()
+        };
+        let mut state = HomeState::with_config(config);
+        let mut terminal = Terminal::new(TestBackend::new(80, 6)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, &mut state);
+            })
+            .unwrap();
+
+        for x in 0..80u16 {
+            for y in 0..6u16 {
+                if state.hits.hit(x, y, event::MouseButton::Left).is_some() {
+                    assert!(
+                        y < 5,
+                        "a menu row was clickable outside the window at ({x}, {y})"
+                    );
+                }
+            }
+        }
     }
 }

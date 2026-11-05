@@ -5,13 +5,14 @@
 
 use std::borrow::Cow;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use super::HomeAction;
+use crate::hitbox::is_left;
 use crate::theming::{ElementStyle, texts};
 use crate::vault::widget::chrome::paint_overlay;
 
@@ -22,6 +23,11 @@ impl About {
     /// Any key dismisses the card: there is nothing to type into it.
     pub fn handle_key(&mut self, _key: KeyEvent) -> Option<HomeAction> {
         Some(HomeAction::Close)
+    }
+
+    /// A left click anywhere dismisses the card; the right button is ignored.
+    pub fn handle_click(&mut self, button: MouseButton, _x: u16, _y: u16) -> Option<HomeAction> {
+        is_left(button).then_some(HomeAction::Close)
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {

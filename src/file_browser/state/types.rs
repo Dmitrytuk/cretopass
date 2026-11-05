@@ -12,6 +12,15 @@ pub enum FocusTarget {
     Locations,
 }
 
+/// What a click on the File Browser means, recorded by its renderer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BrowserHit {
+    /// A file-list row, by its index in `entries` (before search filtering).
+    Entry(usize),
+    /// A Locations overlay row, by its index in `locations`.
+    Location(usize),
+}
+
 /// Transient prefix state for the `a` key in `CreateFile` mode.
 ///
 /// The first `a` arms the prefix; the next key decides the action (`f` for a

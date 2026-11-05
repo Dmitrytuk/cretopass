@@ -37,7 +37,7 @@ pub(crate) use detail::{
     picker_items, render_extra_field_line,
 };
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton};
 
 use super::TreeState;
 use crate::file_handling::ExportFormat;
@@ -156,6 +156,31 @@ impl Modal {
             Self::ShareDestination(destination) => destination.handle_paste(text),
             Self::SharePassphrase(prompt) => prompt.handle_paste(text),
             Self::Help(_) | Self::Alert(_) | Self::Export(_) | Self::Share(_) => {}
+        }
+    }
+
+    /// Applies a click at `(x, y)`: the modal hit-tests it against the regions its
+    /// renderer recorded and reports what the user asked for, exactly as
+    /// [`Modal::handle_key`] does.
+    ///
+    /// Help and Alert dismiss anywhere, so they need no recorded region; a
+    /// confirmation has no click target and reports `None`.
+    pub(crate) fn handle_click(
+        &mut self,
+        button: MouseButton,
+        x: u16,
+        y: u16,
+        state: &mut TreeState,
+    ) -> Option<TreeAction> {
+        match self {
+            Self::Help(help) => help.handle_click(button, x, y, state),
+            Self::Alert(alert) => alert.handle_click(button, x, y, state),
+            Self::Detail(detail) => detail.handle_click(button, x, y, state),
+            Self::Export(wizard) => wizard.handle_click(button, x, y, state),
+            Self::ExportDestination(destination) => destination.handle_click(button, x, y, state),
+            Self::Share(wizard) => wizard.handle_click(button, x, y, state),
+            Self::ShareDestination(destination) => destination.handle_click(button, x, y, state),
+            Self::SharePassphrase(prompt) => prompt.handle_click(button, x, y, state),
         }
     }
 }

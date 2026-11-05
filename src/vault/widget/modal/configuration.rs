@@ -6,13 +6,14 @@
 
 use std::borrow::Cow;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
+use crate::hitbox::{HitMap, is_left};
 use crate::theming::{Action, ElementStyle, Icon, scheme_label, texts};
 use crate::vault::utils::Configuration;
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
@@ -37,12 +38,17 @@ const SETTINGS: [Setting; 3] = [
 /// The Home configuration dialog.
 pub struct ConfigurationModal {
     selected: usize,
+    /// The clickable setting rows recorded by the renderer.
+    hits: HitMap<usize>,
 }
 
 impl ConfigurationModal {
     /// A dialog with the first setting highlighted.
     pub fn new() -> Self {
-        Self { selected: 0 }
+        Self {
+            selected: 0,
+            hits: HitMap::default(),
+        }
     }
 
     /// `j`/`k` move between settings, `Space` toggles the highlighted one,
@@ -64,7 +70,26 @@ impl ConfigurationModal {
         }
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect, config: &Configuration) {
+    /// A left click on a row selects it, or on a repeat toggles it.
+    pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) -> Option<HomeAction> {
+        if !is_left(button) {
+            return None;
+        }
+        let row = self.hits.hit(x, y, button)?;
+        if row >= SETTINGS.len() {
+            return None;
+        }
+        let was_selected = self.selected == row;
+        self.selected = row;
+        if was_selected {
+            Some(HomeAction::ToggleSetting(SETTINGS[row]))
+        } else {
+            None
+        }
+    }
+
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, config: &Configuration) {
+        self.hits.clear();
         let overlay_area = make_overlay(area, 10);
         let block = Block::default()
             .title(texts::CONFIG_TITLE)
@@ -90,6 +115,13 @@ impl ConfigurationModal {
         }
 
         lines.push(Line::from(""));
+
+        let inner = block.inner(overlay_area);
+        let visible = SETTINGS.len().min(inner.height.saturating_sub(1) as usize);
+        for i in 0..visible {
+            let rect = Rect::new(inner.x, inner.y + 1 + i as u16, inner.width, 1);
+            self.hits.push(rect, MouseButton::Left, i);
+        }
 
         paint_overlay(
             frame,
@@ -203,6 +235,28 @@ mod tests {
         assert!(matches!(
             modal.handle_key(key(KeyCode::Esc)),
             Some(HomeAction::DiscardConfig)
+        ));
+    }
+
+    #[test]
+    fn a_repeat_click_toggles_the_setting() {
+        let mut modal = ConfigurationModal::new();
+        let config = Configuration::default();
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| modal.render(frame, frame.area(), &config))
+            .unwrap();
+
+        let (x, y) = (0..24u16)
+            .flat_map(|y| (0..80u16).map(move |x| (x, y)))
+            .find(|&(x, y)| modal.hits.hit(x, y, MouseButton::Left) == Some(1))
+            .expect("the second setting must be clickable");
+
+        assert!(modal.handle_click(MouseButton::Left, x, y).is_none());
+        assert!(matches!(
+            modal.handle_click(MouseButton::Left, x, y),
+            Some(HomeAction::ToggleSetting(_))
         ));
     }
 }

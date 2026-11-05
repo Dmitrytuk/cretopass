@@ -5,7 +5,7 @@
 //! confirm screen (`y`/Enter proceeds, any other key returns to the fields),
 //! mirroring the Detail modal's field-delete confirmation.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
@@ -14,6 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use super::TreeAction;
 use super::chrome::centered_rect;
 use crate::cursor::password_field_spans;
+use crate::hitbox::{HitMap, is_left};
 use crate::share::{Passphrase, PassphraseSubmit, SharePassword};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::Node;
@@ -38,6 +39,8 @@ pub(crate) struct SharePassphrase {
     passphrase: Passphrase,
     /// Whether the "share without a password?" confirmation is showing.
     confirming_empty: bool,
+    /// The clickable field regions recorded by the renderer.
+    hits: HitMap<usize>,
 }
 
 impl SharePassphrase {
@@ -50,6 +53,7 @@ impl SharePassphrase {
             dest,
             passphrase: Passphrase::new(),
             confirming_empty: false,
+            hits: HitMap::default(),
         }
     }
 
@@ -101,6 +105,24 @@ impl SharePassphrase {
         self.passphrase.paste(text);
     }
 
+    /// A left click on a field row focuses that field; the right button is
+    /// ignored, and the passwordless confirmation takes no clicks.
+    pub(crate) fn handle_click(
+        &mut self,
+        button: MouseButton,
+        x: u16,
+        y: u16,
+        _state: &mut TreeState,
+    ) -> Option<TreeAction> {
+        if !is_left(button) || self.confirming_empty {
+            return None;
+        }
+        if let Some(index) = self.hits.hit(x, y, button) {
+            self.passphrase.focus(index);
+        }
+        None
+    }
+
     /// The share request for the typed `passphrase`.
     fn action(&self, passphrase: SharePassword) -> TreeAction {
         TreeAction::Share {
@@ -112,7 +134,8 @@ impl SharePassphrase {
     }
 
     /// Draws the password step, or the passwordless confirmation over it.
-    pub(crate) fn render(&self, frame: &mut Frame, area: Rect) {
+    pub(crate) fn render(&mut self, frame: &mut Frame, area: Rect) {
+        self.hits.clear();
         if self.confirming_empty {
             self.render_empty_confirm(frame, area);
             return;
@@ -164,6 +187,13 @@ impl SharePassphrase {
         frame.render_widget(Clear, overlay_area);
         frame.render_widget(block, overlay_area);
         frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+
+        // Lines: blank, file, blank, then one line per field.
+        let visible = LABELS.len().min(inner.height.saturating_sub(3) as usize);
+        for index in 0..visible {
+            let rect = Rect::new(inner.x, inner.y + 3 + index as u16, inner.width, 1);
+            self.hits.push(rect, MouseButton::Left, index);
+        }
     }
 
     /// Draws the "share without a password?" confirmation.

@@ -9,9 +9,10 @@ use zeroize::Zeroizing;
 
 use super::HomeAction;
 use crate::cursor::{FieldEdit, SecretFieldGroup, secret_field_spans};
+use crate::hitbox::{HitMap, is_left};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{display_path, make_overlay, paint_overlay};
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
@@ -23,6 +24,8 @@ pub struct UnlockPrompt {
     file_data: Vec<u8>,
     fields: SecretFieldGroup,
     error: Option<String>,
+    /// The clickable field rows recorded by the renderer.
+    hits: HitMap<usize>,
 }
 
 impl UnlockPrompt {
@@ -33,6 +36,7 @@ impl UnlockPrompt {
             file_data,
             fields: SecretFieldGroup::with_fields(1),
             error: None,
+            hits: HitMap::default(),
         }
     }
 
@@ -80,7 +84,18 @@ impl UnlockPrompt {
         }
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect, display_full_path: bool) {
+    /// A left click on the field focuses it; the right button is ignored.
+    pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) {
+        if !is_left(button) {
+            return;
+        }
+        if let Some(index) = self.hits.hit(x, y, button) {
+            self.fields.focus(index);
+        }
+    }
+
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, display_full_path: bool) {
+        self.hits.clear();
         let shown_path = display_path(&self.file_path, display_full_path);
 
         let overlay_area = make_overlay(area, if self.error.is_some() { 8 } else { 7 });
@@ -116,6 +131,15 @@ impl UnlockPrompt {
         }
 
         lines.push(Line::from(""));
+
+        let inner = block.inner(overlay_area);
+        if inner.height > 3 {
+            self.hits.push(
+                Rect::new(inner.x, inner.y + 3, inner.width, 1),
+                MouseButton::Left,
+                0,
+            );
+        }
 
         paint_overlay(
             frame,

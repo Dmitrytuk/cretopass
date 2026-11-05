@@ -14,9 +14,11 @@ use crate::theming::{
 use crate::tree::node::Node;
 use crate::tree::widget::{
     AddPosition, Detail, ExportWizard, Help, InputMode, Modal, SaveExit, SaveState, ShareWizard,
-    TreeAction, TreeState, TreeWidget, centered_rect, execute,
+    TreeAction, TreeHit, TreeState, TreeWidget, centered_rect, execute,
 };
-use crossterm::event::{self, Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -486,32 +488,44 @@ fn handle_key_press<B: Backend>(
         KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
         KeyRoute::Navigation => dispatch_key(key, state),
     }
-
-    if let Some(worker) = autosave {
-        match autosave_action(state.modified, worker.is_running(), &state.save_state) {
-            AutosaveAction::Submit => {
-                state.modified = false;
-                *submitted = worker.submit(state.root.clone());
-                state.save_state = SaveState::Saving;
-            }
-            AutosaveAction::ReportWorkerStopped => {
-                state.save_state = SaveState::Failed {
-                    error: SaveError::WorkerStopped,
-                    acknowledged: false,
-                };
-            }
-            AutosaveAction::Idle => {}
-        }
-    }
+    flush_autosave(state, autosave, submitted);
     Ok(())
 }
 
-/// Applies a mouse event: a wheel tick scrolls the active list, anything else is
-/// ignored (clicks are hit-tested on each screen, not translated here).
+/// Hands a committed change to the autosave worker, showing `Saving` until it
+/// has been submitted.
+fn flush_autosave(
+    state: &mut TreeState,
+    autosave: &mut Option<Autosave<Node>>,
+    submitted: &mut u64,
+) {
+    let Some(worker) = autosave else {
+        return;
+    };
+    match autosave_action(state.modified, worker.is_running(), &state.save_state) {
+        AutosaveAction::Submit => {
+            state.modified = false;
+            *submitted = worker.submit(state.root.clone());
+            state.save_state = SaveState::Saving;
+        }
+        AutosaveAction::ReportWorkerStopped => {
+            state.save_state = SaveState::Failed {
+                error: SaveError::WorkerStopped,
+                acknowledged: false,
+            };
+        }
+        AutosaveAction::Idle => {}
+    }
+}
+
+/// Applies a mouse event.
 ///
-/// The wheel is skipped while a save overlay owns the screen — its keys answer a
-/// prompt, they do not navigate — and while a dismiss overlay (Help or an Alert)
-/// is open, because the wheel must never be the key that closes it.
+/// A wheel tick scrolls the active list through the same key path as the arrows;
+/// a left/right button press is hit-tested against the active modal or the tree
+/// rows. The save overlay owns the screen — its keys answer a prompt, they do
+/// not navigate — so every mouse event is ignored while it is up. The wheel is
+/// additionally skipped on a dismiss overlay (Help or an Alert), because it must
+/// never be the key that closes it; a click there *does* dismiss it.
 fn handle_mouse<B: Backend>(
     mouse: event::MouseEvent,
     state: &mut TreeState,
@@ -519,16 +533,99 @@ fn handle_mouse<B: Backend>(
     autosave: &mut Option<Autosave<Node>>,
     submitted: &mut u64,
 ) -> io::Result<()> {
-    if state.save_exit != SaveExit::None
-        || state.save_state.overlay_message().is_some()
-        || dismiss_overlay_open(state)
-    {
+    if state.save_exit != SaveExit::None || state.save_state.overlay_message().is_some() {
         return Ok(());
     }
-    if let Some(key) = wheel_nav_key(&mouse) {
-        handle_key_press(key, state, terminal, autosave, submitted)?;
+    match mouse.kind {
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            if dismiss_overlay_open(state) {
+                return Ok(());
+            }
+            if let Some(key) = wheel_nav_key(&mouse) {
+                handle_key_press(key, state, terminal, autosave, submitted)?;
+            }
+        }
+        MouseEventKind::Down(button) => {
+            handle_click(
+                button,
+                mouse.column,
+                mouse.row,
+                state,
+                terminal,
+                autosave,
+                submitted,
+            )?;
+        }
+        _ => {}
     }
     Ok(())
+}
+
+/// Turns a left/right button press into the action the click stands for.
+///
+/// The active modal owns the screen: a click goes to it, or does nothing. With
+/// no modal, the click is hit-tested against the tree rows; `Esc`-only modes
+/// (search and the prefixes) accept no clicks.
+fn handle_click<B: Backend>(
+    button: MouseButton,
+    x: u16,
+    y: u16,
+    state: &mut TreeState,
+    terminal: &mut Terminal<B>,
+    autosave: &mut Option<Autosave<Node>>,
+    submitted: &mut u64,
+) -> io::Result<()> {
+    if state.modal.is_some() {
+        handle_modal_click(button, x, y, state, terminal)?;
+    } else if matches!(state.mode, InputMode::Normal)
+        && let Some(target) = state.hits.hit(x, y, button)
+    {
+        apply_tree_hit(target, button, state);
+    }
+    flush_autosave(state, autosave, submitted);
+    Ok(())
+}
+
+/// Applies a click on a tree row.
+///
+/// The click always moves the selection to the clicked row first (the rule the
+/// whole mouse feature follows): a left click on a branch then toggles it, a
+/// left click on a leaf only selects it, and a right click opens the row's
+/// Detail — the same view `i` opens.
+fn apply_tree_hit(target: TreeHit, button: MouseButton, state: &mut TreeState) {
+    let TreeHit::Row(index) = target;
+    if index >= state.visible.len() {
+        return;
+    }
+    state.selected = index;
+    match button {
+        // A branch toggles through the same action its `Enter`/`Space` key uses.
+        MouseButton::Left if state.visible[index].is_parent => {
+            dispatch_action(Action::ToggleExpand, state)
+        }
+        MouseButton::Right => state.modal = Some(Modal::Detail(Box::new(Detail::browse()))),
+        _ => {}
+    }
+}
+
+/// Dispatches a click to the active modal, mirroring [`handle_modal_key`].
+fn handle_modal_click<B: Backend>(
+    button: MouseButton,
+    x: u16,
+    y: u16,
+    state: &mut TreeState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
+    let Some(mut modal) = state.modal.take() else {
+        return Ok(());
+    };
+    match modal.handle_click(button, x, y, state) {
+        None => {
+            state.modal = Some(modal);
+            Ok(())
+        }
+        Some(action) => run_modal_action(state, terminal, modal, action),
+    }
 }
 
 /// Whether a modal that closes on any key is open. The wheel must not be that
@@ -540,7 +637,7 @@ fn dismiss_overlay_open(state: &TreeState) -> bool {
 /// Dispatches a key event to the handler for the current input mode.
 fn dispatch_key(key: event::KeyEvent, state: &mut TreeState) {
     match &state.mode {
-        InputMode::Normal => handle_normal(key, state),
+        InputMode::Normal => dispatch_action(Action::from_normal(&key), state),
         InputMode::Search => handle_search(key, state),
         InputMode::PendingCut => handle_pending_cut(key, state),
         InputMode::PendingPaste => handle_pending_paste(key, state),
@@ -569,24 +666,36 @@ fn handle_modal_key<B: Backend>(
             state.modal = Some(modal);
             Ok(())
         }
-        Some(action) => {
-            // The File Browser remembers where it was for its next opening, the
-            // same way Home captures it when the browser reports an action.
-            match &modal {
-                Modal::ExportDestination(destination) => {
-                    state.browser_session = destination.session();
-                }
-                Modal::ShareDestination(destination) => {
-                    state.browser_session = destination.session();
-                }
-                _ => {}
-            }
-            let keeps_produced = !matches!(action, TreeAction::Close);
-            let result = execute(state, terminal, action, ui);
-            state.modal = retained_modal(keeps_produced, modal, state.modal.take());
-            result
-        }
+        Some(action) => run_modal_action(state, terminal, modal, action),
     }
+}
+
+/// Performs a modal action, identically for a key press and a click.
+///
+/// The File Browser remembers where it was for its next opening, the same way
+/// Home captures it when the browser reports an action. A `Close` leaves the slot
+/// as `execute` left it; any other action keeps the modal that produced it,
+/// unless `execute` installed a replacement (Export, Share and a copy all report
+/// their result as an Alert).
+fn run_modal_action<B: Backend>(
+    state: &mut TreeState,
+    terminal: &mut Terminal<B>,
+    modal: Modal,
+    action: TreeAction,
+) -> io::Result<()> {
+    match &modal {
+        Modal::ExportDestination(destination) => {
+            state.browser_session = destination.session();
+        }
+        Modal::ShareDestination(destination) => {
+            state.browser_session = destination.session();
+        }
+        _ => {}
+    }
+    let keeps_produced = !matches!(action, TreeAction::Close);
+    let result = execute(state, terminal, action, ui);
+    state.modal = retained_modal(keeps_produced, modal, state.modal.take());
+    result
 }
 
 /// The modal showing after a modal action runs.
@@ -640,8 +749,13 @@ fn is_leaf_selected(state: &TreeState) -> bool {
         .unwrap_or(false)
 }
 
-fn handle_normal(key: event::KeyEvent, state: &mut TreeState) {
-    match Action::from_normal(&key) {
+/// Performs a Normal-mode [`Action`] on the tree.
+///
+/// Split out from the key dispatch so a click can run the same code as its key:
+/// the tree's click handler maps a clicked row to an `Action` and calls this,
+/// exactly as the key dispatch does.
+fn dispatch_action(action: Action, state: &mut TreeState) {
+    match action {
         Action::Quit => {
             state.quit = true;
         }
@@ -871,7 +985,12 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
 
     let layout = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
 
-    TreeWidget::render(frame, layout[0], state);
+    // Take the hit map out for the frame, refill it, and put it back: this keeps
+    // the renderer's `&TreeState` borrow disjoint from the map, and a click next
+    // iteration reads the regions this frame drew.
+    let mut hits = std::mem::take(&mut state.hits);
+    hits.clear();
+    TreeWidget::render_with_hits(frame, layout[0], state, &mut hits);
 
     let (mode_str, mode_style, hint) = status_bar_parts(state);
     render_status_bar(
@@ -910,6 +1029,8 @@ fn ui(frame: &mut Frame, state: &mut TreeState) {
             }
         }
     }
+
+    state.hits = hits;
 }
 
 /// Maps the active tree mode (or a parked save overlay) to the unified
@@ -1178,6 +1299,12 @@ mod tests {
 
     fn handle_form(key: KeyEvent, state: &mut TreeState) {
         dispatch_key(key, state);
+    }
+
+    /// Drives a Normal-mode key through the shared action dispatch, the path the
+    /// event loop uses with no modal open.
+    fn handle_normal(key: KeyEvent, state: &mut TreeState) {
+        super::dispatch_action(Action::from_normal(&key), state);
     }
 
     fn handle_select_field_type(key: KeyEvent, state: &mut TreeState) {
@@ -2882,5 +3009,113 @@ mod tests {
 
         assert_eq!(state.selected, 0, "the parked overlay owns the screen");
         assert_eq!(state.save_exit, SaveExit::Blocked);
+    }
+
+    // ── Click hit-testing ──
+
+    /// Draws the tree screen so its renderer fills `state.hits`.
+    fn draw(state: &mut TreeState) {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| ui(f, state)).unwrap();
+    }
+
+    /// The first cell whose click resolves to `target` for `button`.
+    fn point_for(state: &TreeState, target: TreeHit, button: MouseButton) -> (u16, u16) {
+        for y in 0..24u16 {
+            for x in 0..80u16 {
+                if state.hits.hit(x, y, button) == Some(target) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("no hit region for {target:?}");
+    }
+
+    #[test]
+    fn a_left_click_on_a_branch_toggles_it() {
+        let mut state = state_with_a_child();
+        draw(&mut state);
+        let (x, y) = point_for(&state, TreeHit::Row(0), MouseButton::Left);
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        handle_click(
+            MouseButton::Left,
+            x,
+            y,
+            &mut state,
+            &mut terminal,
+            &mut None,
+            &mut 0,
+        )
+        .unwrap();
+
+        assert_eq!(state.visible.len(), 1, "the Root branch collapsed");
+        assert_eq!(state.selected, 0);
+    }
+
+    #[test]
+    fn a_left_click_on_a_leaf_only_selects_it() {
+        let mut state = state_with_a_child();
+        state.selected = 0;
+        draw(&mut state);
+        let (x, y) = point_for(&state, TreeHit::Row(1), MouseButton::Left);
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        handle_click(
+            MouseButton::Left,
+            x,
+            y,
+            &mut state,
+            &mut terminal,
+            &mut None,
+            &mut 0,
+        )
+        .unwrap();
+
+        assert_eq!(state.selected, 1, "the click moved the selection");
+        assert!(state.modal.is_none(), "a leaf click does not open Detail");
+        assert_eq!(state.visible.len(), 2, "the click changed no expansion");
+    }
+
+    #[test]
+    fn a_right_click_on_a_row_opens_detail() {
+        let mut state = state_with_a_child();
+        draw(&mut state);
+        let (x, y) = point_for(&state, TreeHit::Row(1), MouseButton::Right);
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        handle_click(
+            MouseButton::Right,
+            x,
+            y,
+            &mut state,
+            &mut terminal,
+            &mut None,
+            &mut 0,
+        )
+        .unwrap();
+
+        assert_eq!(state.selected, 1);
+        assert!(matches!(state.modal, Some(Modal::Detail(_))));
+    }
+
+    #[test]
+    fn a_left_click_dismisses_help() {
+        let mut state = state_with_a_child();
+        state.modal = Some(Modal::Help(Help));
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        handle_click(
+            MouseButton::Left,
+            5,
+            5,
+            &mut state,
+            &mut terminal,
+            &mut None,
+            &mut 0,
+        )
+        .unwrap();
+
+        assert!(state.modal.is_none(), "a click dismisses Help anywhere");
     }
 }

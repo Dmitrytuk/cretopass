@@ -9,6 +9,7 @@ pub mod cursor;
 pub mod file_browser;
 pub mod file_handling;
 pub mod generator;
+pub(crate) mod hitbox;
 pub(crate) mod share;
 pub(crate) mod terminal;
 pub mod theming;

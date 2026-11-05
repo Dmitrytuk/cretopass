@@ -209,6 +209,15 @@ impl SecretFieldGroup {
         self.focused = self.focused.saturating_sub(1);
     }
 
+    /// Focuses the field at `index`, ignoring an out-of-range index.
+    ///
+    /// Used by the screens to turn a click on a field row into a focus change.
+    pub fn focus(&mut self, index: usize) {
+        if index < self.fields.len() {
+            self.focused = index;
+        }
+    }
+
     /// Runs `action` on the focused field.
     pub fn apply(&mut self, action: impl FnOnce(&mut SecretField)) {
         if let Some(field) = self.fields.get_mut(self.focused) {

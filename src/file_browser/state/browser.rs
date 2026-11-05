@@ -6,11 +6,12 @@ use crate::file_handling::{
     DirLoader, DiskInfo, DiskLoader, ExportFormat, FileEntry, ListingOutcome, output_path,
     suggest_export_name, suggest_share_name,
 };
+use crate::hitbox::HitMap;
 use crate::theming::texts;
 
 use super::locations::{dirs_home, disk_locations, home_location, preselect_location};
 use super::mode::FileBrowserMode;
-use super::types::{AddPrefix, FileBrowserSession, FocusTarget, Location};
+use super::types::{AddPrefix, BrowserHit, FileBrowserSession, FocusTarget, Location};
 
 /// Full state of the file browser modal.
 ///
@@ -69,6 +70,8 @@ pub struct FileBrowserState {
     /// A path the user just deleted, awaiting the refreshed listing so the
     /// browser can tell whether the name actually disappeared.
     deleted_path: Option<PathBuf>,
+    /// The clickable rows the renderer recorded for the last frame.
+    pub(crate) hits: HitMap<BrowserHit>,
 }
 
 impl FileBrowserState {
@@ -163,6 +166,7 @@ impl FileBrowserState {
             previous: None,
             select_on_load: None,
             deleted_path: None,
+            hits: HitMap::default(),
         };
         state.loader.request(&dir, state.show_hidden);
         state

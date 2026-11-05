@@ -1,13 +1,14 @@
 //! The browser's centered popups: the Locations picker and the transient
 //! input / delete / overwrite / error dialogs.
 
+use crossterm::event::MouseButton;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::cursor::cursor_field_spans;
-use crate::file_browser::state::FileBrowserState;
+use crate::file_browser::state::{BrowserHit, FileBrowserState, FocusTarget};
 use crate::theming::{ElementStyle, Icon, texts};
 
 use super::chrome::{centered_popup, centered_popup_sized};
@@ -36,6 +37,19 @@ pub(super) fn render_locations_popup(frame: &mut Frame, area: Rect, state: &mut 
         list_height,
     );
     let scroll = state.location_scroll;
+
+    // Record the clickable rows before the borrowing `rows` build below.
+    if state.focus == FocusTarget::Locations {
+        for (offset, index) in (scroll..scroll + list_height).enumerate() {
+            if index >= state.locations.len() {
+                break;
+            }
+            let rect = Rect::new(inner.x, inner.y + offset as u16, inner.width, 1);
+            state
+                .hits
+                .push(rect, MouseButton::Left, BrowserHit::Location(index));
+        }
+    }
 
     let label_width = state
         .locations
