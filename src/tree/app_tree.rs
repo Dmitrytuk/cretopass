@@ -497,9 +497,11 @@ fn handle_modal_key<B: Backend>(
 ///
 /// A `Close` action leaves the slot as `execute` left it (normally empty). Any
 /// other action keeps the modal that produced it, unless `execute` installed a
-/// replacement (Export reports its result as an Alert). Keeping the produced
-/// modal is what lets the Detail modal stay up to show its transient "copied"
-/// alert.
+/// replacement (Export, Share and a copy all report their result as an Alert).
+/// Keeping the produced modal matters on the busy-runner error path:
+/// `export`/`share` run `run_with_busy(...)?` before installing their result, so
+/// when that `?` returns early the slot is empty and this fallback is what keeps
+/// the produced modal on screen.
 fn retained_modal(
     keeps_produced: bool,
     produced: Modal,
@@ -1680,10 +1682,9 @@ mod tests {
     }
 
     #[test]
-    fn a_copy_action_keeps_the_modal_that_produced_it() {
-        // Regression: the routing used to drop the modal whenever it returned a
-        // non-Close action, so a copy closed the Detail screen and the "copied"
-        // alert never showed.
+    fn a_non_close_action_keeps_its_producer_when_nothing_is_installed() {
+        // The busy-runner error path installs nothing, so the modal that
+        // produced the action must be restored rather than dropped.
         let produced = Modal::Detail(Box::new(Detail::browse()));
         assert!(matches!(
             retained_modal(true, produced, None),

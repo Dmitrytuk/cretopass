@@ -9,6 +9,7 @@ use crossterm::terminal::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 pub mod cli;
+pub(crate) mod clipboard;
 pub mod crypt;
 pub mod cursor;
 pub mod file_browser;

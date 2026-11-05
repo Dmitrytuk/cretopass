@@ -40,8 +40,6 @@ const SYMBOL_COLUMNS: usize = 3;
 pub(crate) struct Detail {
     /// Highlighted extra-field row while browsing.
     selected: usize,
-    /// Copy-confirmation alert text, if any. The next key dismisses it.
-    alert: Option<String>,
     /// The open Form Popup, or `None` while browsing. Held inside the generator
     /// popups rather than here while one of those is up.
     form: Option<FormState>,
@@ -90,7 +88,6 @@ impl Detail {
     pub(crate) fn editing(node: &Node) -> Self {
         Self {
             selected: 0,
-            alert: None,
             form: Some(FormState::new_edit(node)),
             popup: DetailPopup::None,
         }
@@ -100,7 +97,6 @@ impl Detail {
     pub(crate) fn adding() -> Self {
         Self {
             selected: 0,
-            alert: None,
             form: Some(FormState::new_add()),
             popup: DetailPopup::None,
         }
@@ -141,12 +137,6 @@ impl Detail {
 
     /// Keys while browsing the Node's extra fields.
     fn handle_browse(&mut self, key: KeyEvent, state: &mut TreeState) -> Option<TreeAction> {
-        // A copy alert consumes the next key and clears itself.
-        if self.alert.is_some() {
-            self.alert = None;
-            return None;
-        }
-
         let field_count = state.current_node_ref().map_or(0, |n| n.extra_fields.len());
 
         match Action::from_detail(&key) {
@@ -175,7 +165,9 @@ impl Detail {
                         .get(self.selected)
                         .map(|ef| ef.value.clone())
                 })?;
-                self.alert = Some(texts::COPY_CHECK.to_string());
+                // An empty value is a silent no-op: writing it would wipe the
+                // user's clipboard. The verdict for a real copy is the
+                // orchestrator's, shown as a result modal.
                 if text.is_empty() {
                     None
                 } else {
@@ -746,7 +738,7 @@ impl Detail {
         }
     }
 
-    /// Draws the browsed Node's ExtraFields, and the copy alert if it is armed.
+    /// Draws the browsed Node's ExtraFields.
     fn render_browse(&self, frame: &mut Frame, area: Rect, state: &TreeState) {
         let Some(node) = state.current_node_ref() else {
             return;
@@ -775,10 +767,6 @@ impl Detail {
         frame.render_widget(Clear, overlay_area);
         frame.render_widget(block, overlay_area);
         frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-
-        if self.alert.is_some() {
-            render_copy_alert(frame, area);
-        }
     }
 
     /// Draws the Add/Edit form.
@@ -897,11 +885,7 @@ impl Detail {
             Screen::Browse => (
                 texts::MODE_DETAIL,
                 ElementStyle::ModeDetail,
-                if self.alert.is_some() {
-                    texts::HINT_DETAIL_ALERT
-                } else {
-                    texts::HINT_DETAIL
-                },
+                texts::HINT_DETAIL,
             ),
             Screen::Form => {
                 let form = self.form.as_ref().expect("the form is open");
@@ -1405,29 +1389,6 @@ fn render_symbol_checklist_overlay(frame: &mut Frame, area: Rect, modal: &Genera
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
-/// Draws the transient "copied" confirmation over `area`.
-fn render_copy_alert(frame: &mut Frame, area: Rect) {
-    let overlay_area = centered_rect(area, area.width / 3, 4);
-
-    let block = Block::default()
-        .title(texts::OVERLAY_COPIED)
-        .borders(Borders::ALL)
-        .style(ElementStyle::AlertSuccessBlock.style());
-
-    let inner = block.inner(overlay_area);
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            texts::COPY_CHECK,
-            ElementStyle::AlertSuccessText.style(),
-        )),
-    ];
-
-    frame.render_widget(Clear, overlay_area);
-    frame.render_widget(block, overlay_area);
-    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1509,17 +1470,16 @@ mod tests {
     }
 
     #[test]
-    fn y_copies_the_selected_value_and_alerts() {
+    fn y_copies_the_selected_value() {
         let (mut detail, mut state) = detail_with_fields();
         match detail.handle_key(key(KeyCode::Char('y')), &mut state) {
             Some(TreeAction::CopyToClipboard { text }) => assert_eq!(text, "a"),
             _ => panic!("expected a clipboard copy"),
         }
-        assert_eq!(detail.alert.as_deref(), Some(texts::COPY_CHECK));
     }
 
     #[test]
-    fn an_empty_value_skips_the_clipboard_but_still_alerts() {
+    fn an_empty_value_asks_for_no_copy() {
         let mut node = Node::new("Root");
         node.extra_fields.push(ExtraField {
             field_type: FieldType::Login,
@@ -1527,12 +1487,16 @@ mod tests {
         });
         let mut detail = Detail::browse();
         let mut state = TreeState::new(node);
-        let _ = detail.handle_key(key(KeyCode::Char('y')), &mut state);
-        assert_eq!(detail.alert.as_deref(), Some(texts::COPY_CHECK));
+        assert!(
+            detail
+                .handle_key(key(KeyCode::Char('y')), &mut state)
+                .is_none(),
+            "an empty value must not reach the clipboard"
+        );
     }
 
     #[test]
-    fn no_field_skips_both_the_clipboard_and_the_alert() {
+    fn no_field_asks_for_no_copy() {
         let mut detail = Detail::browse();
         let mut state = TreeState::new(Node::new("Root"));
         assert!(
@@ -1540,22 +1504,5 @@ mod tests {
                 .handle_key(key(KeyCode::Char('y')), &mut state)
                 .is_none()
         );
-        assert!(detail.alert.is_none());
-    }
-
-    #[test]
-    fn the_next_key_after_a_copy_alert_is_consumed() {
-        let (mut detail, mut state) = detail_with_fields();
-        let _ = detail.handle_key(key(KeyCode::Char('y')), &mut state);
-        assert!(detail.handle_key(key(KeyCode::Esc), &mut state).is_none());
-        assert!(detail.alert.is_none());
-    }
-
-    #[test]
-    fn status_parts_switch_hint_while_the_alert_is_armed() {
-        let (mut detail, mut state) = detail_with_fields();
-        assert_eq!(detail.status_parts(&state.root).2, texts::HINT_DETAIL);
-        let _ = detail.handle_key(key(KeyCode::Char('y')), &mut state);
-        assert_eq!(detail.status_parts(&state.root).2, texts::HINT_DETAIL_ALERT);
     }
 }
