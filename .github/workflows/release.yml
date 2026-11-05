@@ -188,7 +188,9 @@ jobs:
         if: matrix.archive == 'tar.gz'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf cretopass-${{ matrix.target }}.tar.gz cretopass
+          cp "$GITHUB_WORKSPACE/LICENSE" "$GITHUB_WORKSPACE/LICENSE-THIRD-PARTY" .
+          tar czf cretopass-${{ matrix.target }}.tar.gz \
+            cretopass LICENSE LICENSE-THIRD-PARTY
           mv cretopass-${{ matrix.target }}.tar.gz "$GITHUB_WORKSPACE/"
         shell: bash
 
@@ -196,7 +198,9 @@ jobs:
         if: matrix.archive == 'zip'
         run: |
           Push-Location "target/${{ matrix.target }}/release"
-          7z a "cretopass-${{ matrix.target }}.zip" cretopass.exe
+          Copy-Item "$env:GITHUB_WORKSPACE/LICENSE" .
+          Copy-Item "$env:GITHUB_WORKSPACE/LICENSE-THIRD-PARTY" .
+          7z a "cretopass-${{ matrix.target }}.zip" cretopass.exe LICENSE LICENSE-THIRD-PARTY
           Move-Item "cretopass-${{ matrix.target }}.zip" "$env:GITHUB_WORKSPACE/"
           Pop-Location
         shell: pwsh
@@ -293,6 +297,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
+            LICENSE
+            LICENSE-THIRD-PARTY
             install.sh
             install.sh.sha256
             install.ps1
