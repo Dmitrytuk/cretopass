@@ -41,17 +41,58 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             render(f, area, &mut state);
         })?;
 
+        // While the File Browser is waiting for a directory listing, keep
+        // redrawing on the spinner tick so the UI never looks frozen — but still
+        // read keys, so Esc closes the browser immediately while the fs call is
+        // stuck on another thread.
+        if browser_is_loading(&state) {
+            // Apply any completed listing every iteration, so a result is never
+            // stuck behind a stream of keys.
+            poll_browser_listing(&mut state);
+            if event::poll(SPINNER_TICK)? {
+                if let Event::Key(key) = event::read()? {
+                    if key.kind != KeyEventKind::Press {
+                        continue;
+                    }
+                    dispatch_event(key, &mut state, terminal)?;
+                }
+            } else {
+                state.spinner.advance();
+            }
+            continue;
+        }
+
         if let Event::Key(key) = event::read()? {
             if key.kind != KeyEventKind::Press {
                 continue;
             }
-
-            if state.modal.is_none() {
-                handle_home_key(key, &mut state, terminal)?;
-            } else {
-                handle_modal_key(key, &mut state, terminal)?;
-            }
+            dispatch_event(key, &mut state, terminal)?;
         }
+    }
+}
+
+/// Routes a key to the menu or the active modal.
+fn dispatch_event<B: Backend>(
+    key: event::KeyEvent,
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
+    if state.modal.is_none() {
+        handle_home_key(key, state, terminal)
+    } else {
+        handle_modal_key(key, state, terminal)
+    }
+}
+
+/// Whether the open File Browser has a directory listing in flight.
+fn browser_is_loading(state: &HomeState) -> bool {
+    matches!(&state.modal, Some(Modal::FileBrowser(browser)) if browser.is_loading())
+}
+
+/// Applies a completed File Browser listing, if any.
+fn poll_browser_listing(state: &mut HomeState) {
+    if let Some(Modal::FileBrowser(browser)) = &mut state.modal {
+        browser.poll_listing();
     }
 }
 
@@ -191,6 +232,31 @@ mod tests {
                 cell.symbol()
             );
         }
+    }
+
+    #[test]
+    fn the_home_loop_helpers_poll_a_pending_browser_listing() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::FileBrowser(Box::new(BrowserModal::new(
+            FileBrowserMode::OpenFile,
+            &FileBrowserSession::default(),
+        ))));
+
+        assert!(
+            browser_is_loading(&state),
+            "a fresh browser waits on its listing"
+        );
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while browser_is_loading(&state) && std::time::Instant::now() < deadline {
+            poll_browser_listing(&mut state);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        assert!(
+            !browser_is_loading(&state),
+            "the loop helper must apply the completed listing"
+        );
     }
 
     #[test]

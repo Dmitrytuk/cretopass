@@ -355,6 +355,8 @@ pub const MSG_NO_FILE_PATH: &str = "No file path set";
 
 pub const EMPTY_DIR: &str = "  (empty directory)";
 pub const NO_MATCHING_FILES: &str = "  No matching files";
+/// Shown in place of the file list while a directory listing is in flight.
+pub const FB_LOADING: &str = "  Loading…";
 pub const ADD_FIELD_BUTTON: &str = "+ Add Field";
 pub const PASSWORD_MASK: &str = "*****";
 pub const COPY_CHECK: &str = "✓ Copied!";
@@ -394,3 +396,5 @@ pub const FB_HINT_LOCATIONS: &str = " j/k:move  Enter:open  Esc:close ";
 pub const MSG_CANNOT_DELETE_FILE: &str = "Cannot delete the currently open file";
 pub const MSG_CANNOT_OVERWRITE_SECRET: &str = "Cannot overwrite a secret file";
 pub const MSG_NAME_REQUIRED: &str = "Enter a file name first";
+/// A directory read that did not answer within the listing timeout.
+pub const MSG_DIRECTORY_NOT_RESPONDING: &str = "Directory not responding";

@@ -61,7 +61,12 @@ impl ExportDestination {
     ) -> Option<TreeAction> {
         match file_browser::handle_key(key, &mut self.browser) {
             None => None,
-            Some(FileBrowserAction::Cancelled) => Some(TreeAction::Close),
+            Some(FileBrowserAction::Cancelled) => {
+                // Abandon any in-flight listing explicitly before the modal
+                // closes.
+                self.browser.cancel();
+                Some(TreeAction::Close)
+            }
             Some(FileBrowserAction::Selected(path)) => Some(TreeAction::Export {
                 node: self.node.clone(),
                 include_children: self.include_children,
@@ -77,6 +82,16 @@ impl ExportDestination {
     /// The directory and hidden-entry memory for the next browser opening.
     pub(crate) fn session(&self) -> FileBrowserSession {
         self.browser.session()
+    }
+
+    /// Whether the browser has a directory listing in flight.
+    pub(crate) fn is_loading(&self) -> bool {
+        self.browser.is_loading()
+    }
+
+    /// Applies a completed directory listing, if any.
+    pub(crate) fn poll_listing(&mut self) -> bool {
+        self.browser.poll_listing()
     }
 
     /// Draws the browser over `area`. Its renderer keeps its own viewport

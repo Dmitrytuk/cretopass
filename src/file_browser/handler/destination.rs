@@ -117,12 +117,14 @@ mod tests {
     /// An export browser over `dir`, as if opened for the secret file
     /// `dir/vault.age`, in `format`.
     fn export_state(dir: &Path, format: ExportFormat) -> FileBrowserState {
-        FileBrowserState::for_export(
+        let mut state = FileBrowserState::for_export(
             format,
             Some(&dir.join("vault.age")),
             None,
             &FileBrowserSession::default(),
-        )
+        );
+        state.settle();
+        state
     }
 
     #[test]
@@ -318,11 +320,13 @@ mod tests {
     /// A share browser over `dir`, as if opened for the secret file
     /// `dir/vault.age`.
     fn share_state(dir: &Path) -> FileBrowserState {
-        FileBrowserState::for_share(
+        let mut state = FileBrowserState::for_share(
             Some(&dir.join("vault.age")),
             None,
             &FileBrowserSession::default(),
-        )
+        );
+        state.settle();
+        state
     }
 
     #[test]

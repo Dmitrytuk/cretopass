@@ -18,6 +18,7 @@ pub(crate) mod export;
 pub(crate) mod file_process;
 pub(crate) mod format;
 pub(crate) mod import;
+pub(crate) mod listing;
 pub(crate) mod passphrase;
 pub(crate) mod share;
 pub(crate) mod xml;
@@ -33,6 +34,7 @@ pub use file_process::{
     read_file, rename_file, save_tree, validate_encrypted_file, write_file,
 };
 pub use import::{ParseError, import_tree};
+pub use listing::{DirLoader, LISTING_TIMEOUT, ListingOutcome};
 pub use passphrase::Passphrase;
 pub use share::{share_tree, suggest_share_name};
 

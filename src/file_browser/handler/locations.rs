@@ -3,8 +3,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::file_browser::state::{
-    FileBrowserAction, FileBrowserState, FocusTarget, build_locations, list_entries,
-    preselect_location,
+    FileBrowserAction, FileBrowserState, FocusTarget, build_locations, preselect_location,
 };
 
 /// `D` opens the Locations overlay from the list.
@@ -52,17 +51,10 @@ pub(super) fn handle_locations_key(
                 state.focus = FocusTarget::List;
                 return None;
             };
-            match list_entries(&location.path, state.show_hidden) {
-                Ok(entries) => {
-                    state.current_dir = location.path;
-                    state.entries = entries;
-                    state.selected = 0;
-                    state.search_active = false;
-                    state.search_query.clear();
-                    state.focus = FocusTarget::List;
-                }
-                Err(e) => state.error = Some(format!("{e}")),
-            }
+            // Close the overlay and request the directory in the background; a
+            // failure surfaces once the listing lands, restoring the old one.
+            state.focus = FocusTarget::List;
+            state.navigate_to(location.path, None);
         }
         _ => {}
     }
@@ -157,19 +149,21 @@ mod tests {
         let result = handle_key(key(KeyCode::Enter), &mut state);
 
         assert_eq!(result, None);
-        assert_eq!(state.focus, FocusTarget::List);
-        assert_eq!(state.current_dir, dir.path());
+        assert_eq!(state.focus, FocusTarget::List, "the overlay closes at once");
+        assert_eq!(state.current_dir, dir.path(), "the jump is immediate");
+        state.settle();
         assert!(state.entries.iter().any(|e| e.name == "inside.txt"));
         assert!(state.search_query.is_empty());
         assert!(!state.search_active);
     }
 
     #[test]
-    fn test_locations_enter_unreadable_keeps_overlay_open() {
+    fn test_locations_enter_unreadable_restores_the_previous_directory() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("missing");
 
         let mut state = make_state(FileBrowserMode::OpenFile);
+        let before = state.current_dir.clone();
         state.locations = vec![Location {
             label: "missing".to_string(),
             path: missing.clone(),
@@ -180,10 +174,14 @@ mod tests {
         state.focus = FocusTarget::Locations;
 
         handle_key(key(KeyCode::Enter), &mut state);
+        state.settle();
 
-        assert_eq!(state.focus, FocusTarget::Locations);
-        assert!(state.error.is_some());
-        assert_ne!(state.current_dir, missing);
+        assert_eq!(state.focus, FocusTarget::List, "the overlay closes at once");
+        assert!(state.error.is_some(), "the failure is reported");
+        assert_eq!(
+            state.current_dir, before,
+            "the previous directory is restored"
+        );
     }
 
     #[test]
@@ -203,6 +201,7 @@ mod tests {
         state.focus = FocusTarget::Locations;
 
         handle_key(key(KeyCode::Enter), &mut state);
+        state.settle();
 
         assert!(state.entries.iter().any(|e| e.name == ".hidden.txt"));
     }

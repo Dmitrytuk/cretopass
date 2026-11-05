@@ -224,6 +224,7 @@ mod tests {
         assert!(state.creating_name.is_empty());
         let created = state.current_dir.join("myfolder");
         assert!(created.is_dir(), "folder should have been created");
+        state.settle();
         assert_eq!(state.entries.len(), before + 1);
 
         let _ = std::fs::remove_dir(&created);
@@ -405,6 +406,7 @@ mod tests {
         assert!(!state.show_hidden);
 
         assert_eq!(handle_key(ctrl(KeyCode::Char('h')), &mut state), None);
+        state.settle();
 
         assert!(state.show_hidden);
         assert!(state.entries.iter().any(|e| e.name == ".hidden.txt"));

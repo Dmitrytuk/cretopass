@@ -1,33 +1,11 @@
-//! The directory listing behind the browser and the Locations overlay rows.
+//! The Locations overlay rows.
 
 use std::path::{Path, PathBuf};
 
-use crate::file_handling::{self, FileEntry, FileHandlingError};
+use crate::file_handling;
 use crate::theming::texts;
 
-use super::types::{FileBrowserSession, Location};
-
-/// Lists `path` honouring the hidden-entry setting.
-pub fn list_entries(path: &Path, show_hidden: bool) -> Result<Vec<FileEntry>, FileHandlingError> {
-    if show_hidden {
-        file_handling::list_dir_including_hidden(path)
-    } else {
-        file_handling::list_dir(path)
-    }
-}
-
-/// Picks the initial directory and its listing for a new browser.
-pub(super) fn initial_location(session: &FileBrowserSession) -> (PathBuf, Vec<FileEntry>) {
-    if let Some(dir) = session.last_dir.as_deref()
-        && let Ok(entries) = list_entries(dir, session.show_hidden)
-    {
-        return (dir.to_path_buf(), entries);
-    }
-
-    let home = dirs_home();
-    let entries = list_entries(&home, session.show_hidden).unwrap_or_default();
-    (home, entries)
-}
+use super::types::Location;
 
 /// Builds the Locations overlay rows: Home first, then mounted disks.
 pub fn build_locations() -> Vec<Location> {
