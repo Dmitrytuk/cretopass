@@ -3,12 +3,12 @@
 use std::path::{Path, PathBuf};
 
 use crate::file_handling::{
-    DirLoader, ExportFormat, FileEntry, ListingOutcome, output_path, suggest_export_name,
-    suggest_share_name,
+    DirLoader, DiskInfo, DiskLoader, ExportFormat, FileEntry, ListingOutcome, output_path,
+    suggest_export_name, suggest_share_name,
 };
 use crate::theming::texts;
 
-use super::locations::dirs_home;
+use super::locations::{dirs_home, disk_locations, home_location, preselect_location};
 use super::mode::FileBrowserMode;
 use super::types::{AddPrefix, FileBrowserSession, FocusTarget, Location};
 
@@ -57,6 +57,8 @@ pub struct FileBrowserState {
     pub location_scroll: usize,
     /// The background directory lister.
     loader: DirLoader,
+    /// The background disk enumerator behind the Locations overlay.
+    disks: DiskLoader,
     /// The directory and listing to restore when the pending request fails or
     /// times out. `None` while nothing is pending (or for the first request,
     /// which falls back to Home instead).
@@ -154,11 +156,37 @@ impl FileBrowserState {
             scroll: 0,
             location_scroll: 0,
             loader: DirLoader::new(),
+            disks: DiskLoader::new(),
             previous: None,
             select_on_load: None,
         };
         state.loader.request(&dir, state.show_hidden);
         state
+    }
+
+    /// Opens the Locations overlay.
+    ///
+    /// The pinned Home row appears at once; mounted disks are enumerated on a
+    /// background thread and appended when they arrive, so a disconnected
+    /// network or cloud drive cannot stall the overlay.
+    pub fn begin_locations(&mut self) {
+        self.locations = vec![home_location()];
+        self.location_selected = 0;
+        self.location_scroll = 0;
+        self.disks.request();
+    }
+
+    /// Whether the Locations overlay is still waiting for its disks.
+    pub fn locations_loading(&self) -> bool {
+        self.disks.is_pending()
+    }
+
+    /// Appends the enumerated disks and re-runs the row pre-selection.
+    fn append_disk_locations(&mut self, disks: Vec<DiskInfo>) {
+        self.locations.extend(disk_locations(&disks));
+        if self.focus == FocusTarget::Locations {
+            self.location_selected = preselect_location(&self.locations, &self.current_dir);
+        }
     }
 
     /// The exact file an export would write: the open directory joined with the
@@ -269,27 +297,34 @@ impl FileBrowserState {
     /// restores the previous directory and shows the reason, or falls back to
     /// the home directory when there is nothing to restore.
     pub fn poll_listing(&mut self) -> bool {
-        let Some(outcome) = self.loader.poll() else {
-            return false;
-        };
+        let mut changed = false;
 
-        match outcome {
-            ListingOutcome::Loaded { entries, .. } => {
-                self.previous = None;
-                self.entries = entries;
-                self.selected = self
-                    .select_on_load
-                    .take()
-                    .and_then(|name| self.entries.iter().position(|e| e.name == name))
-                    .unwrap_or(0);
-                self.clamp_selection();
-            }
-            ListingOutcome::Failed { error, .. } => self.on_listing_failure(format!("{error}")),
-            ListingOutcome::TimedOut { .. } => {
-                self.on_listing_failure(texts::MSG_DIRECTORY_NOT_RESPONDING.to_string());
-            }
+        if let Some(disks) = self.disks.poll() {
+            self.append_disk_locations(disks);
+            changed = true;
         }
-        true
+
+        if let Some(outcome) = self.loader.poll() {
+            match outcome {
+                ListingOutcome::Loaded { entries, .. } => {
+                    self.previous = None;
+                    self.entries = entries;
+                    self.selected = self
+                        .select_on_load
+                        .take()
+                        .and_then(|name| self.entries.iter().position(|e| e.name == name))
+                        .unwrap_or(0);
+                    self.clamp_selection();
+                }
+                ListingOutcome::Failed { error, .. } => self.on_listing_failure(format!("{error}")),
+                ListingOutcome::TimedOut { .. } => {
+                    self.on_listing_failure(texts::MSG_DIRECTORY_NOT_RESPONDING.to_string());
+                }
+            }
+            changed = true;
+        }
+
+        changed
     }
 
     /// Handles a failed or timed-out listing.
@@ -314,14 +349,31 @@ impl FileBrowserState {
         }
     }
 
-    /// Returns `true` while a listing request is outstanding.
+    /// Returns `true` while a directory listing or a disk query is outstanding.
     pub fn is_loading(&self) -> bool {
+        self.loader.is_pending() || self.disks.is_pending()
+    }
+
+    /// Whether a *directory* listing is in flight.
+    ///
+    /// Distinct from [`Self::is_loading`], which also tracks the Locations
+    /// overlay's disk query: the file list's `Loading…` placeholder must not
+    /// appear just because the overlay is enumerating disks.
+    pub fn dir_loading(&self) -> bool {
         self.loader.is_pending()
     }
 
-    /// Abandons the outstanding listing request without waiting for it.
+    /// Closes the Locations overlay, abandoning a pending disk query.
+    pub fn close_locations(&mut self) {
+        self.disks.cancel();
+        self.focus = FocusTarget::List;
+    }
+
+    /// Abandons the outstanding directory listing and disk query without
+    /// waiting for either.
     pub fn cancel(&mut self) {
         self.loader.cancel();
+        self.disks.cancel();
         self.previous = None;
         self.select_on_load = None;
     }

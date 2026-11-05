@@ -2,9 +2,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::file_browser::state::{
-    FileBrowserAction, FileBrowserState, FocusTarget, build_locations, preselect_location,
-};
+use crate::file_browser::state::{FileBrowserAction, FileBrowserState, FocusTarget};
 
 /// `D` opens the Locations overlay from the list.
 pub(super) fn is_locations_key(key: &KeyEvent) -> bool {
@@ -12,11 +10,10 @@ pub(super) fn is_locations_key(key: &KeyEvent) -> bool {
         && !key.modifiers.contains(KeyModifiers::CONTROL)
         && !key.modifiers.contains(KeyModifiers::ALT)
 }
-/// Builds the Locations rows and opens the overlay.
+/// Opens the Locations overlay: the Home row shows at once and disks are
+/// enumerated in the background.
 pub(super) fn open_locations(state: &mut FileBrowserState) {
-    state.locations = build_locations();
-    state.location_selected = preselect_location(&state.locations, &state.current_dir);
-    state.location_scroll = 0;
+    state.begin_locations();
     state.focus = FocusTarget::Locations;
 }
 pub(super) fn handle_locations_key(
@@ -26,7 +23,7 @@ pub(super) fn handle_locations_key(
     let closes = matches!(key.code, KeyCode::Esc | KeyCode::Left)
         || (key.code == KeyCode::Char('h') && !key.modifiers.contains(KeyModifiers::CONTROL));
     if closes || is_locations_key(&key) {
-        state.focus = FocusTarget::List;
+        state.close_locations();
         return None;
     }
 
@@ -48,12 +45,12 @@ pub(super) fn handle_locations_key(
         }
         KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
             let Some(location) = state.locations.get(state.location_selected).cloned() else {
-                state.focus = FocusTarget::List;
+                state.close_locations();
                 return None;
             };
             // Close the overlay and request the directory in the background; a
             // failure surfaces once the listing lands, restoring the old one.
-            state.focus = FocusTarget::List;
+            state.close_locations();
             state.navigate_to(location.path, None);
         }
         _ => {}
@@ -91,6 +88,43 @@ mod tests {
 
         assert_eq!(state.focus, FocusTarget::Locations);
         assert!(state.locations.first().is_some_and(|l| l.is_home));
+    }
+
+    #[test]
+    fn test_d_opens_with_the_home_row_before_the_disks_arrive() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+
+        handle_key(key(KeyCode::Char('D')), &mut state);
+
+        assert_eq!(state.locations.len(), 1, "only Home is known at once");
+        assert!(state.locations[0].is_home);
+        assert!(state.locations_loading(), "the disks are still enumerating");
+
+        state.settle();
+
+        assert!(
+            !state.locations_loading(),
+            "the disks land in the background"
+        );
+        assert!(
+            state.location_selected < state.locations.len(),
+            "the pre-selection must point at a real row"
+        );
+    }
+
+    #[test]
+    fn closing_the_locations_overlay_cancels_the_disk_query() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        handle_key(key(KeyCode::Char('D')), &mut state);
+        assert!(state.locations_loading());
+
+        handle_key(key(KeyCode::Esc), &mut state);
+
+        assert_eq!(state.focus, FocusTarget::List);
+        assert!(
+            !state.locations_loading(),
+            "closing the overlay must abandon the disk query"
+        );
     }
 
     #[test]

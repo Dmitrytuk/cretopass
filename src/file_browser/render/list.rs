@@ -111,7 +111,7 @@ pub(super) fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBr
         .collect();
 
     if visible.is_empty() {
-        let empty_msg = if state.is_loading() {
+        let empty_msg = if state.dir_loading() {
             texts::FB_LOADING
         } else if state.search_active || !state.search_query.is_empty() {
             texts::NO_MATCHING_FILES

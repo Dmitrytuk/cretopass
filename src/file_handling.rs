@@ -34,7 +34,7 @@ pub use file_process::{
     read_file, rename_file, save_tree, validate_encrypted_file, write_file,
 };
 pub use import::{ParseError, import_tree};
-pub use listing::{DirLoader, LISTING_TIMEOUT, ListingOutcome};
+pub use listing::{DirLoader, DiskLoader, LISTING_TIMEOUT, ListingOutcome};
 pub use passphrase::Passphrase;
 pub use share::{share_tree, suggest_share_name};
 

@@ -28,6 +28,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::disks::{DiskInfo, list_disks};
 use super::error::FileHandlingError;
 use super::file_process::{FileEntry, list_dir, list_dir_including_hidden};
 
@@ -223,6 +224,133 @@ fn list_for(dir: &Path, show_hidden: bool) -> Result<Vec<FileEntry>, FileHandlin
     }
 }
 
+/// A message a disk-enumeration thread sends when it finishes.
+#[derive(Debug)]
+struct DiskMessage {
+    generation: u64,
+    disks: Vec<DiskInfo>,
+}
+
+/// The newest disk request the loader is waiting for.
+#[derive(Debug)]
+struct DiskPending {
+    generation: u64,
+    started: Instant,
+}
+
+/// Enumerates mounted disks off the UI thread.
+///
+/// `list_disks` (sysinfo) can stall on a disconnected network or cloud drive,
+/// so the Locations overlay must not call it while handling a key. Like
+/// [`DirLoader`], the request runs on a detached thread and is reported by
+/// generation, so a late result from a cancelled or superseded request is
+/// dropped. A request that exceeds [`LISTING_TIMEOUT`] settles to an empty list
+/// rather than leaving the overlay loading forever.
+#[derive(Debug)]
+pub struct DiskLoader {
+    tx: Sender<DiskMessage>,
+    rx: Receiver<DiskMessage>,
+    generation: u64,
+    pending: Option<DiskPending>,
+}
+
+impl Default for DiskLoader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DiskLoader {
+    /// Creates a loader with no outstanding request.
+    pub fn new() -> Self {
+        let (tx, rx) = mpsc::channel();
+        Self {
+            tx,
+            rx,
+            generation: 0,
+            pending: None,
+        }
+    }
+
+    /// Starts enumerating the disks, replacing any request still in flight.
+    pub fn request(&mut self) {
+        self.generation += 1;
+        let generation = self.generation;
+        self.pending = Some(DiskPending {
+            generation,
+            started: Instant::now(),
+        });
+
+        let tx = self.tx.clone();
+        // Detached: a stuck disk query cannot be cancelled, so it is left to
+        // finish (or not) on its own and its result is reaped at process exit.
+        let spawned = thread::Builder::new()
+            .name("disk-listing".to_string())
+            .spawn(move || {
+                let _ = tx.send(DiskMessage {
+                    generation,
+                    disks: list_disks(),
+                });
+            });
+        if spawned.is_err() {
+            // Report "no disks" rather than staying pending forever.
+            self.pending = None;
+        }
+    }
+
+    /// Returns `true` while a request is outstanding.
+    pub fn is_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Reports the newest request's disks, if it is ready.
+    ///
+    /// A completed result wins over the timeout; a request older than
+    /// [`LISTING_TIMEOUT`] settles to an empty list so the overlay stops
+    /// showing `Loading…`.
+    pub fn poll(&mut self) -> Option<Vec<DiskInfo>> {
+        self.poll_at(Instant::now())
+    }
+
+    /// [`Self::poll`] against a caller-supplied clock.
+    fn poll_at(&mut self, now: Instant) -> Option<Vec<DiskInfo>> {
+        let Some(generation) = self.pending.as_ref().map(|pending| pending.generation) else {
+            // Drop a late result from a cancelled request.
+            while self.rx.try_recv().is_ok() {}
+            return None;
+        };
+
+        loop {
+            match self.rx.try_recv() {
+                Ok(message) if message.generation == generation => {
+                    self.pending = None;
+                    return Some(message.disks);
+                }
+                // A superseded request: drop it.
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+
+        let timed_out = self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| now.duration_since(pending.started) >= LISTING_TIMEOUT);
+        if timed_out {
+            self.pending = None;
+            return Some(Vec::new());
+        }
+
+        None
+    }
+
+    /// Abandons the outstanding request without waiting for it.
+    pub fn cancel(&mut self) {
+        self.pending = None;
+        self.generation += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,6 +435,66 @@ mod tests {
 
         assert!(!loader.is_pending());
         assert!(loader.poll().is_none());
+    }
+
+    #[test]
+    fn a_disk_request_reports_a_list_and_then_goes_idle() {
+        let mut loader = DiskLoader::new();
+        loader.request();
+        assert!(loader.is_pending());
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut result = None;
+        while Instant::now() < deadline {
+            if let Some(disks) = loader.poll() {
+                result = Some(disks);
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        assert!(result.is_some(), "the disk query must report a list");
+        assert!(!loader.is_pending());
+    }
+
+    #[test]
+    fn a_second_disk_request_while_pending_is_a_no_op() {
+        let mut loader = DiskLoader::new();
+        loader.request();
+        loader.request();
+        assert!(loader.is_pending());
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if loader.poll().is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        assert!(!loader.is_pending());
+    }
+
+    #[test]
+    fn a_disk_request_that_never_answers_settles_to_an_empty_list() {
+        // A channel that never receives stands in for a stuck `list_disks`.
+        let (tx, rx) = mpsc::channel::<DiskMessage>();
+        let mut loader = DiskLoader {
+            tx,
+            rx,
+            generation: 1,
+            pending: Some(DiskPending {
+                generation: 1,
+                started: Instant::now(),
+            }),
+        };
+
+        let disks = loader
+            .poll_at(Instant::now() + LISTING_TIMEOUT)
+            .expect("a settled result");
+
+        assert!(disks.is_empty(), "a timed-out query reports no disks");
+        assert!(!loader.is_pending(), "the overlay must stop loading");
     }
 
     #[test]
