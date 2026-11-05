@@ -75,12 +75,13 @@ most one at a time. `Modal::handle_key` reads a key and returns a `TreeAction`;
 Detail modal's Form Popup live-edits a Node), but anything outside the process —
 the system clipboard, the export file write, screen transitions — is a
 `TreeAction`. This is the same intent contract the Home screen uses (see
-[0021](../../../../docs/adr/0021-home-intent-contract.md)); `Modal` and `Popup`
+[0021](../../../vault/docs/adr/0021-home-intent-contract.md)); `Modal` and `Popup`
 are the vocabulary of [GLOSSARY.md](../../GLOSSARY.md). Because the modals are
 pure over their own state, their `handle_key` is testable without a terminal.
 
-- `Modal::Detail` browses a Node's extra fields (copying a value to the
-  clipboard is its only I/O). Its Form Popup carries all Add/Edit state in a
+- `Modal::Detail` browses a Node's extra fields (copying a value is reported as a
+  `TreeAction`; the write happens in the orchestrator). Its Form Popup carries all
+  Add/Edit state in a
   single `FormState` (`node_id`, `draft`, `selected_row`, `cursor`, `focus`,
   `pending`, `field_cut_buffer`, `scratch`, `history`, `history_cursor`,
   `history_coalesce`), with the field-type picker, custom-name prompt, delete
@@ -204,7 +205,7 @@ parent row (`collapse_or_select_parent`).
   on the root, which has no sibling slot) puts the node back in the buffer.
 - `p` enters `PendingPaste` only when the buffer is non-empty; `p` pastes after,
   `P` pastes before, `l`/`→` pastes as last child.
-- System clipboard only used in the Detail modal (copy a row's value). Targets: `pbcopy` (macOS), `wl-copy`/`xclip`/`xsel` (Linux).
+- The system clipboard is used only in the Detail modal (copy a row's value) and only through the `clipboard` gateway ([0025](../../../../docs/adr/0025-clipboard-gateway.md)): `arboard` on every platform, with `pbcopy` (macOS) / `wl-copy`→`xclip`→`xsel` (Linux) as a fallback, and the outcome shown as a result modal.
 - `remove_node()` only targets children (not root). The Root cannot be cut, so
   `d` is inert while the Root is selected.
 

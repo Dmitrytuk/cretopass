@@ -15,6 +15,7 @@ snapshot back to an age-encrypted JSON file.
 | `theming` | [0004](../../src/theming/docs/adr/0004-theming.md) | Centralized keybindings, styles, icons, UI strings, the switchable [dark and light colour schemes](0019-runtime-colour-scheme-switching.md) ([0015](0015-default-dark-colour-scheme.md)), the title-bar `Status`/`Spinner` ([0011](0011-animated-status-spinner.md)), and the shared status bar ([0014](0014-status-bar-unification.md)) |
 | `generator` | [0012](0012-password-generator.md) | Password generation — strict leaf, depends only on `rand`; TUI-free and tree-free |
 | `share` | [0023](0023-sharing-a-vault-subtree.md) | Share flow, UI-agnostic: the recipient's masked password pair (`Passphrase`), wrapped by the Tree and Home modals |
+| `clipboard` | [0025](0025-clipboard-gateway.md) | System clipboard gateway — `arboard` on every platform with a command-line helper fallback; the one place a secret reaches the OS clipboard |
 | `tree` | [0005](../../src/tree/docs/adr/0005-tree-module.md) | Tree data model, state machine, rendering, async event loop |
 | `vault` | [0006](../../src/vault/docs/adr/0006-vault-module.md) | Home screen, active vault state, configuration persistence |
 | `file_browser` | [0007](../../src/file_browser/docs/adr/0007-file-browser.md) | OS directory browser overlay with mounted-disk locations and hidden-entry toggle; listings and disk enumeration run off the UI thread, and browsing reads no file contents ([0024](0024-browsing-never-reads-file-contents.md)) |
@@ -45,6 +46,11 @@ password pair that the Tree and Home share flows both use, and never imports
 `TreeState`/`HomeState`. Writing the bundle itself is
 `file_handling::share`'s job ([0023](0023-sharing-a-vault-subtree.md)).
 
+The `clipboard` module is a strict leaf below `tree`: `tree::widget::orchestrator`
+calls `clipboard::copy_text` when the Detail modal reports a copy, and the module
+owns the process-wide `arboard::Clipboard` handle without importing `TreeState`
+([0025](0025-clipboard-gateway.md)).
+
 ## Core design principles
 
 1. **I/O gateway** — all vault and document I/O goes through `file_handling`. Every write is atomic (exclusive temp file + `fsync` + rename) and reads are symlink-safe. The CLI lifecycle commands are the single deliberate exception, managing their own install artifacts with `std::fs` (see [ADR 0001](../../src/file_handling/docs/adr/0001-io-gateway.md)).
@@ -65,6 +71,7 @@ password pair that the Tree and Home share flows both use, and never imports
 | `tokio` 1 (`rt`, `sync`, `macros`, `time`) | tree | current-thread runtime, `select!`, save-event channel, spinner `interval` and bounded `timeout` |
 | `futures-util` 0.3 | tree | `StreamExt::next` for `EventStream` |
 | `age` 0.11 | crypt | passphrase-based encryption |
+| `arboard` 3.7 (`default-features = false`) | clipboard | cross-platform system clipboard for the Detail copy |
 | `rand` 0.8 | generator | cryptographically secure password randomness (already in the graph via `age`) |
 | `serde` / `serde_json` 1 | file_handling, node | JSON serialization of tree |
 | `uuid` 1 (v4, serde) | node, widget | stable node identities |

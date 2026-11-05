@@ -23,7 +23,7 @@ impossible without touching every module.
 | `palette_default_light.rs` | The **Default Light** colour scheme: the warm, off-white counterpart of Default Dark, the same roles with light values ([0019](../../../../docs/adr/0019-runtime-colour-scheme-switching.md)). |
 | `theming.rs` | Owns the `Palette` type, the scheme-name constants, and the active-scheme cell (`palette()` / `set_palette()`); a scheme swap is one write ([0019](../../../../docs/adr/0019-runtime-colour-scheme-switching.md)). |
 | `style.rs` | `ElementStyle` enum (69 variants) organized by UI area (Tree, Mode, FileBrowser, Home, Cursor, etc.). Each resolves to a concrete `ratatui::style::Style` built from the active colour scheme. |
-| `status_bar.rs` | The single shared status-bar renderer: `render_status_bar(frame, area, mode_str, mode_style, hint)` draws `[MODE] hints` for every screen (see [0014](../../../docs/adr/0014-status-bar-unification.md)). |
+| `status_bar.rs` | The single shared status-bar renderer: `render_status_bar(frame, area, mode_str, mode_style, hint)` draws `[MODE] hints` for every screen (see [0014](../../../../docs/adr/0014-status-bar-unification.md)). |
 | `alert.rs` | The single shared alert card: `AlertKind` (`Success`/`Error`) and `render_alert(frame, area, message, kind)`. Both the Home and Tree alert modals draw through it, so a positive outcome is always green and a failure red. |
 | `texts.rs` | All UI string constants: labels, hints, mode names, messages, menu items, keyboard help — plus `share_instruction()`, which assembles the share bundle's `HOW-TO-OPEN.txt` from those constants so the `file_handling` gateway owns no user-facing prose. |
 
@@ -40,8 +40,10 @@ carried by `AlertKind`, which maps to the block/text `ElementStyle`s:
 
 Home's `Modal::success` / `Modal::error` and the Tree's `Modal::success` /
 `Modal::error` all build this card, so the same outcome never looks different
-between the two screens. The Tree's transient "Copied!" popup keeps its own
-smaller nested geometry but borrows the `Success` styles.
+between the two screens. A copy result uses the same card: the orchestrator's
+`report_copy` installs `Modal::success(COPY_CHECK)` or
+`Modal::error(MSG_COPY_FAILED + error)`, replacing the old transient "Copied!"
+popup.
 
 ## Keybindings
 
@@ -88,7 +90,7 @@ through matched rows only.
 |------|--------|
 | `j`/`k` / `↑` / `↓` | Navigate rows (a node's extra fields) |
 | `Tab` / `Shift+Tab` | Navigate rows, wrapping (like the form's Nav level) |
-| `c` / `y` | Copy selected row to clipboard → "Copied!" alert |
+| `c` / `y` | Copy selected row to the system clipboard → result modal ([0025](../../../../docs/adr/0025-clipboard-gateway.md)) |
 | `i` / `Enter` | Edit this node |
 | `Esc` | Close overlay |
 

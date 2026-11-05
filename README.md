@@ -51,9 +51,11 @@ cretopass remove   # delete the app and all its artifacts
 - **Add & edit forms** — in-place forms for creating and editing nodes, with
   full cursor movement (`Left`/`Right`/`Home`/`End`) and extra-field
   management (add via the `+ Add Field` row, delete via `Del`).
-- **Detail overlay** — view a node's fields (`Ctrl+Enter`/`i`), copy any row
-  to the system clipboard with `Enter` (uses `wl-copy`/`xclip`/`xsel` on
-  Linux, `pbcopy` on macOS).
+- **Detail overlay** — view a node's fields (`Ctrl+Enter`/`i`) and copy any
+  row to the system clipboard with `c`/`y`. Copying uses OS-native APIs
+  (`arboard`) on Windows, macOS, and X11 Linux, falling back to
+  `pbcopy`/`wl-copy`/`xclip`/`xsel` when needed, and shows the outcome as a
+  result modal.
 - **Home screen** — the app starts with a launcher screen: open an existing
   secret file, create a new one, or pick from recently used files.
 - **Auto-save** — every mutation (add, edit, cut, paste) re-encrypts and
@@ -89,9 +91,11 @@ cretopass deliberately keeps its attack surface small by design:
   truncated vault. New secret files are created owner-only (`0600`), and a
   plaintext export is always written owner-only.
 - **Clipboard is opt-in and explicit.** Data reaches the system clipboard
-  only when you press `Enter` in the detail overlay — never implicitly. Be
-  aware that anything placed on the system clipboard may be readable by
-  other applications until overwritten.
+  only when you press `c`/`y` on a field in the detail overlay — never
+  implicitly. If the clipboard is unavailable, a copy fails visibly with an
+  error instead of pretending to succeed. Be aware that anything placed on
+  the system clipboard may be readable by other applications until
+  overwritten.
 
 **You are responsible for the passphrase.** There is no recovery mechanism:
 if you forget it, the data cannot be decrypted. Keep your own backups of the
