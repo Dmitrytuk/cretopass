@@ -80,6 +80,9 @@ _Avoid_: Open
 **Cut buffer**: The internal clipboard holding a cut Node, ready for paste. Move-style: the next successful paste consumes the node, so it can be inserted only once. A failed paste leaves the node in the buffer. Distinct from the system clipboard.
 _Avoid_: Clipboard, Yank buffer
 
+**Clipboard paste**: Reading the System clipboard's text into the focused text input with `Ctrl+V` or a terminal-native (bracketed) paste. Distinct from this context's **Paste** operations (`PasteStart` / `PasteSibling` / `PasteChild`) and from the Form's field paste: those move Nodes and ExtraFields already inside the app, while a Clipboard paste brings text in from outside. It reaches only the Tree's text inputs — the Form, the custom-field-name prompt, the generator length row, and Search.
+_Avoid_: Paste (ambiguous with PasteStart/PasteSibling/PasteChild and the field paste)
+
 **Help**: Modal opened with `?`. Lists the Tree's key bindings. Any key dismisses it.
 
 **Alert**: Modal reporting an outcome — a successful export, a saved setting, a refused action. Displays a message; any key dismisses it.

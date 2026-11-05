@@ -56,6 +56,13 @@ cretopass remove   # delete the app and all its artifacts
   (`arboard`) on Windows, macOS, and X11 Linux, falling back to
   `pbcopy`/`wl-copy`/`xclip`/`xsel` when needed, and shows the outcome as a
   result modal.
+- **Clipboard paste** — paste text copied from another application into any text
+  field with `Ctrl+V` (or the terminal's own paste). Multi-line text is joined
+  into one line, and `Ctrl+V` never types the letter `v`.
+- **Mouse support** — the wheel scrolls every list identically in every terminal,
+  and a click selects a row (a repeat click activates it); a right-click on a
+  detail row copies its value. Native terminal selection is off while the app runs;
+  hold `Shift` to select text.
 - **Home screen** — the app starts with a launcher screen: open an existing
   secret file, create a new one, or pick from recently used files.
 - **Auto-save** — every mutation (add, edit, cut, paste) re-encrypts and
@@ -93,7 +100,8 @@ cretopass deliberately keeps its attack surface small by design:
 - **Clipboard is opt-in and explicit.** Data reaches the system clipboard
   only when you press `c`/`y` on a field in the detail overlay — never
   implicitly. If the clipboard is unavailable, a copy fails visibly with an
-  error instead of pretending to succeed. Be aware that anything placed on
+  error instead of pretending to succeed. Likewise, a `Ctrl+V` paste reads the
+  clipboard only when you press it. Be aware that anything placed on
   the system clipboard may be readable by other applications until
   overwritten.
 

@@ -16,6 +16,19 @@ The operating system's shared copy buffer, reached only through the app-wide
 `clipboard` gateway (`arboard` on every platform, with
 `pbcopy`/`wl-copy`/`xclip`/`xsel` as a fallback). The Detail modal writes a
 field's value to it on `c`/`y`, and a write that cannot happen is reported
-rather than silently claimed. Distinct from the Tree's internal **Cut buffer**
-and **field cut buffer**.
+rather than silently claimed. It is also read back into a field by a **Clipboard
+paste**. Distinct from the Tree's internal **Cut buffer** and **field cut
+buffer**.
 _Avoid_: Clipboard (ambiguous with the Tree buffers), paste buffer
+
+**Clipboard paste** / **Paste from the system clipboard**:
+Reading the System clipboard's text into the focused field, triggered by `Ctrl+V`
+or a terminal-native (bracketed) paste. It reaches only the app's text inputs —
+the Tree form, the custom-field-name prompt, the generator's length row, tree
+search, the five password prompts and the File Browser's name/rename/search —
+and nowhere else. Multi-line text is joined into one line; the generator's length
+row keeps digits only. Distinct from the Tree's **Paste** operations (`PasteStart`
+/ `PasteSibling` / `PasteChild`, moving a Node from the Cut buffer) and from the
+Form's field paste (moving an ExtraField from the field cut buffer): those move
+data already inside the app, while a Clipboard paste brings outside text in.
+_Avoid_: Paste (ambiguous with the Tree and Form Paste operations)

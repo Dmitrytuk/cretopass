@@ -44,6 +44,22 @@ Rules that follow from it:
 - **An empty value is a silent no-op.** Detail emits no action for an empty
   field rather than writing it, which would wipe the user's clipboard.
 
+## Reading — clipboard paste
+
+`clipboard::paste_text` is the read side of the same gateway: `arboard.get_text()`
+first, then the read ladder `wl-paste -n` → `xclip -o -selection clipboard` →
+`xsel -b -o` (Linux) and `pbpaste` (macOS). It reuses the same process-wide handle and
+returns the text in a `Zeroizing<String>`, because a clipboard read usually carries a
+secret. `ClipboardError::Read` reports an unreadable clipboard, and the screens treat
+that as a silent no-op: a paste that cannot happen never shows a false success.
+
+`Ctrl+V` is intercepted **once per event loop**, before any dispatcher, so it can never
+fall through to a `Char(c)` arm and type the letter `v`; the same `apply_paste` serves a
+terminal-native bracketed-paste `Event::Paste`. Multi-line text is joined into one line
+and the generator's length field keeps digits only. See
+[ADR 0026](0026-deterministic-mouse-input.md) for the terminal mode that makes the
+native paste atomic.
+
 ## Dependency choices
 
 `arboard = { version = "3.7", default-features = false }`.

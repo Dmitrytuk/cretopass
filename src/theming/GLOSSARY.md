@@ -45,3 +45,31 @@ The one scheme the app is currently rendering with, held in a process-wide cell
 and swapped at runtime from the Home Configuration modal. The choice is persisted
 as `palette_name`; Default Dark is active until the user picks another.
 _Avoid_: Current theme, selected palette
+
+**Mouse capture**:
+The terminal mode in which the app, not the terminal, receives the wheel and
+clicks. The `terminal` module enables it at startup and disables it symmetrically
+on exit, error and panic. The trade-off is that the terminal's native text
+selection is off while it is on (most emulators still select while `Shift` is
+held).
+_Avoid_: Mouse mode, mouse reporting
+
+**Wheel**:
+A scroll tick that maps to Up/Down navigation through the existing key dispatch,
+so every list scrolls identically in every terminal with no coordinate maths. It
+never dismisses a dismiss-on-any-key overlay (Help, About, Alert).
+_Avoid_: Scroll, mouse scroll
+
+**Hit-box**:
+A rectangular on-screen region a renderer records, paired with the Click target it
+stands for. The `hitbox` leaf resolves a click's cell to the **topmost** recorded
+box, so a modal's rows outrank the screen rows drawn behind them.
+_Avoid_: Click region, hit area, rectangle
+
+**Click**:
+A left/right button press that a screen hit-tests on its Hit-boxes and turns into
+the same `Action` its key would produce. A click first moves the selection to the
+clicked row; a repeat click on the already-selected row activates it. The right
+button copies a Detail field's value. Drags and moves are ignored, and a
+destructive confirmation has no Hit-boxes at all, so no click can answer `y`.
+_Avoid_: Tap, press
