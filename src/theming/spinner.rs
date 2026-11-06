@@ -124,10 +124,20 @@ fn first_non_empty(values: [Option<&str>; 3]) -> Option<&str> {
 /// an explicitly non-UTF-8 locale such as `C`, `POSIX`, or `*.ISO-8859-1` gives
 /// ASCII.
 fn is_utf8_locale(locale: Option<&str>) -> bool {
-    locale.is_none_or(|value| {
-        let upper = value.to_ascii_uppercase();
-        upper.contains("UTF-8") || upper.contains("UTF8")
-    })
+    locale.is_none_or(|value| codeset(value).is_some_and(is_utf8_codeset))
+}
+
+/// The codeset token of a POSIX locale string
+/// (`language[_territory][.codeset][@modifier]`), e.g. `UTF-8` in
+/// `en_US.UTF-8@euro`.
+fn codeset(locale: &str) -> Option<&str> {
+    let after_dot = locale.split_once('.')?.1;
+    Some(after_dot.split('@').next().unwrap_or(after_dot))
+}
+
+/// Whether a codeset token names UTF-8 (`UTF-8` or `UTF8`, any case).
+fn is_utf8_codeset(codeset: &str) -> bool {
+    codeset.eq_ignore_ascii_case("UTF-8") || codeset.eq_ignore_ascii_case("UTF8")
 }
 
 /// A frame counter for the animated busy glyph.
@@ -247,14 +257,18 @@ mod tests {
     }
 
     #[test]
-    fn utf8_locales_are_recognised_by_their_common_spellings() {
+    fn utf8_locales_are_recognised_by_their_codeset() {
         assert!(is_utf8_locale(Some("en_US.UTF-8")));
         assert!(is_utf8_locale(Some("en_us.utf-8")));
         assert!(is_utf8_locale(Some("C.utf8")));
+        assert!(is_utf8_locale(Some("en_US.UTF-8@euro")));
         assert!(is_utf8_locale(None));
         assert!(!is_utf8_locale(Some("")));
         assert!(!is_utf8_locale(Some("C")));
         assert!(!is_utf8_locale(Some("POSIX")));
         assert!(!is_utf8_locale(Some("de_DE.ISO-8859-1")));
+        // The codeset is matched as a whole token, not a substring.
+        assert!(!is_utf8_locale(Some("en_US.XXUTF8XX")));
+        assert!(!is_utf8_locale(Some("en_US.UTF-8x")));
     }
 }
