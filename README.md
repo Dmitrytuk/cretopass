@@ -59,11 +59,16 @@ irm https://github.com/Dmitrytuk/cretopass/releases/latest/download/install.ps1 
   `Enter` to toggle, `/` to search.
 - **Search & filter** — live search with highlights; ancestors of matches
   auto-expand; `Enter` keeps highlights while freeing navigation.
-- **Cut / copy / paste** — cut a node with `d d`, paste as sibling (`p`) or
-  as child (`P`). The internal clipboard supports pasting multiple times.
+- **Cut / copy / paste** — cut a node with `d d`, then paste with `p` (after),
+  `P` (before), or `l`/`→` (as a child). The internal clipboard supports
+  pasting multiple times.
 - **Add & edit forms** — in-place forms for creating and editing nodes, with
   full cursor movement (`Left`/`Right`/`Home`/`End`) and extra-field
   management (add via the `+ Add Field` row, delete via `Del`).
+- **Password & login generators** — `Ctrl+G` in a field opens a generator: for a
+  `Password` field, a configurable password (length plus a special-character
+  checklist); for a `Login` field, a pronounceable word. Generation coalesces
+  into a single undo step.
 - **Detail overlay** — view a node's fields (`Ctrl+Enter`/`i`) and copy any
   row to the system clipboard with `c`/`y`. Copying uses OS-native APIs
   (`arboard`) on Windows, macOS, and X11 Linux, falling back to
@@ -74,10 +79,16 @@ irm https://github.com/Dmitrytuk/cretopass/releases/latest/download/install.ps1 
   into one line, and `Ctrl+V` never types the letter `v`.
 - **Mouse support** — the wheel scrolls every list identically in every terminal,
   and a click selects a row (a repeat click activates it); a right-click on a
-  detail row copies its value. Native terminal selection is off while the app runs;
-  hold `Shift` to select text.
+  detail row copies its value, and a click outside a modal closes it. Native
+  terminal selection is off while the app runs; hold `Shift` to select text.
 - **Home screen** — the app starts with a launcher screen: open an existing
-  secret file, create a new one, or pick from recently used files.
+  secret file, create a new one, change the active file's password, export or
+  share it, or pick from recently used files.
+- **Configuration** — a Home modal switches the colour scheme live (reverting on
+  `Esc`) and persists your choice.
+- **File browser** — names the file or folder for open/create/import/export/share.
+  `D` opens a `Locations` list of mounted disks, and `Ctrl+h` toggles hidden
+  dot-entries.
 - **Auto-save** — every mutation (add, edit, cut, paste) re-encrypts and
   writes the file immediately using an atomic temp-file rename, so a crash
   mid-save cannot corrupt the vault.
