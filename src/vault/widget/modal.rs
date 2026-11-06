@@ -31,9 +31,11 @@ pub use export::ExportWizard;
 pub use share::SharePassphrase;
 pub use unlock::UnlockPrompt;
 
-use crossterm::event::{KeyEvent, MouseButton};
+use crossterm::event::{KeyCode, KeyEvent, MouseButton};
+use ratatui::layout::Rect;
 
 use crate::file_handling::ExportFormat;
+use crate::hitbox::{is_left, point_in};
 use crate::share::SharePassword;
 
 /// What the active modal asks the Home screen to do.
@@ -197,9 +199,24 @@ impl Modal {
     /// its renderer recorded and reports what the user asked for, exactly as
     /// [`Modal::handle_key`] does.
     ///
+    /// A left click **outside** the panel the renderer drew is the modal's `Esc`:
+    /// the existing key path runs, so the click and the key can never drift. That
+    /// closes a prompt, discards the Configuration edits, or declines a
+    /// confirmation — a click can never answer `y`. About and the passive Alert
+    /// dismiss on any click, so they report no panel to test against; the
+    /// File Browser is a deliberate exception, for the reason on
+    /// [`Modal::panel_rect`].
+    ///
     /// A password prompt only moves the focus between its fields, and a
-    /// confirmation takes no clicks at all, so both report `None`.
+    /// confirmation takes no in-panel clicks, so their `handle_click` returns
+    /// `None` when the click lands within the panel.
     pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) -> Option<HomeAction> {
+        if is_left(button)
+            && let Some(rect) = self.panel_rect()
+            && !point_in(rect, x, y)
+        {
+            return self.handle_key(KeyEvent::from(KeyCode::Esc));
+        }
         match self {
             Self::About(about) => about.handle_click(button, x, y),
             Self::Alert(alert) => alert.handle_click(button, x, y),
@@ -223,6 +240,27 @@ impl Modal {
             Self::Export(wizard) => wizard.handle_click(button, x, y),
             Self::Confirmation(_) => None,
             Self::FileBrowser(browser) => browser.handle_click(button, x, y),
+        }
+    }
+
+    /// The panel the active modal drew last frame, when a click outside it is a
+    /// dismissal.
+    ///
+    /// `None` for the overlays that already dismiss on any click (About, Alert)
+    /// and for the File Browser. The browser is a deliberate exception: its
+    /// clickable list fills most of the screen, so a click beside it is far more
+    /// likely to be a near-miss on a row than a request to abandon an in-progress
+    /// file choice — it keeps its own click handling instead.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        match self {
+            Self::Unlock(prompt) => prompt.panel_rect(),
+            Self::CreateSecret(prompt) => prompt.panel_rect(),
+            Self::ChangePassword(prompt) => prompt.panel_rect(),
+            Self::Configuration(modal) => modal.panel_rect(),
+            Self::Confirmation(confirmation) => confirmation.panel_rect(),
+            Self::Export(wizard) => wizard.panel_rect(),
+            Self::SharePassphrase(prompt) => prompt.panel_rect(),
+            Self::FileBrowser(_) | Self::About(_) | Self::Alert(_) => None,
         }
     }
 }

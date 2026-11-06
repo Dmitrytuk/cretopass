@@ -28,6 +28,9 @@ pub(crate) struct ShareWizard {
     selected: usize,
     /// The clickable row regions recorded by the renderer.
     hits: HitMap<usize>,
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// An outside click closes the wizard, like `Esc`.
+    rect: Option<Rect>,
 }
 
 impl ShareWizard {
@@ -37,6 +40,7 @@ impl ShareWizard {
             node,
             selected: 0,
             hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -91,10 +95,17 @@ impl ShareWizard {
         }
     }
 
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// An outside click closes the wizard, like `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
+    }
+
     /// Draws the scope list over `area`.
     pub(crate) fn render(&mut self, frame: &mut Frame, area: Rect) {
         self.hits.clear();
         let overlay_area = centered_rect(area, area.width / 2, 6);
+        self.rect = Some(overlay_area);
 
         let block = Block::default()
             .title(texts::OVERLAY_SHARE_SCOPE)

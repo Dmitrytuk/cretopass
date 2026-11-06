@@ -41,6 +41,9 @@ pub(crate) struct SharePassphrase {
     confirming_empty: bool,
     /// The clickable field regions recorded by the renderer.
     hits: HitMap<usize>,
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// An outside click steps back one level, like `Esc`.
+    rect: Option<Rect>,
 }
 
 impl SharePassphrase {
@@ -54,6 +57,7 @@ impl SharePassphrase {
             passphrase: Passphrase::new(),
             confirming_empty: false,
             hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -123,6 +127,18 @@ impl SharePassphrase {
         None
     }
 
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// An outside click steps back one level, like `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
+    }
+
+    /// Whether the passwordless confirmation is the screen showing.
+    #[cfg(test)]
+    pub(crate) fn is_confirming_empty(&self) -> bool {
+        self.confirming_empty
+    }
+
     /// The share request for the typed `passphrase`.
     fn action(&self, passphrase: SharePassword) -> TreeAction {
         TreeAction::Share {
@@ -137,7 +153,7 @@ impl SharePassphrase {
     pub(crate) fn render(&mut self, frame: &mut Frame, area: Rect) {
         self.hits.clear();
         if self.confirming_empty {
-            self.render_empty_confirm(frame, area);
+            self.rect = Some(self.render_empty_confirm(frame, area));
             return;
         }
 
@@ -147,6 +163,7 @@ impl SharePassphrase {
             9
         };
         let overlay_area = centered_rect(area, area.width.saturating_mul(3) / 5, height);
+        self.rect = Some(overlay_area);
         let block = Block::default()
             .title(texts::SHARE_TITLE_PASSPHRASE)
             .borders(Borders::ALL)
@@ -197,7 +214,7 @@ impl SharePassphrase {
     }
 
     /// Draws the "share without a password?" confirmation.
-    fn render_empty_confirm(&self, frame: &mut Frame, area: Rect) {
+    fn render_empty_confirm(&self, frame: &mut Frame, area: Rect) -> Rect {
         let overlay_area = centered_rect(area, area.width.saturating_mul(2) / 3, 4);
         let block = Block::default()
             .title(texts::OVERLAY_SHARE_CONFIRM)
@@ -216,6 +233,8 @@ impl SharePassphrase {
         frame.render_widget(Clear, overlay_area);
         frame.render_widget(block, overlay_area);
         frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+
+        overlay_area
     }
 
     /// Badge and hint for the tree status bar while the password step is open.

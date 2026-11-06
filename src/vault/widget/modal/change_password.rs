@@ -31,6 +31,9 @@ pub struct ChangePasswordPrompt {
     error: Option<String>,
     /// The clickable field rows recorded by the renderer.
     hits: HitMap<usize>,
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it dismisses the dialog, like `Esc`.
+    rect: Option<Rect>,
 }
 
 impl ChangePasswordPrompt {
@@ -40,6 +43,7 @@ impl ChangePasswordPrompt {
             fields: SecretFieldGroup::with_fields(LABELS.len()),
             error: None,
             hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -106,9 +110,16 @@ impl ChangePasswordPrompt {
         }
     }
 
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it dismisses the dialog, like `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
+    }
+
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         self.hits.clear();
         let overlay_area = make_overlay(area, if self.error.is_some() { 12 } else { 11 });
+        self.rect = Some(overlay_area);
         let block = Block::default()
             .title(texts::HOME_CHANGE_PASSWORD)
             .borders(Borders::ALL)

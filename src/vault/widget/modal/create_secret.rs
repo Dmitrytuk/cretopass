@@ -31,6 +31,9 @@ pub struct CreateSecretPrompt {
     error: Option<String>,
     /// The clickable field rows recorded by the renderer.
     hits: HitMap<usize>,
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it dismisses the dialog, like `Esc`.
+    rect: Option<Rect>,
 }
 
 impl CreateSecretPrompt {
@@ -41,6 +44,7 @@ impl CreateSecretPrompt {
             fields: SecretFieldGroup::with_fields(LABELS.len()),
             error: None,
             hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -113,11 +117,18 @@ impl CreateSecretPrompt {
         }
     }
 
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it dismisses the dialog, like `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
+    }
+
     pub fn render(&mut self, frame: &mut Frame, area: Rect, display_full_path: bool) {
         self.hits.clear();
         let shown_path = display_path(&self.file_path, display_full_path);
 
         let overlay_area = make_overlay(area, if self.error.is_some() { 10 } else { 9 });
+        self.rect = Some(overlay_area);
         let block = Block::default()
             .title(texts::HOME_CREATE_SECRET)
             .borders(Borders::ALL)

@@ -7,7 +7,7 @@ Vault lifecycle: opening, creating, browsing for, configuring, and exchanging se
 **Home**: The launcher shown on startup. Lists Open secret file, Create new secret file, Configuration, Change file password, Export/Share/Import actions, and Recent secret files.
 _Avoid_: Settings menu, Launcher
 
-**Modal**: A window that takes over the keyboard until it is dismissed. At most one is open at a time, over the Home menu or the Tree. Nothing outside it reacts to keys while it is up.
+**Modal**: A window that takes over the keyboard until it is dismissed. At most one is open at a time, over the Home menu or the Tree. Nothing outside it reacts to keys while it is up. A left click outside its panel does what `Esc` does — closing a prompt, discarding Configuration edits, or declining a Confirmation; the File Browser is the one exception.
 _Avoid_: Overlay, Dialog, Popup (a Popup is the nested case)
 
 **Popup**: A window nested inside a Modal — the File Browser's Locations list, its name and rename prompts. It never outlives the Modal that opened it.

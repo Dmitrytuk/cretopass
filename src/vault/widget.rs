@@ -342,11 +342,13 @@ mod tests {
     use crate::vault::active_file::ActiveVaultState;
     use crate::vault::utils::Configuration;
     use crate::vault::widget::modal::{
-        About, BrowserModal, ConfigurationModal, Confirmation, ExportWizard, UnlockPrompt,
+        About, BrowserModal, ConfigurationModal, Confirmation, ExportWizard, SharePassphrase,
+        UnlockPrompt,
     };
     use crate::vault::widget::render::home_status_parts;
     use crossterm::event::KeyCode;
     use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
     use ratatui::style::Color;
     use std::path::PathBuf;
 
@@ -1051,5 +1053,188 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ── Outside-click dismissal (an outside click is the modal's Esc) ──
+
+    /// Draws the whole Home screen and any open modal into a test backend.
+    fn draw_home(state: &mut HomeState) {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, state);
+            })
+            .unwrap();
+    }
+
+    /// A cell guaranteed to fall outside `rect` on the 80×24 test screen.
+    fn outside(rect: Rect) -> (u16, u16) {
+        for y in 0..24u16 {
+            for x in 0..80u16 {
+                if !crate::hitbox::point_in(rect, x, y) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("every cell is inside {rect:?}");
+    }
+
+    /// The panel the active modal drew, when a click outside it dismisses.
+    fn panel(state: &HomeState) -> Rect {
+        state
+            .modal
+            .as_ref()
+            .and_then(Modal::panel_rect)
+            .expect("the active modal records a panel")
+    }
+
+    /// Drives one click through the same routing the event loop uses.
+    fn click(state: &mut HomeState, button: event::MouseButton, x: u16, y: u16) {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        handle_click(button, x, y, state, &mut terminal).unwrap();
+    }
+
+    #[test]
+    fn a_click_outside_the_unlock_prompt_closes_it() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Unlock(UnlockPrompt::new(
+            "/tmp/vault.age".to_string(),
+            vec![1, 2, 3],
+        )));
+        draw_home(&mut state);
+
+        let (x, y) = outside(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(
+            state.modal.is_none(),
+            "an outside click is the prompt's Esc"
+        );
+    }
+
+    #[test]
+    fn a_click_inside_the_unlock_prompt_off_a_field_is_a_noop() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Unlock(UnlockPrompt::new(
+            "/tmp/vault.age".to_string(),
+            vec![1, 2, 3],
+        )));
+        draw_home(&mut state);
+
+        // The panel's top-left cell is its border: inside, but no field row.
+        let rect = panel(&state);
+        click(&mut state, event::MouseButton::Left, rect.x, rect.y);
+
+        assert!(
+            matches!(state.modal, Some(Modal::Unlock(_))),
+            "a click inside the panel must not close it"
+        );
+    }
+
+    #[test]
+    fn a_click_outside_configuration_discards_the_edits() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.config_before_modal = state.config.clone();
+        // An unsaved edit that an outside click must roll back, as `Esc` does.
+        state.config.display_full_path = !state.config_before_modal.display_full_path;
+        state.modal = Some(Modal::Configuration(ConfigurationModal::new()));
+        draw_home(&mut state);
+
+        let (x, y) = outside(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(state.modal.is_none(), "the dialog closes");
+        assert_eq!(
+            state.config.display_full_path, state.config_before_modal.display_full_path,
+            "an outside click must discard the edits, like Esc"
+        );
+    }
+
+    #[test]
+    fn a_click_outside_a_confirmation_declines_and_never_confirms() {
+        let mut state = HomeState::with_config(Configuration::default());
+        let path = "/tmp/keep.age".to_string();
+        state.config.recent_files.push(path.clone());
+        state.modal = Some(Modal::Confirmation(Confirmation::delete_recent(
+            path.clone(),
+        )));
+        draw_home(&mut state);
+
+        let (x, y) = outside(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(state.modal.is_none(), "the confirmation is gone");
+        assert!(
+            state.config.recent_files.iter().any(|p| p == &path),
+            "an outside click declines: the file must not be dropped"
+        );
+    }
+
+    #[test]
+    fn a_right_click_outside_the_unlock_prompt_is_ignored() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Unlock(UnlockPrompt::new(
+            "/tmp/vault.age".to_string(),
+            vec![1, 2, 3],
+        )));
+        draw_home(&mut state);
+
+        let (x, y) = outside(panel(&state));
+        click(&mut state, event::MouseButton::Right, x, y);
+
+        assert!(
+            matches!(state.modal, Some(Modal::Unlock(_))),
+            "only the left button dismisses"
+        );
+
+        // The same cell with the left button does close, bracketing the guard.
+        click(&mut state, event::MouseButton::Left, x, y);
+        assert!(state.modal.is_none(), "the left button still dismisses");
+    }
+
+    #[test]
+    fn a_click_outside_the_export_wizard_closes_it() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Export(ExportWizard::new()));
+        draw_home(&mut state);
+
+        let (x, y) = outside(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(
+            state.modal.is_none(),
+            "an outside click is the wizard's Esc"
+        );
+    }
+
+    #[test]
+    fn a_click_outside_the_share_passphrase_step_closes_it() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::SharePassphrase(SharePassphrase::new(
+            "/tmp/bundle".to_string(),
+        )));
+        draw_home(&mut state);
+
+        let (x, y) = outside(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(state.modal.is_none(), "an outside click is the step's Esc");
+    }
+
+    #[test]
+    fn a_click_outside_about_still_dismisses_it() {
+        // About satisfies the guard's `None` branch and keeps its existing
+        // "any left click closes" behaviour.
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::About(About));
+        draw_home(&mut state);
+
+        click(&mut state, event::MouseButton::Left, 0, 0);
+
+        assert!(
+            state.modal.is_none(),
+            "About still closes on any left click"
+        );
     }
 }

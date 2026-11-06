@@ -21,6 +21,20 @@ pub(crate) fn is_left(button: MouseButton) -> bool {
     matches!(button, MouseButton::Left)
 }
 
+/// Whether the cell `(x, y)` falls inside `rect`.
+///
+/// `ratatui` 0.28 has no `Rect::contains`, so this is the one containment
+/// definition the app hit-tests with: [`HitBox::contains`] delegates to it, and
+/// a modal uses it to tell a click inside its panel from one outside it. Width
+/// and height are added with saturating arithmetic, so an overflowing rect can
+/// never wrap and report a cell outside it.
+pub(crate) fn point_in(rect: Rect, x: u16, y: u16) -> bool {
+    x >= rect.x
+        && x < rect.x.saturating_add(rect.width)
+        && y >= rect.y
+        && y < rect.y.saturating_add(rect.height)
+}
+
 /// One clickable rectangle and what a click there means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct HitBox<T> {
@@ -32,9 +46,7 @@ struct HitBox<T> {
 impl<T> HitBox<T> {
     /// Whether `(x, y)` falls inside this box.
     fn contains(&self, x: u16, y: u16) -> bool {
-        let (left, top, width, height) =
-            (self.rect.x, self.rect.y, self.rect.width, self.rect.height);
-        x >= left && x < left.saturating_add(width) && y >= top && y < top.saturating_add(height)
+        point_in(self.rect, x, y)
     }
 }
 
@@ -131,5 +143,33 @@ mod tests {
     fn is_left_only_accepts_the_primary_button() {
         assert!(is_left(MouseButton::Left));
         assert!(!is_left(MouseButton::Right));
+    }
+
+    #[test]
+    fn point_in_matches_the_half_open_rectangle() {
+        let rect = Rect::new(2, 1, 4, 3);
+        assert!(point_in(rect, 2, 1), "the top-left corner is inside");
+        assert!(point_in(rect, 5, 3), "the last cell is inside");
+        assert!(!point_in(rect, 1, 1), "left of the rect is outside");
+        assert!(!point_in(rect, 6, 1), "right of the rect is outside");
+        assert!(!point_in(rect, 2, 0), "above the rect is outside");
+        assert!(!point_in(rect, 2, 4), "below the rect is outside");
+    }
+
+    #[test]
+    fn point_in_saturates_instead_of_wrapping() {
+        // A rect whose right edge would overflow `u16` must not wrap and claim
+        // cells on the far left of the screen.
+        let rect = Rect::new(u16::MAX - 2, 0, 10, 1);
+        assert!(
+            !point_in(rect, 0, 0),
+            "the rect must not wrap to the left edge"
+        );
+        assert!(point_in(rect, u16::MAX - 2, 0));
+        assert!(point_in(rect, u16::MAX - 1, 0));
+        assert!(
+            !point_in(rect, u16::MAX, 0),
+            "the saturated right edge stays exclusive"
+        );
     }
 }

@@ -27,6 +27,9 @@ pub struct ExportWizard {
     index: usize,
     /// The clickable format rows recorded by the renderer.
     hits: HitMap<usize>,
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it dismisses the wizard, like `Esc`.
+    rect: Option<Rect>,
 }
 
 impl ExportWizard {
@@ -35,6 +38,7 @@ impl ExportWizard {
         Self {
             index: 0,
             hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -84,9 +88,15 @@ impl ExportWizard {
         }
     }
 
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it dismisses the wizard, like `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
+    }
+
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         self.hits.clear();
-        render_format_list(frame, area, self.index, &mut self.hits);
+        self.rect = Some(render_format_list(frame, area, self.index, &mut self.hits));
     }
 
     pub fn status_parts(&self) -> (&'static str, ElementStyle, Cow<'_, str>) {
@@ -98,7 +108,12 @@ impl ExportWizard {
     }
 }
 
-fn render_format_list(frame: &mut Frame, area: Rect, selected: usize, hits: &mut HitMap<usize>) {
+fn render_format_list(
+    frame: &mut Frame,
+    area: Rect,
+    selected: usize,
+    hits: &mut HitMap<usize>,
+) -> Rect {
     let overlay_area = make_overlay(area, 9);
     let block = Block::default()
         .title(texts::EXPORT_SELECT_TITLE)
@@ -143,6 +158,8 @@ fn render_format_list(frame: &mut Frame, area: Rect, selected: usize, hits: &mut
         block,
         Paragraph::new(Text::from(lines)),
     );
+
+    overlay_area
 }
 
 #[cfg(test)]
