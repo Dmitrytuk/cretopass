@@ -11,7 +11,7 @@ use crate::file_browser::state::{
     AddPrefix, BrowserHit, FileBrowserAction, FileBrowserState, FocusTarget,
 };
 use crate::file_handling;
-use crate::hitbox::is_left;
+use crate::hitbox::{RowClick, is_left};
 use crate::theming::texts;
 
 use super::input::{handle_input_key, handle_input_paste};
@@ -240,13 +240,13 @@ fn click_entry(index: usize, state: &mut FileBrowserState) -> Option<FileBrowser
     if index >= state.entries.len() {
         return None;
     }
-    let was_selected = state.selected == index;
+    let click = RowClick::resolve(state.selected, index);
     state.selected = index;
     // The search box takes `Enter` to end the search; a click must act, so it
     // leaves the search box first.
     state.search_active = false;
     let is_dir = state.entries[index].is_dir;
-    if is_dir || was_selected {
+    if is_dir || click.activated() {
         handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), state)
     } else {
         None

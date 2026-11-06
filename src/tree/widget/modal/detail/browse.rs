@@ -14,6 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use super::super::chrome::make_overlay_area;
 use super::{Detail, DetailHit, TreeAction, plain_key};
 use crate::cursor::selected_span;
+use crate::hitbox::RowClick;
 use crate::theming::{Action, ElementStyle};
 use crate::tree::widget::{FormState, TreeState};
 
@@ -78,10 +79,12 @@ impl Detail {
         button: MouseButton,
         state: &mut TreeState,
     ) -> Option<TreeAction> {
-        let was_selected = self.selected == index;
+        let click = RowClick::resolve(self.selected, index);
         self.selected = index;
         match button {
-            MouseButton::Left if was_selected => self.handle_key(plain_key(KeyCode::Enter), state),
+            MouseButton::Left if click.activated() => {
+                self.handle_key(plain_key(KeyCode::Enter), state)
+            }
             MouseButton::Right => self.handle_key(plain_key(KeyCode::Char('y')), state),
             _ => None,
         }

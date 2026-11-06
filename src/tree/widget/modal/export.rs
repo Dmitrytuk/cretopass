@@ -15,7 +15,7 @@ use super::TreeAction;
 use super::chrome::centered_rect;
 use crate::cursor::selected_span;
 use crate::file_handling::ExportFormat;
-use crate::hitbox::{ClickSurface, record_rows};
+use crate::hitbox::{ClickSurface, RowClick, record_rows};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::TreeState;
@@ -125,9 +125,9 @@ impl ExportWizard {
         if row >= count {
             return None;
         }
-        let was_selected = self.selected == row;
+        let click = RowClick::resolve(self.selected, row);
         self.selected = row;
-        if was_selected {
+        if click.activated() {
             self.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), state)
         } else {
             None

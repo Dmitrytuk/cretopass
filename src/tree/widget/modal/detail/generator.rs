@@ -21,7 +21,7 @@ use crate::cursor::{
     selected_span,
 };
 use crate::generator::{self, PasswordLength, PasswordParams};
-use crate::hitbox::{ClickSurface, record_rows};
+use crate::hitbox::{ClickSurface, RowClick, record_rows};
 use crate::theming::{Action, ElementStyle, Icon, texts};
 use crate::tree::widget::{GeneratorModal, TreeState};
 
@@ -231,12 +231,16 @@ impl Detail {
         if index >= GENERATOR_ROWS {
             return None;
         }
-        let was_selected =
-            matches!(&self.popup, DetailPopup::GeneratePassword(modal) if modal.selected == index);
+        let click = match &self.popup {
+            DetailPopup::GeneratePassword(modal) => RowClick::resolve(modal.selected, index),
+            // A different popup is not this generator: the old `matches!` guard
+            // was false here, so the click only moves and never activates.
+            _ => RowClick::Moved,
+        };
         if let DetailPopup::GeneratePassword(modal) = &mut self.popup {
             modal.selected = index;
         }
-        if was_selected {
+        if click.activated() {
             self.handle_key(plain_key(KeyCode::Enter), state)
         } else {
             None

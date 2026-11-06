@@ -15,7 +15,7 @@ use super::super::chrome::centered_rect;
 use super::form::commit_form_change;
 use super::{Detail, DetailHit, DetailPopup, TreeAction, plain_key};
 use crate::cursor::{cursor_field_spans, selected_span};
-use crate::hitbox::record_rows;
+use crate::hitbox::{RowClick, record_rows};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::{ExtraField, FieldType};
 use crate::tree::widget::{FormFocus, TreeState};
@@ -203,12 +203,16 @@ impl Detail {
         if index >= picker_items().len() {
             return None;
         }
-        let was_selected =
-            matches!(&self.popup, DetailPopup::SelectFieldType { selected } if *selected == index);
+        let click = match &self.popup {
+            DetailPopup::SelectFieldType { selected } => RowClick::resolve(*selected, index),
+            // A different popup is not this picker: the old `matches!` guard was
+            // false here, so the click only moves and never activates.
+            _ => RowClick::Moved,
+        };
         if let DetailPopup::SelectFieldType { selected } = &mut self.popup {
             *selected = index;
         }
-        if was_selected {
+        if click.activated() {
             self.handle_key(plain_key(KeyCode::Enter), state)
         } else {
             None

@@ -33,10 +33,12 @@ Rules that follow from it:
   synthetic key) and runs the existing handler, so keyboard and mouse cannot diverge.
 - **Soft policy vs. hard policy.** Two user-approved rules shape every click:
   a click first **moves the selection** to the clicked row, and a **repeat** click on
-  an already-selected list row **activates** it. On the Tree a branch toggles on a
-  single left click while a leaf is activated by the right button (which opens its
-  Detail); a right click on a Detail field row copies the value (an empty value is a
-  silent no-op).
+  an already-selected list row **activates** it. The first is the shared
+  `hitbox::RowClick::resolve(selected, clicked)` resolver (`Moved`/`Activated`), so
+  every picker reads the same rule; each site keeps its own activation branch. On the
+  Tree a branch toggles on a single left click while a leaf is activated by the right
+  button (which opens its Detail); a right click on a Detail field row copies the
+  value (an empty value is a silent no-op).
 - **An outside click is that modal's `Esc`.** A left click that misses a dismissable
   modal's panel runs the modal's own `Esc` handler — the same code path as the key —
   so a click closes a form, closes an export/share wizard, unwinds one nested popup

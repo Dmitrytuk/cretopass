@@ -19,7 +19,7 @@ use crate::cursor::{
     backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
 };
 use crate::generator;
-use crate::hitbox::{ClickSurface, record_rows};
+use crate::hitbox::{ClickSurface, RowClick, record_rows};
 use crate::theming::{Action, ElementStyle, Icon, texts};
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{FormFocus, FormPending, FormRow, FormState, GeneratorModal, TreeState};
@@ -206,9 +206,9 @@ impl Detail {
         state: &mut TreeState,
     ) -> Option<TreeAction> {
         let form = self.form.as_mut()?;
-        let was_selected = form.selected_row == index;
+        let click = RowClick::resolve(form.selected_row, index);
         form.select_row(&state.root, index);
-        if was_selected {
+        if click.activated() {
             self.handle_key(plain_key(KeyCode::Enter), state)
         } else {
             None

@@ -13,7 +13,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
-use crate::hitbox::{ClickSurface, record_rows};
+use crate::hitbox::{ClickSurface, RowClick, record_rows};
 use crate::theming::{Action, ElementStyle, Icon, scheme_label, texts};
 use crate::vault::utils::Configuration;
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
@@ -77,9 +77,9 @@ impl ConfigurationModal {
         if row >= SETTINGS.len() {
             return None;
         }
-        let was_selected = self.selected == row;
+        let click = RowClick::resolve(self.selected, row);
         self.selected = row;
-        if was_selected {
+        if click.activated() {
             Some(HomeAction::ToggleSetting(SETTINGS[row]))
         } else {
             None

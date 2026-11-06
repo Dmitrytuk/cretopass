@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
 use crate::file_handling::ExportFormat;
-use crate::hitbox::{ClickSurface, record_rows};
+use crate::hitbox::{ClickSurface, RowClick, record_rows};
 use crate::theming::{Action, ElementStyle, Icon, texts};
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
 
@@ -71,9 +71,9 @@ impl ExportWizard {
         if row >= count {
             return None;
         }
-        let was_selected = self.index == row;
+        let click = RowClick::resolve(self.index, row);
         self.index = row;
-        if was_selected {
+        if click.activated() {
             Some(HomeAction::BeginExportDestination {
                 format: FORMATS[row],
             })

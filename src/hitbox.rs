@@ -9,6 +9,10 @@
 //!
 //! The map is generic over the screen's own target, so this module depends only
 //! on `ratatui` and `crossterm` — a strict leaf like `generator` and `clipboard`.
+//!
+//! A modal groups its map with the panel it drew in a [`ClickSurface`], and
+//! [`RowClick`] resolves the click rule every picker shares: the first click
+//! moves the selection, and a repeat click activates.
 
 use crossterm::event::MouseButton;
 use ratatui::layout::Rect;
@@ -204,6 +208,36 @@ pub(crate) fn record_rows<T>(
     }
 }
 
+/// What a click on a selectable row resolves to.
+///
+/// The soft policy of the mouse feature (ADR 0026): the first click moves the
+/// selection to the clicked row, and only a click on the already-selected row
+/// activates it. Each screen keeps its own activation branch; this is the shared
+/// selection rule, so every picker reads the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RowClick {
+    /// The click moved the selection to a different row; it does not activate.
+    Moved,
+    /// The click landed on the already-selected row; activate it.
+    Activated,
+}
+
+impl RowClick {
+    /// Resolves a click at `clicked` against the row currently `selected`.
+    pub(crate) fn resolve(selected: usize, clicked: usize) -> Self {
+        if selected == clicked {
+            Self::Activated
+        } else {
+            Self::Moved
+        }
+    }
+
+    /// Whether the click should activate the row.
+    pub(crate) fn activated(self) -> bool {
+        matches!(self, Self::Activated)
+    }
+}
+
 /// Whether `button` at `(x, y)` is a click outside `panel`, once it has been
 /// drawn.
 ///
@@ -327,6 +361,14 @@ mod tests {
         assert_eq!(hits.hit(0, 0, MouseButton::Left), Some(0));
         assert_eq!(hits.hit(0, 1, MouseButton::Left), Some(1));
         assert_eq!(hits.hit(0, 2, MouseButton::Left), None);
+    }
+
+    #[test]
+    fn row_click_activates_only_the_already_selected_row() {
+        assert_eq!(RowClick::resolve(2, 2), RowClick::Activated);
+        assert_eq!(RowClick::resolve(2, 3), RowClick::Moved);
+        assert!(RowClick::resolve(0, 0).activated());
+        assert!(!RowClick::resolve(0, 1).activated());
     }
 
     #[test]
