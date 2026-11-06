@@ -157,7 +157,7 @@ impl Default for Spinner {
     /// Builds a deterministic spinner on the Braille frame set.
     ///
     /// State builders ([`HomeState::with_config`](crate::vault::HomeState),
-    /// [`TreeState::new`](crate::tree::TreeState)) use this so tests never read
+    /// [`TreeState::new`](crate::tree::widget::TreeState)) use this so tests never read
     /// the environment; the composition roots override it with
     /// [`Spinner::detected`].
     fn default() -> Self {
