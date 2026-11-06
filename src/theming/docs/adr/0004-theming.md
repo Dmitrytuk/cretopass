@@ -39,11 +39,13 @@ are banned for exactly this reason.
 
 The same rule governs the title-bar spinner
 ([0011](../../../../docs/adr/0011-animated-status-spinner.md)): its
-`SpinnerStyle` uses the Braille frames only where the process locale is UTF-8,
-and the WGL4-safe half-blocks (`U+2580` `▀`, `U+2590` `▐`, `U+2584` `▄`,
-`U+258C` `▌`) on Windows, so by default the busy glyph never collapses to one
-substituted placeholder. `CRETOPASS_SPINNER` overrides the choice when the
-default is wrong for the terminal in use.
+`SpinnerStyle` uses the Braille frames where the terminal understands UTF-8 —
+the process locale is UTF-8 or unset — and the WGL4-safe half-blocks
+(`U+2580` `▀`, `U+2590` `▐`, `U+2584` `▄`, `U+258C` `▌`) on Windows, which
+ignores the locale entirely, so by default the busy glyph never collapses to
+one substituted placeholder. An explicitly non-UTF-8 locale falls back to ASCII.
+`CRETOPASS_SPINNER` overrides the choice when the default is wrong for the
+terminal in use.
 
 ## Alerts
 

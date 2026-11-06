@@ -18,7 +18,7 @@ entire duration makes "working" visibly different from "stuck".
 | 6 | **Input during the Home wait is read and fully drained, then discarded.** | A stray Enter must not trigger a second action once the wait ends. Esc / Ctrl+C cannot cancel the scrypt work, so swallowing them is the honest behavior. |
 | 7 | **Tree: a guarded `tokio::time::interval` tick.** `MissedTickBehavior::Delay`; the tick branch and the flush tick are both guarded by `save_state.spins()`. | `interval`'s first tick is immediate, but the guard is false while idle, so the app does not redraw at 12.5 fps when nothing is happening. The Tree draws once per 80 ms only while a save is outstanding. |
 | 8 | **Tree: a blocking helper for the blocking writes.** `run_with_busy` mirrors Home's `run_with_spinner` for the Tree operations that block outside autosave — the share write and the export: a transient `operation_status` on `TreeState` takes title-bar precedence over `save_state`, and the helper advances the spinner and redraws until the worker finishes. | The share write (age scrypt + fsync, [0023](0023-sharing-a-vault-subtree.md)) and the export (full-tree serialisation plus file and directory `fsync`, [0022](0022-user-chosen-export-destination.md)) are as slow as a save and would otherwise freeze the UI. Mid-wait input is left to the `EventStream` rather than drained: polling crossterm would race its reader thread. |
-| 9 | **Frame set chosen at runtime.** `SpinnerStyle` (`Braille`/`Blocks`/`Ascii`) is resolved once by `Spinner::default()`: Windows uses the WGL4-safe half-block set (`U+2580` `▀`, `U+2590` `▐`, `U+2584` `▄`, `U+258C` `▌`); other platforms use Braille when the locale is UTF-8 and ASCII otherwise. `CRETOPASS_SPINNER=auto\|braille\|blocks\|ascii` overrides it. | Braille (`U+28xx`) is outside WGL4, so the console fonts Windows ships have no glyph for it and Windows substitutes one static placeholder for every frame — the animation looked frozen. Half-blocks are in WGL4, so the spinner moves in any console font. |
+| 9 | **Frame set chosen at runtime.** `SpinnerStyle` (`Braille`/`Blocks`/`Ascii`) is resolved at the composition roots by `Spinner::detected()` (`Spinner::default()` stays deterministic Braille for tests): Windows uses the WGL4-safe half-block set (`U+2580` `▀`, `U+2590` `▐`, `U+2584` `▄`, `U+258C` `▌`); other platforms use Braille when the locale is UTF-8 or unset and ASCII when the locale is explicitly non-UTF-8. `CRETOPASS_SPINNER=auto\|braille\|blocks\|ascii` overrides it. | Braille (`U+28xx`) is outside WGL4, so the console fonts Windows ships have no glyph for it and Windows substitutes one static placeholder for every frame — the animation looked frozen. Half-blocks are in WGL4, so the spinner moves in any console font. |
 
 ## Home busy helper
 
@@ -86,7 +86,9 @@ next turn of the event loop.
   save is outstanding.
 - The Tree title bar shows a blocking operation's status ahead of the autosave
   status; the two share one spinner frame counter.
-- The spinner's frame set is resolved once when the Home/Tree state is built
-  (from `CRETOPASS_SPINNER`, the OS, and the locale); on Unix an unset or
+- The spinner's frame set is resolved once at each composition root
+  (`HomeState::new`, the tree roots) from `CRETOPASS_SPINNER`, the OS, and the
+  locale; on Unix an unset or UTF-8 locale yields Braille and an explicitly
   non-UTF-8 locale yields ASCII, and the override can force a set where that
-  guess is wrong.
+  guess is wrong. The state builders used by tests call the deterministic
+  `Spinner::default()` (Braille) and never read the environment.
