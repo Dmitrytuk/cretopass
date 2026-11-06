@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use ratatui::style::Style;
 use ratatui::text::Span;
+use zeroize::Zeroizing;
 
 use crate::theming::{ElementStyle, Icon};
 
@@ -78,7 +79,7 @@ fn truncate_to_bytes(text: &str, max_bytes: usize) -> &str {
 /// Inserts a character at the cursor, advancing the cursor past the inserted
 /// character (accounting for multi-byte UTF-8 chars).
 ///
-/// A character that would push the field past [`MAX_FIELD_BYTES`] is not
+/// A character that would push the field past `MAX_FIELD_BYTES` is not
 /// inserted; the cursor is clamped to the text length either way.
 pub fn insert_char_at(text: &mut String, cursor: &mut usize, c: char) {
     let pos = (*cursor).min(text.len());
@@ -94,7 +95,7 @@ pub fn insert_char_at(text: &mut String, cursor: &mut usize, c: char) {
 ///
 /// The cursor is clamped to the text length and, defensively, walked back to a
 /// char boundary first, so a stray offset can never panic the insertion. An
-/// empty `s`, or one that has no room left before [`MAX_FIELD_BYTES`], changes
+/// empty `s`, or one that has no room left before `MAX_FIELD_BYTES`, changes
 /// nothing.
 pub fn insert_str_at(text: &mut String, cursor: &mut usize, s: &str) {
     let mut pos = (*cursor).min(text.len());
@@ -162,7 +163,7 @@ impl PastePolicy {
     /// Returns the form of `text` this policy accepts, borrowing when nothing
     /// needs to be removed.
     ///
-    /// The payload is first cut to [`MAX_FIELD_BYTES`], so a hostile clipboard
+    /// The payload is first cut to `MAX_FIELD_BYTES`, so a hostile clipboard
     /// cannot retain an unbounded string in a field even before sanitising.
     pub fn clean(self, text: &str) -> Cow<'_, str> {
         let text = truncate_to_bytes(text, MAX_FIELD_BYTES);
@@ -170,6 +171,23 @@ impl PastePolicy {
             Self::SingleLine => strip_control_chars(text),
             Self::Digits if text.chars().all(|c| c.is_ascii_digit()) => Cow::Borrowed(text),
             Self::Digits => Cow::Owned(text.chars().filter(char::is_ascii_digit).collect()),
+        }
+    }
+
+    /// Runs `f` on the sanitised form of `text`, zeroizing the result when the
+    /// policy had to rewrite it.
+    ///
+    /// The common control-free paste borrows the caller's buffer, so a secret
+    /// already held in a [`Zeroizing`] buffer is not copied a second time; only
+    /// a rewritten paste allocates, and that copy is wiped when `f` returns.
+    ///
+    /// The `impl FnOnce(&str) -> T` bound is higher-ranked in the slice's
+    /// lifetime, so `T` cannot hold a borrow of the cleaned text: the borrowed
+    /// branch's secret cannot escape past the call.
+    pub(crate) fn apply_cleaned<T>(self, text: &str, f: impl FnOnce(&str) -> T) -> T {
+        match self.clean(text) {
+            Cow::Borrowed(cleaned) => f(cleaned),
+            Cow::Owned(cleaned) => f(&Zeroizing::new(cleaned)),
         }
     }
 }
@@ -354,6 +372,20 @@ mod tests {
         // the `ESC` that would let it drive the terminal at render time.
         assert_eq!(PastePolicy::SingleLine.clean("pw\u{1b}[201~"), "pw[201~");
         assert_eq!(PastePolicy::SingleLine.clean("a\tb"), "ab");
+    }
+
+    #[test]
+    fn apply_cleaned_lends_the_policy_result_to_the_closure() {
+        assert_eq!(
+            PastePolicy::SingleLine.apply_cleaned("a\r\nb", |cleaned| cleaned.to_string()),
+            "ab",
+            "the owned path hands the rewritten text to the closure"
+        );
+        assert_eq!(
+            PastePolicy::SingleLine.apply_cleaned("plain", |cleaned| cleaned.to_string()),
+            "plain",
+            "the borrowed path hands the unchanged text to the closure"
+        );
     }
 
     #[test]

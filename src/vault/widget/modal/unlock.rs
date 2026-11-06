@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use zeroize::Zeroizing;
 
 use super::HomeAction;
-use crate::cursor::{FieldEdit, SecretFieldGroup, secret_field_spans};
+use crate::cursor::{FieldEdit, SecretFieldGroup, paste_clearing_error, secret_field_spans};
 use crate::hitbox::{ClickSurface, record_rows};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{display_path, make_overlay, paint_overlay};
@@ -80,9 +80,7 @@ impl UnlockPrompt {
 
     /// Pastes the clipboard's text into the password field, single-line only.
     pub fn handle_paste(&mut self, text: &str) {
-        if self.fields.paste_clipboard(text) {
-            self.error = None;
-        }
+        paste_clearing_error(&mut self.fields, &mut self.error, text);
     }
 
     /// A left click on the field focuses it; any other button is ignored.

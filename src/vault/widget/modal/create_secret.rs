@@ -8,7 +8,9 @@ use std::borrow::Cow;
 use zeroize::Zeroizing;
 
 use super::HomeAction;
-use crate::cursor::{FieldEdit, PairVerdict, SecretFieldGroup, password_field_spans};
+use crate::cursor::{
+    FieldEdit, PairVerdict, SecretFieldGroup, password_field_spans, paste_clearing_error,
+};
 use crate::hitbox::{ClickSurface, record_rows};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{display_path, make_overlay, paint_overlay};
@@ -82,9 +84,7 @@ impl CreateSecretPrompt {
     /// Pastes the clipboard's text into the focused password field,
     /// single-line only.
     pub fn handle_paste(&mut self, text: &str) {
-        if self.fields.paste_clipboard(text) {
-            self.error = None;
-        }
+        paste_clearing_error(&mut self.fields, &mut self.error, text);
     }
 
     /// Validates the pair: empty means "no passphrase" (a separate confirmation),

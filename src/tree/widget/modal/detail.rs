@@ -26,7 +26,6 @@ mod tests;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use zeroize::Zeroizing;
 
 use super::TreeAction;
 use crate::cursor::{PastePolicy, insert_str_at, push_str_capped};
@@ -185,15 +184,16 @@ impl Detail {
     pub(crate) fn handle_paste(&mut self, text: &str, _state: &mut TreeState) {
         match self.screen() {
             Screen::Form => {
-                let cleaned = Zeroizing::new(PastePolicy::SingleLine.clean(text).into_owned());
-                if cleaned.is_empty() {
-                    return;
-                }
-                let Some(scratch) = self.form.as_mut().and_then(|form| form.scratch.as_mut())
-                else {
-                    return;
-                };
-                insert_str_at(&mut scratch.text, &mut scratch.cursor, &cleaned);
+                PastePolicy::SingleLine.apply_cleaned(text, |cleaned| {
+                    if cleaned.is_empty() {
+                        return;
+                    }
+                    let Some(scratch) = self.form.as_mut().and_then(|form| form.scratch.as_mut())
+                    else {
+                        return;
+                    };
+                    insert_str_at(&mut scratch.text, &mut scratch.cursor, cleaned);
+                });
             }
             Screen::CustomFieldName => {
                 let cleaned = PastePolicy::SingleLine.clean(text);

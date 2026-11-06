@@ -13,7 +13,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
-use crate::cursor::{FieldEdit, SecretFieldGroup, password_field_spans};
+use crate::cursor::{FieldEdit, SecretFieldGroup, password_field_spans, paste_clearing_error};
 use crate::hitbox::{ClickSurface, record_rows};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
@@ -91,9 +91,7 @@ impl ChangePasswordPrompt {
     /// Pastes the clipboard's text into the focused password field,
     /// single-line only.
     pub fn handle_paste(&mut self, text: &str) {
-        if self.fields.paste_clipboard(text) {
-            self.error = None;
-        }
+        paste_clearing_error(&mut self.fields, &mut self.error, text);
     }
 
     /// A left click on a field row focuses that field; any other button is
