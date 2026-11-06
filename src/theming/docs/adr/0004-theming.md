@@ -27,6 +27,16 @@ impossible without touching every module.
 | `alert.rs` | The single shared alert card: `AlertKind` (`Success`/`Error`) and `render_alert(frame, area, message, kind)`. Both the Home and Tree alert modals draw through it, so a positive outcome is always green and a failure red. |
 | `texts.rs` | All UI string constants: labels, hints, mode names, messages, menu items, keyboard help — plus `share_instruction()`, which assembles the share bundle's `HOW-TO-OPEN.txt` from those constants so the `file_handling` gateway owns no user-facing prose. |
 
+## Icons
+
+`icon.rs` is the one place a glyph is chosen. Icons must stay within **WGL4**
+(or plain ASCII), because the console fonts Windows ships are WGL4-level: a
+codepoint outside it has no glyph in the font, and Windows substitutes it from
+Segoe UI Symbol/Emoji, drawing the boxed emoji form — usually double-width,
+which also shifts the row. The expand/collapse pair is the WGL4-safe `►` / `▼`
+(`U+25BA` / `U+25BC`); the boxed-emoji triangles `U+25B6` `▶` / `U+25C0` `◀`
+are banned for exactly this reason.
+
 ## Alerts
 
 `theming::render_alert` draws the one alert card both screens use: five rows
