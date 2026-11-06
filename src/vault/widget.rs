@@ -347,6 +347,19 @@ mod tests {
     // calls `env::set_var`, which would be undefined behaviour under the default
     // parallel runner.
 
+    /// `with_config` is the deterministic builder: it must not detect the
+    /// terminal, so its busy glyph is the Braille default no matter the
+    /// environment. Detection happens only in [`HomeState::new`].
+    #[test]
+    fn with_config_builds_the_deterministic_default_spinner() {
+        let state = HomeState::with_config(Configuration::default());
+        assert_eq!(
+            state.spinner.glyph(),
+            crate::theming::Spinner::default().glyph()
+        );
+        assert_eq!(crate::theming::Spinner::default().glyph(), "⣷");
+    }
+
     /// Renders the home screen — including any modal `state` carries — into a
     /// test backend, and asserts that no cell falls through to the terminal's own
     /// background (see [ADR 0018](../../../docs/adr/0018-app-owned-background-fill.md)).

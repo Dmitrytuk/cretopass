@@ -208,6 +208,7 @@ pub fn open_tree<B: Backend>(
 ) -> io::Result<()> {
     let target = path.map(|path| SaveTarget { path, passphrase });
     let mut tree_state = crate::tree::widget::TreeState::new(node);
+    tree_state.spinner = crate::theming::Spinner::detected();
     tree_state.display_full_path = state.config.display_full_path;
     tree_state.generator = state.generator;
     tree_state.browser_session = state.browser_session.clone();

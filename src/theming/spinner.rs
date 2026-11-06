@@ -1,14 +1,18 @@
 //! Animated busy glyph shared by the Home and Tree title bars.
 //!
 //! The spinner is deliberately dependency-free: the frames come from
-//! [`SpinnerStyle`], chosen at runtime by [`SpinnerStyle::detect`]. The smoothest
-//! set is the Braille one `throbber-widgets-tui` ships as `BRAILLE_EIGHT`, but
-//! Braille is outside **WGL4** — the coverage level of the console fonts Windows
-//! ships — so Windows has no glyph and substitutes one static placeholder for
-//! every frame. Windows therefore falls back to a WGL4-safe half-block set, and
-//! a locale that does not promise UTF-8 falls back to ASCII. A `usize` index
-//! advanced with `% frames().len()` stays in range by construction, unlike the
-//! crate's private `i8` index that saturates after ~10 s.
+//! [`SpinnerStyle`]. The smoothest set is the Braille one `throbber-widgets-tui`
+//! ships as `BRAILLE_EIGHT`, but Braille is outside **WGL4** — the coverage level
+//! of the console fonts Windows ships — so Windows has no glyph and substitutes
+//! one static placeholder for every frame. Windows therefore falls back to a
+//! WGL4-safe half-block set, and a locale that does not promise UTF-8 falls back
+//! to ASCII. A `usize` index advanced with `% frames().len()` stays in range by
+//! construction, unlike the crate's private `i8` index that saturates after ~10 s.
+//!
+//! Detection ([`SpinnerStyle::detect`]) reads the process environment and the OS,
+//! so the composition roots resolve it once through [`Spinner::detected`].
+//! [`Spinner::default`] stays deterministic (Braille) so state builders used by
+//! tests never depend on the developer's environment.
 
 use std::time::Duration;
 
@@ -30,13 +34,12 @@ const OVERRIDE_VAR: &str = "CRETOPASS_SPINNER";
 /// A set is never mixed: each style is a self-contained animation, so a terminal
 /// that lacks the glyphs of one set (the Windows console, for Braille) still
 /// animates with another.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpinnerStyle {
     /// Eight Braille frames (`U+28xx`), the same set `throbber-widgets-tui`
-    /// ships as `BRAILLE_EIGHT`. The default and the smoothest option; present
-    /// in Unicode terminals, absent from the WGL4-level fonts the Windows
-    /// console uses.
-    #[default]
+    /// ships as `BRAILLE_EIGHT`. The smoothest option and the deterministic
+    /// [`Spinner::default`]; present in Unicode terminals, absent from the
+    /// WGL4-level fonts the Windows console uses.
     Braille,
     /// A rotating half-block set. Every glyph is in **WGL4** (`U+2580` `▀`,
     /// `U+2590` `▐`, `U+2584` `▄`, `U+258C` `▌`), so it renders in the Windows
@@ -57,46 +60,71 @@ impl SpinnerStyle {
         }
     }
 
-    /// Chooses a frame set from the environment.
+    /// Chooses a frame set from the environment and the OS.
     ///
     /// The `CRETOPASS_SPINNER` environment variable wins when it names a style;
     /// otherwise the platform decides: Windows gets [`Blocks`](Self::Blocks) —
     /// its console fonts have no Braille glyph, and a missing glyph renders one
     /// static placeholder for every frame — while every other platform gets
-    /// [`Braille`](Self::Braille) when the locale is UTF-8 and
-    /// [`Ascii`](Self::Ascii) otherwise.
+    /// [`Braille`](Self::Braille) when the locale is UTF-8 or unset and
+    /// [`Ascii`](Self::Ascii) when the locale is explicitly non-UTF-8.
+    ///
+    /// Reads the environment, so call it once at a composition root (through
+    /// [`Spinner::detected`]), never per frame.
     pub fn detect() -> Self {
         let choice = std::env::var(OVERRIDE_VAR).ok();
-        let locale = ["LC_ALL", "LC_CTYPE", "LANG"]
-            .iter()
-            .find_map(|key| std::env::var(key).ok().filter(|value| !value.is_empty()));
-        resolve(
-            choice.as_deref(),
-            cfg!(windows),
-            is_utf8_locale(locale.as_deref()),
-        )
+        resolve(choice.as_deref(), cfg!(windows), is_unicode_terminal())
     }
 }
 
 /// Resolves a frame set from already-read environment values.
 ///
 /// Kept a pure function so tests can exercise every branch without mutating the
-/// process-global environment, which is undefined behaviour under the default
-/// parallel test runner.
+/// process-global environment, which is a data race under the default parallel
+/// test runner.
 fn resolve(choice: Option<&str>, windows: bool, unicode: bool) -> SpinnerStyle {
-    match choice.map(str::to_ascii_lowercase).as_deref() {
-        Some("braille") => SpinnerStyle::Braille,
-        Some("blocks") => SpinnerStyle::Blocks,
-        Some("ascii") => SpinnerStyle::Ascii,
+    match choice {
+        Some(value) if value.eq_ignore_ascii_case("braille") => SpinnerStyle::Braille,
+        Some(value) if value.eq_ignore_ascii_case("blocks") => SpinnerStyle::Blocks,
+        Some(value) if value.eq_ignore_ascii_case("ascii") => SpinnerStyle::Ascii,
         _ if windows => SpinnerStyle::Blocks,
         _ if unicode => SpinnerStyle::Braille,
         _ => SpinnerStyle::Ascii,
     }
 }
 
-/// Whether a locale string (e.g. `en_US.UTF-8`) promises UTF-8 output.
+/// Whether this process's terminal promises UTF-8 output.
+///
+/// Windows console fonts are WGL4-level and the platform ignores the locale for
+/// the frame choice, so the locale is not even read there.
+fn is_unicode_terminal() -> bool {
+    if cfg!(windows) {
+        return false;
+    }
+    let lc_all = std::env::var("LC_ALL").ok();
+    let lc_ctype = std::env::var("LC_CTYPE").ok();
+    let lang = std::env::var("LANG").ok();
+    is_utf8_locale(first_non_empty([
+        lc_all.as_deref(),
+        lc_ctype.as_deref(),
+        lang.as_deref(),
+    ]))
+}
+
+/// The first non-empty value among the standard locale variables, in precedence
+/// order (`LC_ALL`, then `LC_CTYPE`, then `LANG`).
+fn first_non_empty(values: [Option<&str>; 3]) -> Option<&str> {
+    values.into_iter().flatten().find(|value| !value.is_empty())
+}
+
+/// Whether a locale string promises UTF-8 output.
+///
+/// An unset locale counts as UTF-8: modern terminals render UTF-8 regardless, and
+/// a process launched from a GUI (common on macOS) often inherits no locale. Only
+/// an explicitly non-UTF-8 locale such as `C`, `POSIX`, or `*.ISO-8859-1` gives
+/// ASCII.
 fn is_utf8_locale(locale: Option<&str>) -> bool {
-    locale.is_some_and(|value| {
+    locale.is_none_or(|value| {
         let upper = value.to_ascii_uppercase();
         upper.contains("UTF-8") || upper.contains("UTF8")
     })
@@ -110,16 +138,28 @@ pub struct Spinner {
 }
 
 impl Default for Spinner {
-    /// Builds a spinner whose frame set is detected for the current terminal.
+    /// Builds a deterministic spinner on the Braille frame set.
+    ///
+    /// State builders ([`HomeState::with_config`](crate::vault::HomeState),
+    /// [`TreeState::new`](crate::tree::TreeState)) use this so tests never read
+    /// the environment; the composition roots override it with
+    /// [`Spinner::detected`].
     fn default() -> Self {
-        Self::new(SpinnerStyle::detect())
+        Self::new(SpinnerStyle::Braille)
     }
 }
 
 impl Spinner {
     /// Creates a spinner that cycles through `style`'s frames.
-    pub fn new(style: SpinnerStyle) -> Self {
+    fn new(style: SpinnerStyle) -> Self {
         Self { index: 0, style }
+    }
+
+    /// Builds a spinner whose frame set is detected for the current terminal.
+    ///
+    /// Reads the environment and the OS, so call it once at a composition root.
+    pub fn detected() -> Self {
+        Self::new(SpinnerStyle::detect())
     }
 
     /// Advances to the next frame, wrapping back to the first after the last.
@@ -143,6 +183,12 @@ mod tests {
         SpinnerStyle::Blocks,
         SpinnerStyle::Ascii,
     ];
+
+    #[test]
+    fn default_spinner_uses_the_braille_frame_set() {
+        let frames = SpinnerStyle::Braille.frames();
+        assert_eq!(Spinner::default().glyph(), frames[0]);
+    }
 
     #[test]
     fn every_style_advances_through_its_frames_and_wraps() {
@@ -188,10 +234,27 @@ mod tests {
     }
 
     #[test]
+    fn the_first_non_empty_locale_wins_in_precedence_order() {
+        assert_eq!(
+            first_non_empty([Some("a"), Some("b"), Some("c")]),
+            Some("a")
+        );
+        assert_eq!(first_non_empty([Some(""), Some("b"), Some("c")]), Some("b"));
+        assert_eq!(first_non_empty([Some(""), Some(""), Some("c")]), Some("c"));
+        assert_eq!(first_non_empty([None, None, Some("c")]), Some("c"));
+        assert_eq!(first_non_empty([Some(""), Some(""), Some("")]), None);
+        assert_eq!(first_non_empty([None, None, None]), None);
+    }
+
+    #[test]
     fn utf8_locales_are_recognised_by_their_common_spellings() {
         assert!(is_utf8_locale(Some("en_US.UTF-8")));
+        assert!(is_utf8_locale(Some("en_us.utf-8")));
         assert!(is_utf8_locale(Some("C.utf8")));
+        assert!(is_utf8_locale(None));
+        assert!(!is_utf8_locale(Some("")));
         assert!(!is_utf8_locale(Some("C")));
-        assert!(!is_utf8_locale(None));
+        assert!(!is_utf8_locale(Some("POSIX")));
+        assert!(!is_utf8_locale(Some("de_DE.ISO-8859-1")));
     }
 }

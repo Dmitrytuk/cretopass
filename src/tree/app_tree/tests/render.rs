@@ -64,13 +64,16 @@ fn a_blocking_operation_shows_the_saving_spinner_in_the_title_bar() {
     state.save_state = SaveState::Idle;
     state.operation_status = Some(crate::theming::Status::Saving);
 
+    // Read the frame the state itself carries, not a freshly detected one, so a
+    // regression that changes the default frame set cannot slip through.
+    let glyph = state.spinner.glyph();
     let content = rendered_text(&mut state);
     assert!(
         content.contains(texts::STATUS_SAVING),
         "the title bar must show the operation status: {content:?}"
     );
     assert!(
-        content.contains(crate::theming::Spinner::default().glyph()),
+        content.contains(glyph),
         "the busy glyph must be shown: {content:?}"
     );
 }

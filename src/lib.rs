@@ -34,6 +34,7 @@ pub fn run() -> io::Result<()> {
 /// Runs the TUI with a custom root node, skipping the home screen.
 pub fn run_with_root(root: Node) -> io::Result<()> {
     let mut state = TreeState::new(root);
+    state.spinner = crate::theming::Spinner::detected();
     let mut term = terminal::setup()?;
     let res = tree::app_tree::run_app(&mut term, &mut state, None).map(|_| ());
     terminal::restore();
