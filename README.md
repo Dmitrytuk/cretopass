@@ -30,8 +30,21 @@ it to `PATH`. Pass `-Force` to reinstall.
 ### Updating & uninstalling
 
 ```sh
-cretopass update   # check for a new version and install it
 cretopass remove   # delete the app and all its artifacts
+```
+
+The app never connects to the network, so it does not update itself. To update,
+re-run the installer (the same command you installed with) or use your package
+manager:
+
+```sh
+# Linux & macOS
+curl -fsSL https://github.com/Dmitrytuk/cretopass/releases/latest/download/install.sh | sh
+```
+
+```powershell
+# Windows
+irm https://github.com/Dmitrytuk/cretopass/releases/latest/download/install.ps1 | iex
 ```
 
 ## Core functionality
@@ -83,7 +96,9 @@ cretopass deliberately keeps its attack surface small by design:
   *you* choose the location of — your home directory, an encrypted USB
   drive, or your own sync folder. There is no cloud service, no account, no
   third-party server, and no telemetry. Nothing is ever transmitted over the
-  network; the app does not use the network at all.
+  network: the binary contains no network code at all — no telemetry, no
+  account, no update check, and no self-update. Updating is an explicit action
+  you take outside the app.
 - **age encryption.** Files are encrypted with
   [age](https://age-encryption.org) using a passphrase you provide
   (scrypt-based key derivation). Without the passphrase the file is

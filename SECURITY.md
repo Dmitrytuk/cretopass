@@ -28,12 +28,19 @@ version before reporting.
 
 ## Scope
 
+cretopass makes no network requests: the binary contains no network code, and
+updating is an explicit, out-of-process action. The only external channel is the
+release installer (`install.sh` / `install.ps1`) and the release artifacts
+themselves.
+
 In scope:
 
 - encryption and decryption of secret files (`age`),
 - handling of the master password and other secrets in memory,
 - the atomic save, import, and export paths,
-- file-permission or privilege issues.
+- file-permission or privilege issues,
+- the release/installer channel: a tampered release artifact or installer
+  script.
 
 Out of scope:
 

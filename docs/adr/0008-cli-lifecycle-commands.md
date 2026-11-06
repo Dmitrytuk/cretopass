@@ -1,8 +1,15 @@
 # 0008 — CLI lifecycle commands (`update`, `remove`)
 
-`cretopass update` delegates to the platform installer script;
+> **Partially superseded by [ADR 0027](0027-no-in-app-network-access.md).**
+> The `update` half below was **removed**: the binary no longer downloads or
+> executes the installer, because a local password manager makes no network
+> requests. This ADR is kept as the record of the original design; the `remove`
+> decisions still stand.
+
+`cretopass update` delegated to the platform installer script (removed; see
+[ADR 0027](0027-no-in-app-network-access.md));
 `cretopass remove` mirrors the installer's layout in reverse.
-On Windows, both use a detached helper to stage self-replace/self-remove.
+On Windows, `remove` uses a detached helper to stage self-removal.
 
 ## Decisions
 
@@ -23,6 +30,6 @@ On Windows, both use a detached helper to stage self-replace/self-remove.
 - `remove` prompts for confirmation before deleting, listing what will be removed, and lists rc files only when they actually contain a cretopass marker.
 - `remove` rewrites shell rc files atomically and never truncates them when a marker block is unterminated.
 - The `cli` module is the single deliberate exception to the "`file_handling` is the only filesystem gateway" contract ([ADR 0001](../../src/file_handling/docs/adr/0001-io-gateway.md)): it manages install artifacts, not secrets, and uses `std::fs` directly. Every other module writes through the gateway.
-- `update` streams the installer's stdout/stderr to the user as a progress report.
+- `update` streamed the installer's stdout/stderr to the user as a progress report (removed; see [ADR 0027](0027-no-in-app-network-access.md)).
 - The `install.sh`/`install.ps1` scripts are the **canonical record** of installation layout; `layout.rs` is the Rust mirror and the only place `detect`/`remove` read it from.
 - `CRETOPASS_UPDATE_URL` is honoured in debug builds only; `CRETOPASS_CONFIG_DIR` is likewise debug-gated in [`vault::utils::config_dir`](../../src/vault/utils.rs).

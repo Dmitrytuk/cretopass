@@ -38,4 +38,5 @@ Issue Forms only take effect once the templates reach the default branch
 - [0004 — theming](../src/theming/docs/adr/0004-theming.md) — the module that
   holds the shared string constants and keybinding dispatch
 - [0008 — CLI lifecycle commands](./0008-cli-lifecycle-commands.md) — the
-  `update`/`remove` output where the rejected feedback links would have gone
+  `remove` output where the rejected feedback links would have gone (the `update`
+  half was later removed, see [0027](./0027-no-in-app-network-access.md))

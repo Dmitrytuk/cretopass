@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `cretopass update` (in-app self-update) is gone: the binary no longer contains
+  any network code, so a local password manager never downloads or executes
+  remote code. Update by re-running the installer or through your package
+  manager ([ADR 0027](docs/adr/0027-no-in-app-network-access.md)).
+
 ## [1.1.0] - 2026-11-05
 
 ### Added

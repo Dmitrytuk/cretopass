@@ -12,7 +12,7 @@ pub(crate) enum InstallSource {
     Pacman,
     /// Installed via `cargo install`.
     CargoInstall,
-    /// Unknown installation method — refuse update/remove.
+    /// Unknown installation method — refuse remove.
     Unknown,
 }
 
@@ -58,7 +58,7 @@ impl InstallSource {
     }
 }
 
-/// A refusal to run `update`/`remove` against a non-self-managed install.
+/// A refusal to run `remove` against a non-self-managed install.
 ///
 /// Carries the detected [`InstallSource`] so callers can distinguish a
 /// `pacman` install from a `cargo install` without parsing user-facing text.
@@ -84,7 +84,7 @@ impl fmt::Display for ForeignInstall {
             InstallSource::Unknown => write!(
                 f,
                 "cannot determine how cretopass was installed.\n\
-                 Update and remove are only supported for installations from GitHub Releases\n\
+                 Remove is only supported for installations from GitHub Releases\n\
                  (via install.sh or install.ps1)."
             ),
         }
