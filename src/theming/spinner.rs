@@ -124,15 +124,21 @@ fn first_non_empty(values: [Option<&str>; 3]) -> Option<&str> {
 /// an explicitly non-UTF-8 locale such as `C`, `POSIX`, or `*.ISO-8859-1` gives
 /// ASCII.
 fn is_utf8_locale(locale: Option<&str>) -> bool {
-    locale.is_none_or(|value| codeset(value).is_some_and(is_utf8_codeset))
+    locale.is_none_or(|value| is_utf8_codeset(codeset(value)))
 }
 
 /// The codeset token of a POSIX locale string
 /// (`language[_territory][.codeset][@modifier]`), e.g. `UTF-8` in
 /// `en_US.UTF-8@euro`.
-fn codeset(locale: &str) -> Option<&str> {
-    let after_dot = locale.split_once('.')?.1;
-    Some(after_dot.split('@').next().unwrap_or(after_dot))
+///
+/// A value with no `.` is the codeset itself, so a bare `UTF-8` (the macOS
+/// Terminal.app default `LC_CTYPE`) still matches. The first `.` wins and any
+/// `@modifier` is dropped.
+fn codeset(locale: &str) -> &str {
+    let after_dot = locale.split_once('.').map_or(locale, |(_, rest)| rest);
+    after_dot
+        .split_once('@')
+        .map_or(after_dot, |(head, _)| head)
 }
 
 /// Whether a codeset token names UTF-8 (`UTF-8` or `UTF8`, any case).
@@ -262,13 +268,27 @@ mod tests {
         assert!(is_utf8_locale(Some("en_us.utf-8")));
         assert!(is_utf8_locale(Some("C.utf8")));
         assert!(is_utf8_locale(Some("en_US.UTF-8@euro")));
+        // A bare codeset (macOS Terminal.app's `LC_CTYPE=UTF-8`) still matches.
+        assert!(is_utf8_locale(Some("UTF-8")));
+        assert!(is_utf8_locale(Some("UTF8")));
         assert!(is_utf8_locale(None));
         assert!(!is_utf8_locale(Some("")));
         assert!(!is_utf8_locale(Some("C")));
         assert!(!is_utf8_locale(Some("POSIX")));
+        assert!(!is_utf8_locale(Some("en_US")));
         assert!(!is_utf8_locale(Some("de_DE.ISO-8859-1")));
         // The codeset is matched as a whole token, not a substring.
         assert!(!is_utf8_locale(Some("en_US.XXUTF8XX")));
         assert!(!is_utf8_locale(Some("en_US.UTF-8x")));
+    }
+
+    #[test]
+    fn codeset_takes_the_first_dot_and_drops_the_modifier() {
+        assert_eq!(codeset("en_US.UTF-8"), "UTF-8");
+        assert_eq!(codeset("en_US.UTF-8@euro"), "UTF-8");
+        assert_eq!(codeset("UTF-8"), "UTF-8");
+        assert_eq!(codeset("C"), "C");
+        assert_eq!(codeset(""), "");
+        assert_eq!(codeset("@euro"), "");
     }
 }
