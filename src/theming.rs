@@ -19,7 +19,7 @@ pub use background::paint_background;
 pub use icon::Icon;
 pub use key::Action;
 pub(crate) use key::{KeyRoute, route_key, wheel_nav_key};
-pub use spinner::{SPINNER_TICK, Spinner};
+pub use spinner::{SPINNER_TICK, Spinner, SpinnerStyle};
 pub use status::Status;
 pub use status_bar::render_status_bar;
 pub use style::ElementStyle;
