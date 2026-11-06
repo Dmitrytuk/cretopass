@@ -29,7 +29,7 @@ use ratatui::layout::Rect;
 use zeroize::Zeroizing;
 
 use super::TreeAction;
-use crate::cursor::{PastePolicy, insert_str_at};
+use crate::cursor::{PastePolicy, insert_str_at, push_str_capped};
 use crate::hitbox::ClickSurface;
 use crate::theming::{ElementStyle, texts};
 use crate::tree::node::Node;
@@ -201,7 +201,7 @@ impl Detail {
                     return;
                 }
                 if let DetailPopup::CustomFieldName { input } = &mut self.popup {
-                    input.push_str(&cleaned);
+                    push_str_capped(input, &cleaned);
                 }
             }
             Screen::GeneratePassword => {

@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use super::super::chrome::centered_rect;
 use super::form::commit_form_change;
 use super::{Detail, DetailHit, DetailPopup, TreeAction, plain_key};
-use crate::cursor::{cursor_field_spans, selected_span};
+use crate::cursor::{cursor_field_spans, push_char_capped, selected_span};
 use crate::hitbox::{RowClick, record_rows};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::{ExtraField, FieldType};
@@ -155,7 +155,7 @@ impl Detail {
             }
             Action::InsertChar(c) => {
                 let mut input = input;
-                input.push(c);
+                push_char_capped(&mut input, c);
                 self.popup = DetailPopup::CustomFieldName { input };
                 self.form = Some(form);
             }

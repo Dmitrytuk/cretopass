@@ -6,7 +6,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton};
 
-use crate::cursor::PastePolicy;
+use crate::cursor::{PastePolicy, push_char_capped, push_str_capped};
 use crate::file_browser::state::{
     AddPrefix, BrowserHit, FileBrowserAction, FileBrowserState, FocusTarget,
 };
@@ -120,7 +120,7 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
                 return None;
             }
             KeyCode::Char(c) if !c.is_control() => {
-                state.search_query.push(c);
+                push_char_capped(&mut state.search_query, c);
                 state.clamp_selection();
                 return None;
             }
@@ -198,7 +198,7 @@ pub fn handle_paste(text: &str, state: &mut FileBrowserState) {
         FocusTarget::Input => handle_input_paste(state, &cleaned),
         FocusTarget::Rename => handle_rename_paste(state, &cleaned),
         FocusTarget::List if state.search_active => {
-            state.search_query.push_str(&cleaned);
+            push_str_capped(&mut state.search_query, &cleaned);
             state.clamp_selection();
         }
         FocusTarget::List | FocusTarget::Locations => {}

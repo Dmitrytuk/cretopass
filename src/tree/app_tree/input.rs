@@ -10,7 +10,7 @@
 use std::io;
 
 use crate::clipboard;
-use crate::cursor::PastePolicy;
+use crate::cursor::{PastePolicy, push_char_capped, push_str_capped};
 use crate::file_handling::{Autosave, SaveError};
 use crate::theming::{Action, KeyRoute, route_key, wheel_nav_key};
 use crate::tree::node::Node;
@@ -460,7 +460,7 @@ fn handle_search(key: event::KeyEvent, state: &mut TreeState) {
         }
         Action::InsertChar(c) => {
             let mut q = state.search_query.clone();
-            q.push(c);
+            push_char_capped(&mut q, c);
             state.set_search(q);
         }
         _ => {}
@@ -477,7 +477,7 @@ fn handle_search_paste(text: &str, state: &mut TreeState) {
         return;
     }
     let mut query = state.search_query.clone();
-    query.push_str(&cleaned);
+    push_str_capped(&mut query, &cleaned);
     state.set_search(query);
 }
 
