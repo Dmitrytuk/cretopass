@@ -23,7 +23,7 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 | `widget/state.rs` | the tree model and its operations: `TreeState` (root, expanded set, selected index, visible list, navigation mode, vault path, modified flag, cut buffer, search state, `SaveState`, `SaveExit`, the `Modal` slot, the File Browser session memory), `VisibleNode`, the five-variant `InputMode` enum, `AddPosition`, and all tree mutation, navigation and search operations |
 | `widget/form.rs` | the Add/Edit form: `FormState` + undo/redo history (`Snapshot`, `Scratch`), the `FormRow`/`FormFocus`/`FormPending` enums, and `GeneratorModal` |
 | `widget/save.rs` | the autosave status `SaveState` and the parked exit `SaveExit` |
-| `widget/render.rs` | `TreeWidget::render()`: the DFS flat-list view and its title bar |
+| `widget/render.rs` | `TreeWidget::render_with_hits()`: the DFS flat-list view and its title bar, recording clickable rows (`render()` is the public hit-less wrapper) |
 | `widget/modal.rs` | the `Modal` slot, the `TreeAction` intent enum, and the `handle_key(key, &mut TreeState) -> Option<TreeAction>` contract; declares the per-modal sub-modules |
 | `widget/modal/*.rs` | one file per modal (or popup): `help`, `alert`, `detail` (the Form and its picker/name/confirm/generator popups), `export`, `export_destination` (the File Browser naming an export's destination); `chrome.rs` holds the shared overlay geometry |
 | `widget/orchestrator.rs` | the one place a `TreeAction` becomes real work: system clipboard, export file write, screen transitions |

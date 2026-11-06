@@ -27,8 +27,9 @@ pub(crate) fn is_left(button: MouseButton) -> bool {
 
 /// Whether the cell `(x, y)` falls inside `rect`.
 ///
-/// `ratatui` 0.28 has no `Rect::contains`, so this is the one containment
-/// definition the app hit-tests with: [`HitBox::contains`] delegates to it, and
+/// `ratatui`'s `Rect::contains` takes a `Position`; this keeps the app's
+/// `(u16, u16)` call shape and spells out the saturating edge. It is the one
+/// containment definition the app hit-tests with: [`HitMap::hit`] uses it, and
 /// a modal uses it to tell a click inside its panel from one outside it. Width
 /// and height are added with saturating arithmetic, so an overflowing rect can
 /// never wrap and report a cell outside it.
@@ -45,13 +46,6 @@ struct HitBox<T> {
     rect: Rect,
     button: MouseButton,
     target: T,
-}
-
-impl<T> HitBox<T> {
-    /// Whether `(x, y)` falls inside this box.
-    fn contains(&self, x: u16, y: u16) -> bool {
-        point_in(self.rect, x, y)
-    }
 }
 
 /// The clickable regions of one frame, in the order they were recorded.
@@ -92,7 +86,7 @@ impl<T: Copy> HitMap<T> {
         self.boxes
             .iter()
             .rev()
-            .find(|b| b.button == button && b.contains(x, y))
+            .find(|b| b.button == button && point_in(b.rect, x, y))
             .map(|b| b.target)
     }
 }
@@ -403,5 +397,60 @@ mod tests {
             !point_in(rect, u16::MAX, 0),
             "the saturated right edge stays exclusive"
         );
+    }
+}
+
+/// Shared helpers for the click tests on the `80x24` [`TestBackend`] screen.
+///
+/// Screen-specific routing (`click`, `panel`) stays with each screen; these are
+/// the pure geometry searches every click test repeats.
+///
+/// [`TestBackend`]: ratatui::backend::TestBackend
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    /// The first cell whose hit map answers `target` for `button`.
+    pub(crate) fn point_for<T: Copy + PartialEq + std::fmt::Debug>(
+        hits: &HitMap<T>,
+        target: T,
+        button: MouseButton,
+    ) -> (u16, u16) {
+        for y in 0..24u16 {
+            for x in 0..80u16 {
+                if hits.hit(x, y, button) == Some(target) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("no hit region for {target:?}");
+    }
+
+    /// The first cell whose click surface answers `target` for `button`.
+    pub(crate) fn surface_point_for<T: Copy + PartialEq + std::fmt::Debug>(
+        surface: &ClickSurface<T>,
+        target: T,
+        button: MouseButton,
+    ) -> (u16, u16) {
+        for y in 0..24u16 {
+            for x in 0..80u16 {
+                if surface.target_at(button, x, y) == Some(target) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("no hit region for {target:?}");
+    }
+
+    /// A cell guaranteed to fall outside `rect` on the `80x24` test screen.
+    pub(crate) fn outside_point(rect: Rect) -> (u16, u16) {
+        for y in 0..24u16 {
+            for x in 0..80u16 {
+                if !point_in(rect, x, y) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("every cell is inside {rect:?}");
     }
 }

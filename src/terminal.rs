@@ -5,6 +5,16 @@
 //! teardown is symmetric on normal exit, on error **and** on panic. Keeping the
 //! modes in one module is also what lets the same [`restore`] be reused by the
 //! panic hook installed by [`setup`].
+//!
+//! # Testing
+//!
+//! There is deliberately no test seam here. Every function mutates the real
+//! terminal and the panic hook is process-global ([`Once`]), so a unit test
+//! could only pretend to cover it (and would corrupt a running test session).
+//! The ordering and partial-setup rollback paths are exercised manually: a
+//! failed start must leave the shell usable, and every panic must restore it.
+//! The pure pieces this module builds on (crossterm mode sequences, ratatui's
+//! backend) are covered by their own tests.
 
 use std::io::{self, Write};
 use std::sync::Once;

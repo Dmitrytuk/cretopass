@@ -1,6 +1,7 @@
 //! Mouse wheel and click hit-testing tests.
 
 use super::*;
+use crate::hitbox::test_support::{outside_point, point_for};
 
 // ── Mouse wheel routing ──
 /// A wheel event at the top-left; only `kind` matters to the router.
@@ -107,23 +108,11 @@ fn draw(state: &mut TreeState) {
     terminal.draw(|f| ui(f, state)).unwrap();
 }
 
-/// The first cell whose click resolves to `target` for `button`.
-fn point_for(state: &TreeState, target: TreeHit, button: MouseButton) -> (u16, u16) {
-    for y in 0..24u16 {
-        for x in 0..80u16 {
-            if state.hits.hit(x, y, button) == Some(target) {
-                return (x, y);
-            }
-        }
-    }
-    panic!("no hit region for {target:?}");
-}
-
 #[test]
 fn a_left_click_on_a_branch_toggles_it() {
     let mut state = state_with_a_child();
     draw(&mut state);
-    let (x, y) = point_for(&state, TreeHit::Row(0), MouseButton::Left);
+    let (x, y) = point_for(&state.hits, TreeHit::Row(0), MouseButton::Left);
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     handle_click(
@@ -146,7 +135,7 @@ fn a_left_click_on_a_leaf_only_selects_it() {
     let mut state = state_with_a_child();
     state.selected = 0;
     draw(&mut state);
-    let (x, y) = point_for(&state, TreeHit::Row(1), MouseButton::Left);
+    let (x, y) = point_for(&state.hits, TreeHit::Row(1), MouseButton::Left);
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     handle_click(
@@ -169,7 +158,7 @@ fn a_left_click_on_a_leaf_only_selects_it() {
 fn a_right_click_on_a_row_opens_detail() {
     let mut state = state_with_a_child();
     draw(&mut state);
-    let (x, y) = point_for(&state, TreeHit::Row(1), MouseButton::Right);
+    let (x, y) = point_for(&state.hits, TreeHit::Row(1), MouseButton::Right);
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     handle_click(
@@ -208,18 +197,6 @@ fn a_left_click_dismisses_help() {
 }
 
 // ── Outside-click dismissal (an outside click is the modal's Esc) ──
-/// A cell guaranteed to fall outside `rect` on the 80×24 test screen.
-fn outside_point(rect: Rect) -> (u16, u16) {
-    for y in 0..24u16 {
-        for x in 0..80u16 {
-            if !crate::hitbox::point_in(rect, x, y) {
-                return (x, y);
-            }
-        }
-    }
-    panic!("every cell is inside {rect:?}");
-}
-
 /// Drives one click through the same routing the event loop uses.
 fn click(state: &mut TreeState, button: MouseButton, x: u16, y: u16) {
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();

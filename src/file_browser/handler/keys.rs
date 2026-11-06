@@ -284,6 +284,7 @@ mod tests {
     };
     use crate::file_browser::{handle_click, handle_key, handle_paste};
     use crate::file_handling;
+    use crate::hitbox::test_support::point_for;
     use crate::theming::texts;
 
     // ── `a` prefix in CreateFile mode ──
@@ -734,18 +735,6 @@ mod tests {
             .unwrap();
     }
 
-    /// The first cell whose click resolves to `target`.
-    fn point_for(state: &FileBrowserState, target: BrowserHit) -> (u16, u16) {
-        for y in 0..24u16 {
-            for x in 0..80u16 {
-                if state.hits.hit(x, y, MouseButton::Left) == Some(target) {
-                    return (x, y);
-                }
-            }
-        }
-        panic!("no hit region for {target:?}");
-    }
-
     #[test]
     fn a_click_on_a_directory_row_opens_it() {
         let dir = tempfile::tempdir().unwrap();
@@ -758,7 +747,7 @@ mod tests {
 
         draw(&mut state);
         let index = state.entries.iter().position(|e| e.name == "sub").unwrap();
-        let (x, y) = point_for(&state, BrowserHit::Entry(index));
+        let (x, y) = point_for(&state.hits, BrowserHit::Entry(index), MouseButton::Left);
 
         handle_click(MouseButton::Left, x, y, &mut state);
 
@@ -793,7 +782,7 @@ mod tests {
             .unwrap();
         // Start on a different row, so the first click is a real selection.
         state.selected = other;
-        let (x, y) = point_for(&state, BrowserHit::Entry(index));
+        let (x, y) = point_for(&state.hits, BrowserHit::Entry(index), MouseButton::Left);
 
         assert_eq!(
             handle_click(MouseButton::Left, x, y, &mut state),

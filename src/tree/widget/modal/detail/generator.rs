@@ -18,7 +18,7 @@ use super::{
 };
 use crate::cursor::{
     backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
-    selected_span,
+    insert_str_at, selected_span,
 };
 use crate::generator::{self, PasswordLength, PasswordParams};
 use crate::hitbox::{ClickSurface, RowClick, record_rows};
@@ -291,11 +291,11 @@ pub(super) fn paste_generator_length(modal: &mut GeneratorModal, digits: &str) {
         modal.length_cursor = 0;
         modal.length_fresh = false;
     }
-    for c in digits.chars() {
-        if modal.length_input.len() < 3 {
-            insert_char_at(&mut modal.length_input, &mut modal.length_cursor, c);
-        }
-    }
+    // The field holds at most three ASCII digits, so one bounded slice can be
+    // inserted at once instead of filtering digit by digit.
+    let room = 3usize.saturating_sub(modal.length_input.len());
+    let paste: String = digits.chars().take(room).collect();
+    insert_str_at(&mut modal.length_input, &mut modal.length_cursor, &paste);
     modal.error = None;
 }
 

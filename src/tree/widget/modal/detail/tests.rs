@@ -1,6 +1,7 @@
 //! Unit tests for the Detail modal, grouped by surface (browse, paste, clicks).
 
 use super::*;
+use crate::hitbox::test_support::surface_point_for;
 use crate::tree::node::{ExtraField, FieldType};
 use crate::tree::widget::FormFocus;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -241,27 +242,11 @@ fn draw(detail: &mut Detail, state: &TreeState) {
         .expect("a test draw");
 }
 
-/// The first cell whose click resolves to `target` for `button`.
-fn point_for(
-    clicks: &ClickSurface<DetailHit>,
-    target: DetailHit,
-    button: MouseButton,
-) -> (u16, u16) {
-    for y in 0..24u16 {
-        for x in 0..80u16 {
-            if clicks.target_at(button, x, y) == Some(target) {
-                return (x, y);
-            }
-        }
-    }
-    panic!("no hit region for {target:?}");
-}
-
 #[test]
 fn a_click_selects_a_field_and_a_repeat_opens_the_form() {
     let (mut detail, mut state) = detail_with_fields();
     draw(&mut detail, &state);
-    let (x, y) = point_for(&detail.clicks, DetailHit::Field(1), MouseButton::Left);
+    let (x, y) = surface_point_for(&detail.clicks, DetailHit::Field(1), MouseButton::Left);
 
     // The first click only moves the selection.
     assert!(
@@ -281,7 +266,7 @@ fn a_click_selects_a_field_and_a_repeat_opens_the_form() {
 fn a_right_click_copies_the_field_value() {
     let (mut detail, mut state) = detail_with_fields();
     draw(&mut detail, &state);
-    let (x, y) = point_for(&detail.clicks, DetailHit::Field(0), MouseButton::Right);
+    let (x, y) = surface_point_for(&detail.clicks, DetailHit::Field(0), MouseButton::Right);
 
     match detail.handle_click(MouseButton::Right, x, y, &mut state) {
         Some(TreeAction::CopyToClipboard { text }) => assert_eq!(text, "a"),
@@ -305,7 +290,7 @@ fn a_click_on_a_checklist_cell_toggles_it() {
         DetailPopup::SymbolChecklist(modal) => modal.params.symbols.len(),
         other => panic!("expected the symbol checklist, got {other:?}"),
     };
-    let (x, y) = point_for(&detail.clicks, DetailHit::SymbolCell(0), MouseButton::Left);
+    let (x, y) = surface_point_for(&detail.clicks, DetailHit::SymbolCell(0), MouseButton::Left);
     let _ = detail.handle_click(MouseButton::Left, x, y, &mut state);
 
     match &detail.popup {
@@ -324,7 +309,7 @@ fn a_click_on_a_form_row_selects_then_enters() {
     draw(&mut detail, &state);
 
     // Rows are Name(0), Extra(0)(1), Extra(1)(2), Extra(2)(3), AddButton(4).
-    let (x, y) = point_for(&detail.clicks, DetailHit::FormRow(2), MouseButton::Left);
+    let (x, y) = surface_point_for(&detail.clicks, DetailHit::FormRow(2), MouseButton::Left);
     assert!(
         detail
             .handle_click(MouseButton::Left, x, y, &mut state)

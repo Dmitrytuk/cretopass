@@ -326,6 +326,7 @@ mod tests {
     use super::*;
     use crate::file_browser::{FileBrowserMode, FileBrowserSession};
     use crate::file_handling;
+    use crate::hitbox::test_support::outside_point;
     use crate::theming::{Palette, texts};
     use crate::vault::active_file::ActiveVaultState;
     use crate::vault::utils::Configuration;
@@ -1065,18 +1066,6 @@ mod tests {
             .unwrap();
     }
 
-    /// A cell guaranteed to fall outside `rect` on the 80×24 test screen.
-    fn outside(rect: Rect) -> (u16, u16) {
-        for y in 0..24u16 {
-            for x in 0..80u16 {
-                if !crate::hitbox::point_in(rect, x, y) {
-                    return (x, y);
-                }
-            }
-        }
-        panic!("every cell is inside {rect:?}");
-    }
-
     /// The panel the active modal drew, when a click outside it dismisses.
     fn panel(state: &HomeState) -> Rect {
         state
@@ -1101,7 +1090,7 @@ mod tests {
         )));
         draw_home(&mut state);
 
-        let (x, y) = outside(panel(&state));
+        let (x, y) = outside_point(panel(&state));
         click(&mut state, event::MouseButton::Left, x, y);
 
         assert!(
@@ -1138,7 +1127,7 @@ mod tests {
         state.modal = Some(Modal::Configuration(ConfigurationModal::new()));
         draw_home(&mut state);
 
-        let (x, y) = outside(panel(&state));
+        let (x, y) = outside_point(panel(&state));
         click(&mut state, event::MouseButton::Left, x, y);
 
         assert!(state.modal.is_none(), "the dialog closes");
@@ -1158,7 +1147,7 @@ mod tests {
         )));
         draw_home(&mut state);
 
-        let (x, y) = outside(panel(&state));
+        let (x, y) = outside_point(panel(&state));
         click(&mut state, event::MouseButton::Left, x, y);
 
         assert!(state.modal.is_none(), "the confirmation is gone");
@@ -1177,7 +1166,7 @@ mod tests {
         )));
         draw_home(&mut state);
 
-        let (x, y) = outside(panel(&state));
+        let (x, y) = outside_point(panel(&state));
         click(&mut state, event::MouseButton::Right, x, y);
 
         assert!(
@@ -1196,7 +1185,7 @@ mod tests {
         state.modal = Some(Modal::Export(ExportWizard::new()));
         draw_home(&mut state);
 
-        let (x, y) = outside(panel(&state));
+        let (x, y) = outside_point(panel(&state));
         click(&mut state, event::MouseButton::Left, x, y);
 
         assert!(
@@ -1213,7 +1202,7 @@ mod tests {
         )));
         draw_home(&mut state);
 
-        let (x, y) = outside(panel(&state));
+        let (x, y) = outside_point(panel(&state));
         click(&mut state, event::MouseButton::Left, x, y);
 
         assert!(state.modal.is_none(), "an outside click is the step's Esc");

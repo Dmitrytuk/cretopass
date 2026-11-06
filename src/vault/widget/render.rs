@@ -35,7 +35,8 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
     }
 
     match &mut modal {
-        Some(Modal::FileBrowser(_)) => {}
+        // The File Browser returned above; this arm only satisfies exhaustiveness.
+        Some(Modal::FileBrowser(_)) => unreachable!("the File Browser returned above"),
         Some(Modal::Alert(alert)) => alert.render(frame, area),
         Some(Modal::About(about)) => about.render(frame, area),
         Some(Modal::Confirmation(confirmation)) => confirmation.render(frame, area),
