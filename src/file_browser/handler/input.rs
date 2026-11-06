@@ -2,12 +2,18 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
+use crate::cursor::insert_str_at;
 use crate::file_browser::state::{FileBrowserAction, FileBrowserState, FocusTarget};
 use crate::theming::texts;
 
 use super::destination::begin_destination;
 use super::list::create_dir_named;
 use super::text_edit::handle_text_edit;
+
+/// Inserts the already-sanitised `text` into the name input at its cursor.
+pub(super) fn handle_input_paste(state: &mut FileBrowserState, text: &str) {
+    insert_str_at(&mut state.creating_name, &mut state.creating_cursor, text);
+}
 
 pub(super) fn handle_input_key(
     key: KeyEvent,

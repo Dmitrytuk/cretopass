@@ -9,9 +9,10 @@ use zeroize::Zeroizing;
 
 use super::HomeAction;
 use crate::cursor::{FieldEdit, SecretFieldGroup, secret_field_spans};
+use crate::hitbox::{HitMap, is_left};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{display_path, make_overlay, paint_overlay};
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
@@ -23,6 +24,11 @@ pub struct UnlockPrompt {
     file_data: Vec<u8>,
     fields: SecretFieldGroup,
     error: Option<String>,
+    /// The clickable field rows recorded by the renderer.
+    hits: HitMap<usize>,
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it dismisses the prompt, like `Esc`.
+    rect: Option<Rect>,
 }
 
 impl UnlockPrompt {
@@ -33,6 +39,8 @@ impl UnlockPrompt {
             file_data,
             fields: SecretFieldGroup::with_fields(1),
             error: None,
+            hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -73,10 +81,35 @@ impl UnlockPrompt {
         }
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect, display_full_path: bool) {
+    /// Pastes the clipboard's text into the password field, single-line only.
+    pub fn handle_paste(&mut self, text: &str) {
+        if self.fields.paste_clipboard(text) {
+            self.error = None;
+        }
+    }
+
+    /// A left click on the field focuses it; the right button is ignored.
+    pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) {
+        if !is_left(button) {
+            return;
+        }
+        if let Some(index) = self.hits.hit(x, y, button) {
+            self.fields.focus(index);
+        }
+    }
+
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it dismisses the prompt, like `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
+    }
+
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, display_full_path: bool) {
+        self.hits.clear();
         let shown_path = display_path(&self.file_path, display_full_path);
 
         let overlay_area = make_overlay(area, if self.error.is_some() { 8 } else { 7 });
+        self.rect = Some(overlay_area);
         let block = Block::default()
             .title(texts::HOME_ENTER_PASSPHRASE)
             .borders(Borders::ALL)
@@ -109,6 +142,15 @@ impl UnlockPrompt {
         }
 
         lines.push(Line::from(""));
+
+        let inner = block.inner(overlay_area);
+        if inner.height > 3 {
+            self.hits.push(
+                Rect::new(inner.x, inner.y + 3, inner.width, 1),
+                MouseButton::Left,
+                0,
+            );
+        }
 
         paint_overlay(
             frame,

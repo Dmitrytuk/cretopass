@@ -5,7 +5,7 @@
 //! reports a [`TreeAction::BeginShareDestination`] — naming the destination
 //! folder and writing the bundle are the orchestrator's job.
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Text};
@@ -14,6 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use super::TreeAction;
 use super::chrome::centered_rect;
 use crate::cursor::selected_span;
+use crate::hitbox::{HitMap, is_left};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::TreeState;
@@ -25,12 +26,22 @@ pub(crate) struct ShareWizard {
     node: Node,
     /// Focused row: 0 = this node, 1 = this node with children.
     selected: usize,
+    /// The clickable row regions recorded by the renderer.
+    hits: HitMap<usize>,
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// An outside click closes the wizard, like `Esc`.
+    rect: Option<Rect>,
 }
 
 impl ShareWizard {
     /// A wizard for sharing `node`, starting on the node-only row.
     pub(crate) fn new(node: Node) -> Self {
-        Self { node, selected: 0 }
+        Self {
+            node,
+            selected: 0,
+            hits: HitMap::default(),
+            rect: None,
+        }
     }
 
     /// Reads a key: [`TreeAction::Close`] on `Esc`,
@@ -60,9 +71,41 @@ impl ShareWizard {
         }
     }
 
+    /// Applies a click on a row: select it, or on a repeat activate the scope.
+    pub(crate) fn handle_click(
+        &mut self,
+        button: MouseButton,
+        x: u16,
+        y: u16,
+        state: &mut TreeState,
+    ) -> Option<TreeAction> {
+        if !is_left(button) {
+            return None;
+        }
+        let row = self.hits.hit(x, y, button)?;
+        if row >= texts::SHARE_SCOPE_OPTIONS.len() {
+            return None;
+        }
+        let was_selected = self.selected == row;
+        self.selected = row;
+        if was_selected {
+            self.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), state)
+        } else {
+            None
+        }
+    }
+
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// An outside click closes the wizard, like `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
+    }
+
     /// Draws the scope list over `area`.
-    pub(crate) fn render(&self, frame: &mut Frame, area: Rect) {
+    pub(crate) fn render(&mut self, frame: &mut Frame, area: Rect) {
+        self.hits.clear();
         let overlay_area = centered_rect(area, area.width / 2, 6);
+        self.rect = Some(overlay_area);
 
         let block = Block::default()
             .title(texts::OVERLAY_SHARE_SCOPE)
@@ -81,6 +124,12 @@ impl ShareWizard {
         frame.render_widget(Clear, overlay_area);
         frame.render_widget(block, overlay_area);
         frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+
+        let visible = texts::SHARE_SCOPE_OPTIONS.len().min(inner.height as usize);
+        for i in 0..visible {
+            let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
+            self.hits.push(rect, MouseButton::Left, i);
+        }
     }
 
     /// Badge and hint for the tree status bar while the wizard is open.

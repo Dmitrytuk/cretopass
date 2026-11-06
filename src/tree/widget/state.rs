@@ -9,6 +9,7 @@ use super::modal::Modal;
 use super::save::{SaveExit, SaveState};
 use crate::file_browser::FileBrowserSession;
 use crate::generator::PasswordParams;
+use crate::hitbox::HitMap;
 use crate::theming::{Spinner, Status};
 use crate::tree::node::Node;
 
@@ -20,6 +21,17 @@ pub(crate) struct VisibleNode {
     pub depth: usize,
     pub is_parent: bool,
     pub expanded: bool,
+}
+
+/// What a click on the Tree screen means, outside any modal.
+///
+/// Recorded by the tree renderer each frame (see [`TreeState::hits`]) and turned
+/// into an [`Action`](crate::theming::Action) by the event loop, so a click and
+/// its key run the same dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TreeHit {
+    /// A visible tree row, by its index in [`TreeState::visible`].
+    Row(usize),
 }
 
 /// Application input mode determining how key events are interpreted.
@@ -97,6 +109,8 @@ pub struct TreeState {
     /// The modal currently over the Tree, if any: at most one at a time. A key
     /// goes here while it is set, and to the [`InputMode`] navigation otherwise.
     pub(crate) modal: Option<Modal>,
+    /// The tree rows' clickable regions, refilled by the renderer every frame.
+    pub(crate) hits: HitMap<TreeHit>,
 }
 
 impl TreeState {
@@ -125,6 +139,7 @@ impl TreeState {
             display_full_path: true,
             generator: PasswordParams::default(),
             modal: None,
+            hits: HitMap::default(),
         };
         state.update_visible();
         state

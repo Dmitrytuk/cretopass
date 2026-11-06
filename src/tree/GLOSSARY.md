@@ -41,7 +41,7 @@ _Avoid_: generator config, password defaults
 **Tree**: The main workspace where the node tree is navigated, searched, and edited. Entered from Home after opening a secret file.
 _Avoid_: Tree view, Tree app, Workspace
 
-**Modal**: A window that takes over the keyboard until it is dismissed. At most one is open at a time, over the Tree's Normal navigation. Nothing outside it reacts to keys while it is up. Help, Detail, Alert, Export, and the File Browser are Modals.
+**Modal**: A window that takes over the keyboard until it is dismissed. At most one is open at a time, over the Tree's Normal navigation. Nothing outside it reacts to keys while it is up. Help, Detail, Alert, Export, and the File Browser are Modals. A left click outside its panel does what `Esc` does, one nested level per click; the File Browser-backed destination steps are the one exception.
 _Avoid_: Overlay, Dialog, Window
 
 **Popup**: A window nested inside a Modal — the Form inside Detail, or the field-type picker inside Form. It never outlives the Modal that opened it and returns to it when dismissed.
@@ -79,6 +79,9 @@ _Avoid_: Open
 
 **Cut buffer**: The internal clipboard holding a cut Node, ready for paste. Move-style: the next successful paste consumes the node, so it can be inserted only once. A failed paste leaves the node in the buffer. Distinct from the system clipboard.
 _Avoid_: Clipboard, Yank buffer
+
+**Clipboard paste**: Reading the System clipboard's text into the focused text input with `Ctrl+V` or a terminal-native (bracketed) paste. Distinct from this context's **Paste** operations (`PasteStart` / `PasteSibling` / `PasteChild`) and from the Form's field paste: those move Nodes and ExtraFields already inside the app, while a Clipboard paste brings text in from outside. It reaches only the Tree's text inputs — the Form, the custom-field-name prompt, the generator length row, and Search.
+_Avoid_: Paste (ambiguous with PasteStart/PasteSibling/PasteChild and the field paste)
 
 **Help**: Modal opened with `?`. Lists the Tree's key bindings. Any key dismisses it.
 

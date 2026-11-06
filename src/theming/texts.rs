@@ -154,7 +154,7 @@ pub const HINT_TREE_ROOT: &str =
 /// applies, pasting a sibling does not.
 pub const HINT_TREE_ROOT_PASTE: &str =
     "j/↓ k/↑:nav  h/← l/→:fold  p:paste  a:add  /:search  H:home  ?:help  q:quit";
-pub const HINT_SEARCH: &str = "Type to search  Enter:done  Esc:cancel";
+pub const HINT_SEARCH: &str = "Type to search  ^V:paste  Enter:done  Esc:cancel";
 pub const HINT_PENDING_CUT: &str = "d:cut  Esc:cancel";
 pub const HINT_PASTE: &str = "p:after  P:before  l/→:child  Esc:cancel";
 /// Paste hint when the Root is selected: only a child can be pasted into it.
@@ -171,24 +171,26 @@ pub const HINT_FORM_EXTRA: &str =
 pub const HINT_FORM_EXTRA_PASTE: &str =
     "j/k:field  i/Enter:edit  dd:cut  p:paste  Del:delete  u/r:undo/redo  Esc:close";
 pub const HINT_FORM_ADD: &str = "Enter:add field  Esc:cancel";
-pub const HINT_FORM_INPUT: &str = "Type to edit  Enter/Esc:done";
-pub const HINT_FORM_GENERATOR_INPUT: &str = "Type to edit  ^G:generate  Enter/Esc:done";
+pub const HINT_FORM_INPUT: &str = "Type to edit  ^V:paste  Enter/Esc:done";
+pub const HINT_FORM_GENERATOR_INPUT: &str = "Type to edit  ^V:paste  ^G:generate  Enter/Esc:done";
 pub const HINT_GENERATOR: &str =
     "j/k:row  digits:length  ←/→:cursor  Space:all  Enter:ok  Esc:cancel";
 pub const HINT_SYMBOLS: &str = "h/l/j/k:move  Space/Enter:toggle  Esc:done";
 pub const HINT_FIELD_CUT: &str = "d:cut field  Esc:cancel";
 pub const HINT_FIELD_PASTE: &str = "p:after  P:before  Esc:cancel";
 pub const HINT_SELECT_FIELD_TYPE: &str = "j/k:nav  1-9:select  Enter:choose  Esc:cancel";
-pub const HINT_CUSTOM_FIELD_NAME: &str = "Type name  Enter:done  Esc:cancel";
+pub const HINT_CUSTOM_FIELD_NAME: &str = "Type name  ^V:paste  Enter:done  Esc:cancel";
 pub const HINT_CONFIRM_DELETE: &str = "y:delete  n/Esc:cancel";
 pub const HINT_HOME: &str = "j/k:navigate  Enter/l:select  d:<delete path>  ?:about  q:quit";
 pub const HINT_CONFIG: &str = "Space:toggle  Enter:save  Esc:cancel";
 pub const HINT_DELETE_CONFIRM: &str = "y/Enter:confirm  any key:cancel";
 pub const HINT_CHANGE_PW_CONFIRM: &str = "y/Enter:yes  any key:no";
-pub const HINT_CHANGE_PW_INPUT: &str = "Tab/↑/↓:switch  Ctrl+S:show  Enter:apply  Esc:cancel";
+pub const HINT_CHANGE_PW_INPUT: &str =
+    "Tab/↑/↓:switch  ^V:paste  Ctrl+S:show  Enter:apply  Esc:cancel";
 pub const HINT_NO_PASSPHRASE: &str = "y/Enter:yes  any key:no";
-pub const HINT_PASSPHRASE: &str = "Enter:confirm  Ctrl+S:show  Esc:cancel";
-pub const HINT_CREATE_SECRET: &str = "Tab/↑/↓:switch  Ctrl+S:show  Enter:create  Esc:cancel";
+pub const HINT_PASSPHRASE: &str = "Enter:confirm  ^V:paste  Ctrl+S:show  Esc:cancel";
+pub const HINT_CREATE_SECRET: &str =
+    "Tab/↑/↓:switch  ^V:paste  Ctrl+S:show  Enter:create  Esc:cancel";
 pub const HINT_ALERT: &str = "Press any key to dismiss";
 pub const HINT_HELP: &str = "Press any key to close";
 pub const HINT_SAVE_EXIT_BLOCKED: &str = "r:retry  q:quit without saving  any other key:stay";
@@ -207,6 +209,8 @@ pub const TREE_HELP_KEY_BINDINGS: &[&str] = &[
     " Root     No cut, no sibling add/paste",
     " Ctrl+e e Export selected node",
     " Ctrl+e s Share selected node",
+    " ^V       Paste from the system clipboard",
+    " Mouse    Wheel:scroll  Left:select/act",
     " /        Search",
     " ?        Show this help",
     " Esc      Clear search highlights",
@@ -255,7 +259,8 @@ pub const FB_HINT_SHARE_CONFIRM: &str = "Enter:share";
 pub const FB_PROMPT_SHARE_FOLDER: &str = " Write into ";
 
 pub const SHARE_TITLE_PASSPHRASE: &str = " Share Bundle Password ";
-pub const HINT_SHARE_PASSPHRASE: &str = "Tab/↑/↓:switch  Ctrl+S:show  Enter:share  Esc:cancel";
+pub const HINT_SHARE_PASSPHRASE: &str =
+    "Tab/↑/↓:switch  ^V:paste  Ctrl+S:show  Enter:share  Esc:cancel";
 pub const PROMPT_SHARE_NO_PASSPHRASE: &str = "Create the share bundle without a password?";
 pub const HINT_SHARE_NO_PASSPHRASE: &str = "y/Enter:yes  any key:no";
 pub const MODE_SHARE_CONFIRM: &str = "CONFIRM";

@@ -2,12 +2,6 @@
 
 use std::io;
 
-use crossterm::ExecutableCommand;
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
-use ratatui::{Terminal, backend::CrosstermBackend};
-
 pub mod cli;
 pub(crate) mod clipboard;
 pub mod crypt;
@@ -15,7 +9,9 @@ pub mod cursor;
 pub mod file_browser;
 pub mod file_handling;
 pub mod generator;
+pub(crate) mod hitbox;
 pub(crate) mod share;
+pub(crate) mod terminal;
 pub mod theming;
 pub mod tree;
 pub mod vault;
@@ -26,9 +22,9 @@ pub use tree::widget::{InputMode, SaveState, TreeState, TreeWidget};
 /// Runs the home screen. Selecting "Open secret file" opens the tree
 /// with the decrypted contents of the selected encrypted file.
 pub fn run() -> io::Result<()> {
-    let mut terminal = setup_terminal()?;
-    let res = vault::run(&mut terminal);
-    cleanup_terminal(&mut terminal);
+    let mut term = terminal::setup()?;
+    let res = vault::run(&mut term);
+    terminal::restore();
     if let Err(ref e) = res {
         eprintln!("Error: {e}");
     }
@@ -38,27 +34,13 @@ pub fn run() -> io::Result<()> {
 /// Runs the TUI with a custom root node, skipping the home screen.
 pub fn run_with_root(root: Node) -> io::Result<()> {
     let mut state = TreeState::new(root);
-    let mut terminal = setup_terminal()?;
-    let res = tree::app_tree::run_app(&mut terminal, &mut state, None).map(|_| ());
-    cleanup_terminal(&mut terminal);
+    let mut term = terminal::setup()?;
+    let res = tree::app_tree::run_app(&mut term, &mut state, None).map(|_| ());
+    terminal::restore();
     if let Err(ref e) = res {
         eprintln!("Error: {e}");
     }
     res
-}
-
-fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    stdout.execute(EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout);
-    Terminal::new(backend)
-}
-
-fn cleanup_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) {
-    let _ = disable_raw_mode();
-    let _ = terminal.backend_mut().execute(LeaveAlternateScreen);
-    let _ = terminal.show_cursor();
 }
 
 /// Builds a demo tree with sample data: a "Knowledge Base" root containing

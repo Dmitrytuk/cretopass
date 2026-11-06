@@ -4,16 +4,20 @@
 //! `a` add-file/dir prefix, the confirmations, the Locations overlay and the
 //! search box — before dispatching to the handler for the focused area.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton};
 
-use crate::file_browser::state::{AddPrefix, FileBrowserAction, FileBrowserState, FocusTarget};
+use crate::cursor::PastePolicy;
+use crate::file_browser::state::{
+    AddPrefix, BrowserHit, FileBrowserAction, FileBrowserState, FocusTarget,
+};
 use crate::file_handling;
+use crate::hitbox::is_left;
 use crate::theming::texts;
 
-use super::input::handle_input_key;
+use super::input::{handle_input_key, handle_input_paste};
 use super::list::handle_list_key;
 use super::locations::{handle_locations_key, is_locations_key, open_locations};
-use super::rename::handle_rename_key;
+use super::rename::{handle_rename_key, handle_rename_paste};
 
 /// Processes a key event and returns an action if the user completed
 /// or cancelled the file browser.  Returns `None` when the browser
@@ -161,6 +165,101 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
         FocusTarget::Locations => None,
     }
 }
+
+/// Applies pasted `text` to the browser's active text surface.
+///
+/// Mirrors [`handle_key`]'s routing: the error popup dismisses on the paste
+/// rather than swallowing it into the field, the transient confirmations and
+/// the Locations overlay own the keyboard and ignore it, and only the two text
+/// inputs and the search box accept text. The list itself has nothing to paste
+/// into.
+pub fn handle_paste(text: &str, state: &mut FileBrowserState) {
+    let cleaned = PastePolicy::SingleLine.clean(text);
+    if cleaned.is_empty() {
+        return;
+    }
+
+    if state.error.is_some() {
+        state.error = None;
+        return;
+    }
+
+    if state.pending == AddPrefix::Pending
+        || state.confirm_delete.is_some()
+        || state.confirm_overwrite.is_some()
+        || state.focus == FocusTarget::Locations
+    {
+        return;
+    }
+
+    match state.focus {
+        FocusTarget::Input => handle_input_paste(state, &cleaned),
+        FocusTarget::Rename => handle_rename_paste(state, &cleaned),
+        FocusTarget::List if state.search_active => {
+            state.search_query.push_str(&cleaned);
+            state.clamp_selection();
+        }
+        FocusTarget::List | FocusTarget::Locations => {}
+    }
+}
+
+/// Applies a click at `(x, y)` in the File Browser.
+///
+/// Mirrors [`handle_key`]'s routing: a transient popup owns the screen and takes
+/// no clicks, and only the file list or the Locations overlay has clickable rows.
+/// A click on a directory row opens it (like `Enter`); a click on a file row
+/// selects it, and a repeat click on the already-selected file activates it — so
+/// a stray click never opens the wrong file.
+pub fn handle_click(
+    button: MouseButton,
+    x: u16,
+    y: u16,
+    state: &mut FileBrowserState,
+) -> Option<FileBrowserAction> {
+    if !is_left(button) {
+        return None;
+    }
+    if state.error.is_some()
+        || state.pending == AddPrefix::Pending
+        || state.confirm_delete.is_some()
+        || state.confirm_overwrite.is_some()
+    {
+        return None;
+    }
+    match state.hits.hit(x, y, button) {
+        Some(BrowserHit::Entry(index)) => click_entry(index, state),
+        Some(BrowserHit::Location(index)) => click_location(index, state),
+        None => None,
+    }
+}
+
+/// Applies a click on a file-list row.
+fn click_entry(index: usize, state: &mut FileBrowserState) -> Option<FileBrowserAction> {
+    if index >= state.entries.len() {
+        return None;
+    }
+    let was_selected = state.selected == index;
+    state.selected = index;
+    // The search box takes `Enter` to end the search; a click must act, so it
+    // leaves the search box first.
+    state.search_active = false;
+    let is_dir = state.entries[index].is_dir;
+    if is_dir || was_selected {
+        handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), state)
+    } else {
+        None
+    }
+}
+
+/// Applies a click on a Locations overlay row: select it and open it.
+fn click_location(index: usize, state: &mut FileBrowserState) -> Option<FileBrowserAction> {
+    if index >= state.locations.len() {
+        return None;
+    }
+    state.location_selected = index;
+    handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), state)
+}
+
 /// Ctrl+h toggles hidden entries.  Crossterm reports byte `0x08` (Ctrl+H on
 /// Unix) as `Char('h')` + CONTROL; Windows terminals may deliver it as
 /// `Backspace` + CONTROL instead, so both are accepted.
@@ -174,14 +273,14 @@ fn is_toggle_hidden_key(key: &KeyEvent) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crossterm::event::KeyCode;
+    use crossterm::event::{KeyCode, MouseButton};
 
     use super::super::fixtures::{ctrl, key, make_state};
-    use crate::file_browser::handle_key;
-    use crate::file_browser::state::{AddPrefix, FocusTarget};
+    use crate::file_browser::state::{AddPrefix, BrowserHit, FocusTarget};
     use crate::file_browser::{
         FileBrowserAction, FileBrowserMode, FileBrowserSession, FileBrowserState,
     };
+    use crate::file_browser::{handle_click, handle_key, handle_paste};
     use crate::file_handling;
     use crate::theming::texts;
 
@@ -514,5 +613,170 @@ mod tests {
 
         assert!(!state.show_hidden);
         assert_eq!(state.search_query, "abc");
+    }
+
+    // ── Clipboard paste ──
+
+    #[test]
+    fn paste_into_the_name_input_joins_lines() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.focus = FocusTarget::Input;
+        state.creating_name.clear();
+        state.creating_cursor = 0;
+
+        handle_paste("a\r\nb", &mut state);
+
+        assert_eq!(state.creating_name, "ab");
+        assert_eq!(state.creating_cursor, 2);
+    }
+
+    #[test]
+    fn paste_into_the_rename_input_joins_lines() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.focus = FocusTarget::Rename;
+        state.rename_name.clear();
+        state.rename_cursor = 0;
+
+        handle_paste("x\r\ny", &mut state);
+
+        assert_eq!(state.rename_name, "xy");
+        assert_eq!(state.rename_cursor, 2);
+    }
+
+    #[test]
+    fn paste_into_the_search_box_appends() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.focus = FocusTarget::List;
+        state.search_active = true;
+        state.search_query.clear();
+
+        handle_paste("ab", &mut state);
+
+        assert_eq!(state.search_query, "ab");
+    }
+
+    #[test]
+    fn paste_is_ignored_while_the_locations_overlay_is_open() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.focus = FocusTarget::Locations;
+        // A live search box, which the paste would otherwise fill: the overlay
+        // must own the keyboard and swallow it. (The guard and the `Locations`
+        // match arm both ignore a paste here; the test pins the observable
+        // outcome, not which of the two did it.)
+        state.search_active = true;
+        state.search_query = "keep".to_string();
+
+        handle_paste("x", &mut state);
+
+        assert_eq!(state.search_query, "keep");
+    }
+
+    #[test]
+    fn a_paste_dismisses_an_error_without_leaking_into_the_field() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        state.focus = FocusTarget::Input;
+        state.creating_name = "taken.age".to_string();
+        state.creating_cursor = state.creating_name.len();
+        state.error = Some(texts::MSG_FILE_EXISTS.to_string());
+
+        handle_paste("x", &mut state);
+
+        assert_eq!(state.error, None);
+        assert_eq!(state.creating_name, "taken.age", "the draft is preserved");
+    }
+
+    #[test]
+    fn a_paste_on_the_list_without_a_search_changes_nothing() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.focus = FocusTarget::List;
+        assert!(!state.search_active);
+
+        handle_paste("x", &mut state);
+
+        assert!(state.search_query.is_empty());
+    }
+
+    // ── Click hit-testing ──
+
+    /// Draws the browser so its renderer fills `state.hits`.
+    fn draw(state: &mut FileBrowserState) {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| crate::file_browser::render_file_browser(frame, frame.area(), state))
+            .unwrap();
+    }
+
+    /// The first cell whose click resolves to `target`.
+    fn point_for(state: &FileBrowserState, target: BrowserHit) -> (u16, u16) {
+        for y in 0..24u16 {
+            for x in 0..80u16 {
+                if state.hits.hit(x, y, MouseButton::Left) == Some(target) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("no hit region for {target:?}");
+    }
+
+    #[test]
+    fn a_click_on_a_directory_row_opens_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.current_dir = dir.path().to_path_buf();
+        state.entries = file_handling::list_dir(dir.path()).unwrap();
+        state.focus = FocusTarget::List;
+
+        draw(&mut state);
+        let index = state.entries.iter().position(|e| e.name == "sub").unwrap();
+        let (x, y) = point_for(&state, BrowserHit::Entry(index));
+
+        handle_click(MouseButton::Left, x, y, &mut state);
+
+        assert_eq!(
+            state.current_dir,
+            dir.path().join("sub"),
+            "a single click opens a directory"
+        );
+    }
+
+    #[test]
+    fn a_repeat_click_on_a_file_activates_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("note.txt"), b"x").unwrap();
+        std::fs::write(dir.path().join("other.txt"), b"y").unwrap();
+
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.current_dir = dir.path().to_path_buf();
+        state.entries = file_handling::list_dir(dir.path()).unwrap();
+        state.focus = FocusTarget::List;
+
+        draw(&mut state);
+        let index = state
+            .entries
+            .iter()
+            .position(|e| e.name == "note.txt")
+            .unwrap();
+        let other = state
+            .entries
+            .iter()
+            .position(|e| e.name == "other.txt")
+            .unwrap();
+        // Start on a different row, so the first click is a real selection.
+        state.selected = other;
+        let (x, y) = point_for(&state, BrowserHit::Entry(index));
+
+        assert_eq!(
+            handle_click(MouseButton::Left, x, y, &mut state),
+            None,
+            "the first click only selects a file"
+        );
+        assert_eq!(state.selected, index);
+        assert!(matches!(
+            handle_click(MouseButton::Left, x, y, &mut state),
+            Some(FileBrowserAction::Selected(_))
+        ));
     }
 }

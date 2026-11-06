@@ -9,9 +9,10 @@
 use std::io;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, Event, KeyEventKind, MouseButton, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::Backend;
+use zeroize::Zeroizing;
 
 mod chrome;
 mod menu;
@@ -22,12 +23,16 @@ mod state;
 
 pub use state::HomeState;
 
+use crate::clipboard;
+use crate::hitbox::is_left;
 use crate::theming::SPINNER_TICK;
 use crate::theming::Status;
+use crate::theming::{is_clipboard_paste, wheel_nav_key};
 
 use menu::handle_home_key;
 use modal::Modal;
 use render::render;
+use state::HomeHit;
 
 pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let mut state = HomeState::new();
@@ -50,37 +55,175 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             // stuck behind a stream of keys.
             poll_browser_listing(&mut state);
             if event::poll(SPINNER_TICK)? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind != KeyEventKind::Press {
-                        continue;
-                    }
-                    dispatch_event(key, &mut state, terminal)?;
-                }
+                handle_event(event::read()?, &mut state, terminal)?;
             } else {
                 state.spinner.advance();
             }
             continue;
         }
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-            dispatch_event(key, &mut state, terminal)?;
-        }
+        handle_event(event::read()?, &mut state, terminal)?;
     }
 }
 
-/// Routes a key to the menu or the active modal.
-fn dispatch_event<B: Backend>(
-    key: event::KeyEvent,
+/// Where a key press goes once it has been read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeyRoute {
+    /// Read the system clipboard and paste it.
+    Paste,
+    /// Hand the key to the Home menu.
+    Menu,
+    /// Hand the key to the active modal.
+    Modal,
+}
+
+/// Classifies a key press before it reaches any handler.
+///
+/// The clipboard-paste chord is checked first, so `Ctrl+V` can never fall
+/// through to a text field and type the letter `v`.
+fn key_route(key: &event::KeyEvent, state: &HomeState) -> KeyRoute {
+    if is_clipboard_paste(key) {
+        KeyRoute::Paste
+    } else if state.modal.is_none() {
+        KeyRoute::Menu
+    } else {
+        KeyRoute::Modal
+    }
+}
+
+/// Handles one terminal event: a `Ctrl+V` is serviced as a clipboard paste, a
+/// term-native (bracketed) paste is applied to the active input, a key press
+/// goes to the menu or the active modal, and anything else is ignored.
+fn handle_event<B: Backend>(
+    event: Event,
     state: &mut HomeState,
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
+    match event {
+        Event::Key(key) if key.kind == KeyEventKind::Press => match key_route(&key, state) {
+            KeyRoute::Paste => paste_from_clipboard(state),
+            KeyRoute::Menu => handle_home_key(key, state, terminal)?,
+            KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
+        },
+        Event::Paste(text) => {
+            // The event buffer can hold a secret; wipe it on drop, like the
+            // `Ctrl+V` source does.
+            let text = Zeroizing::new(text);
+            apply_paste(&text, state);
+        }
+        Event::Mouse(mouse) => handle_mouse(mouse, state, terminal)?,
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Applies a mouse event.
+///
+/// A wheel tick moves the menu or the modal's own list; a left click is
+/// hit-tested. Ignored while a dismiss overlay (About or an Alert) is open only
+/// for the wheel — the wheel must never be the key that closes it, while a click
+/// *does* dismiss it.
+fn handle_mouse<B: Backend>(
+    mouse: event::MouseEvent,
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
+    match mouse.kind {
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            if dismiss_overlay_open(state) {
+                return Ok(());
+            }
+            if let Some(key) = wheel_nav_key(&mouse) {
+                match key_route(&key, state) {
+                    // A wheel tick carries no modifiers, so it is never the paste chord.
+                    KeyRoute::Paste => {}
+                    KeyRoute::Menu => handle_home_key(key, state, terminal)?,
+                    KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
+                }
+            }
+        }
+        MouseEventKind::Down(button) => {
+            handle_click(button, mouse.column, mouse.row, state, terminal)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Turns a left click into the action it stands for.
+///
+/// The active modal owns the screen: a click goes to it, or does nothing. With
+/// no modal, a menu or recent-file row is selected and activated in one gesture,
+/// matching the keyboard's `Enter`.
+fn handle_click<B: Backend>(
+    button: MouseButton,
+    x: u16,
+    y: u16,
+    state: &mut HomeState,
+    terminal: &mut Terminal<B>,
+) -> io::Result<()> {
+    if let Some(mut modal) = state.modal.take() {
+        return match modal.handle_click(button, x, y) {
+            None => {
+                state.modal = Some(modal);
+                Ok(())
+            }
+            Some(action) => orchestrator::execute(state, terminal, action, Some(modal)),
+        };
+    }
+    if !is_left(button) {
+        return Ok(());
+    }
+    if let Some(HomeHit::MenuItem(index)) = state.hits.hit(x, y, button) {
+        state.selected = index;
+        handle_home_key(
+            event::KeyEvent::new(event::KeyCode::Enter, event::KeyModifiers::NONE),
+            state,
+            terminal,
+        )?;
+    }
+    Ok(())
+}
+
+/// Whether a modal that closes on any key is open. The wheel must not be that
+/// key: About and the passive Alert dismiss on any key, and a Confirmation
+/// treats every non-`y` key as a decline.
+fn dismiss_overlay_open(state: &HomeState) -> bool {
+    matches!(
+        state.modal,
+        Some(Modal::About(_) | Modal::Alert(_) | Modal::Confirmation(_))
+    )
+}
+
+/// Applies pasted `text` to the active modal's focused input, if it has one.
+fn apply_paste(text: &str, state: &mut HomeState) {
+    if let Some(modal) = state.modal.as_mut() {
+        modal.handle_paste(text);
+    }
+}
+
+/// Reads the system clipboard and applies it to the active surface.
+fn paste_from_clipboard(state: &mut HomeState) {
+    paste_into(state, clipboard::paste_text);
+}
+
+/// Applies the result of `read` to the active surface.
+///
+/// An unreadable or empty clipboard is a silent no-op: pasting must never show
+/// a false success or disturb the field. With no modal open — the menu itself
+/// has no text input — the read is skipped entirely: it is synchronous, and a
+/// hung X11 clipboard owner must not freeze the UI for a `Ctrl+V` that provably
+/// does nothing. Taking the read as an argument is what lets the skip and the
+/// failure path be tested without a display.
+fn paste_into(
+    state: &mut HomeState,
+    read: impl FnOnce() -> Result<Zeroizing<String>, clipboard::ClipboardError>,
+) {
     if state.modal.is_none() {
-        handle_home_key(key, state, terminal)
-    } else {
-        handle_modal_key(key, state, terminal)
+        return;
+    }
+    if let Ok(text) = read() {
+        apply_paste(&text, state);
     }
 }
 
@@ -198,10 +341,14 @@ mod tests {
     use crate::theming::{Palette, texts};
     use crate::vault::active_file::ActiveVaultState;
     use crate::vault::utils::Configuration;
-    use crate::vault::widget::modal::{About, BrowserModal, ConfigurationModal, ExportWizard};
+    use crate::vault::widget::modal::{
+        About, BrowserModal, ConfigurationModal, Confirmation, ExportWizard, SharePassphrase,
+        UnlockPrompt,
+    };
     use crate::vault::widget::render::home_status_parts;
     use crossterm::event::KeyCode;
     use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
     use ratatui::style::Color;
     use std::path::PathBuf;
 
@@ -691,5 +838,403 @@ mod tests {
         assert!(file_handling::decrypt_to_node(&data, "pw").is_ok());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── Clipboard paste routing ──
+
+    /// Both paste sources — a `Ctrl+V` read and a bracketed `Event::Paste` —
+    /// funnel through [`apply_paste`], which hands the text to the open modal.
+    #[test]
+    fn a_paste_lands_in_the_open_unlock_prompt() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Unlock(UnlockPrompt::new(
+            "/tmp/vault.age".to_string(),
+            vec![1, 2, 3],
+        )));
+
+        apply_paste("pw\r\nsecret", &mut state);
+
+        match &state.modal {
+            Some(Modal::Unlock(prompt)) => assert_eq!(prompt.typed().as_str(), "pwsecret"),
+            _ => panic!("the unlock prompt must stay open"),
+        }
+    }
+
+    #[test]
+    fn a_paste_with_no_modal_skips_the_clipboard_read() {
+        let mut state = HomeState::with_config(Configuration::default());
+        assert!(state.modal.is_none());
+        let mut read = false;
+
+        paste_into(&mut state, || {
+            read = true;
+            Ok(Zeroizing::new("ignored".to_string()))
+        });
+
+        assert!(!read, "the synchronous read must be skipped with no modal");
+    }
+
+    #[test]
+    fn a_failed_clipboard_read_leaves_the_prompt_untouched() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Unlock(UnlockPrompt::new(
+            "/tmp/vault.age".to_string(),
+            vec![1],
+        )));
+
+        paste_into(&mut state, || {
+            Err(clipboard::ClipboardError::Read("no display".to_string()))
+        });
+
+        match &state.modal {
+            Some(Modal::Unlock(prompt)) => assert_eq!(prompt.typed().as_str(), ""),
+            _ => panic!("the unlock prompt must stay open"),
+        }
+    }
+
+    fn paste_key() -> event::KeyEvent {
+        event::KeyEvent::new(KeyCode::Char('v'), event::KeyModifiers::CONTROL)
+    }
+
+    fn bare_v() -> event::KeyEvent {
+        event::KeyEvent::from(KeyCode::Char('v'))
+    }
+
+    #[test]
+    fn ctrl_v_classifies_as_paste_on_the_home_screen() {
+        let mut with_modal = HomeState::with_config(Configuration::default());
+        with_modal.modal = Some(Modal::Unlock(UnlockPrompt::new(
+            "/tmp/vault.age".to_string(),
+            vec![1],
+        )));
+
+        assert_eq!(key_route(&paste_key(), &with_modal), KeyRoute::Paste);
+        assert_eq!(key_route(&bare_v(), &with_modal), KeyRoute::Modal);
+
+        let menu = HomeState::with_config(Configuration::default());
+        assert_eq!(key_route(&paste_key(), &menu), KeyRoute::Paste);
+        assert_eq!(key_route(&bare_v(), &menu), KeyRoute::Menu);
+    }
+
+    // ── Mouse wheel routing ──
+
+    /// A wheel event at the top-left; only `kind` matters to the router.
+    fn scroll(kind: event::MouseEventKind) -> event::MouseEvent {
+        event::MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers: event::KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn a_wheel_tick_moves_the_menu_selection() {
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        assert_eq!(state.selected, 0);
+
+        handle_mouse(
+            scroll(event::MouseEventKind::ScrollDown),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        assert_eq!(state.selected, 1, "the wheel selects the next menu item");
+
+        handle_mouse(
+            scroll(event::MouseEventKind::ScrollUp),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        assert_eq!(
+            state.selected, 0,
+            "the wheel selects the previous menu item"
+        );
+    }
+
+    #[test]
+    fn the_wheel_never_dismisses_about_or_an_alert() {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let scroll_down = scroll(event::MouseEventKind::ScrollDown);
+
+        let mut about = HomeState::with_config(Configuration::default());
+        about.modal = Some(Modal::About(About));
+        handle_mouse(scroll_down, &mut about, &mut terminal).unwrap();
+        assert!(
+            matches!(about.modal, Some(Modal::About(_))),
+            "the wheel must not dismiss About"
+        );
+
+        let mut alert = HomeState::with_config(Configuration::default());
+        alert.modal = Some(Modal::error("boom"));
+        handle_mouse(scroll_down, &mut alert, &mut terminal).unwrap();
+        assert!(
+            matches!(alert.modal, Some(Modal::Alert(_))),
+            "the wheel must not dismiss an Alert"
+        );
+    }
+
+    #[test]
+    fn the_wheel_never_declines_a_confirmation() {
+        // A confirmation treats every non-`y` key as a decline, so a wheel tick
+        // must not reach it: scrolling past the prompt would silently answer
+        // "no".
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Confirmation(Confirmation::change_password()));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        handle_mouse(
+            scroll(event::MouseEventKind::ScrollDown),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+
+        assert!(
+            matches!(state.modal, Some(Modal::Confirmation(_))),
+            "the wheel must not be read as declining"
+        );
+    }
+
+    #[test]
+    fn a_click_on_a_menu_row_selects_and_activates_it() {
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, &mut state);
+            })
+            .unwrap();
+
+        // Row 2 is "Configuration", which opens a modal without any I/O.
+        let (x, y) = (0..24u16)
+            .flat_map(|y| (0..80u16).map(move |x| (x, y)))
+            .find(|&(x, y)| {
+                state.hits.hit(x, y, event::MouseButton::Left) == Some(HomeHit::MenuItem(2))
+            })
+            .expect("the Configuration row must be clickable");
+
+        handle_click(event::MouseButton::Left, x, y, &mut state, &mut terminal).unwrap();
+
+        assert_eq!(state.selected, 2, "the click moved the menu cursor");
+        assert!(
+            matches!(state.modal, Some(Modal::Configuration(_))),
+            "a single click activates the row"
+        );
+    }
+
+    #[test]
+    fn a_short_home_window_records_no_hits_outside_it() {
+        // A window with far more menu/recent rows than fit on a 6-row terminal:
+        // the rows off the window are never drawn, and must not be clickable.
+        let config = Configuration {
+            recent_files: (0..20).map(|i| format!("/tmp/r{i}.age")).collect(),
+            ..Configuration::default()
+        };
+        let mut state = HomeState::with_config(config);
+        let mut terminal = Terminal::new(TestBackend::new(80, 6)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, &mut state);
+            })
+            .unwrap();
+
+        for x in 0..80u16 {
+            for y in 0..6u16 {
+                if state.hits.hit(x, y, event::MouseButton::Left).is_some() {
+                    assert!(
+                        y < 5,
+                        "a menu row was clickable outside the window at ({x}, {y})"
+                    );
+                }
+            }
+        }
+    }
+
+    // ── Outside-click dismissal (an outside click is the modal's Esc) ──
+
+    /// Draws the whole Home screen and any open modal into a test backend.
+    fn draw_home(state: &mut HomeState) {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, state);
+            })
+            .unwrap();
+    }
+
+    /// A cell guaranteed to fall outside `rect` on the 80×24 test screen.
+    fn outside(rect: Rect) -> (u16, u16) {
+        for y in 0..24u16 {
+            for x in 0..80u16 {
+                if !crate::hitbox::point_in(rect, x, y) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("every cell is inside {rect:?}");
+    }
+
+    /// The panel the active modal drew, when a click outside it dismisses.
+    fn panel(state: &HomeState) -> Rect {
+        state
+            .modal
+            .as_ref()
+            .and_then(Modal::panel_rect)
+            .expect("the active modal records a panel")
+    }
+
+    /// Drives one click through the same routing the event loop uses.
+    fn click(state: &mut HomeState, button: event::MouseButton, x: u16, y: u16) {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        handle_click(button, x, y, state, &mut terminal).unwrap();
+    }
+
+    #[test]
+    fn a_click_outside_the_unlock_prompt_closes_it() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Unlock(UnlockPrompt::new(
+            "/tmp/vault.age".to_string(),
+            vec![1, 2, 3],
+        )));
+        draw_home(&mut state);
+
+        let (x, y) = outside(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(
+            state.modal.is_none(),
+            "an outside click is the prompt's Esc"
+        );
+    }
+
+    #[test]
+    fn a_click_inside_the_unlock_prompt_off_a_field_is_a_noop() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Unlock(UnlockPrompt::new(
+            "/tmp/vault.age".to_string(),
+            vec![1, 2, 3],
+        )));
+        draw_home(&mut state);
+
+        // The panel's top-left cell is its border: inside, but no field row.
+        let rect = panel(&state);
+        click(&mut state, event::MouseButton::Left, rect.x, rect.y);
+
+        assert!(
+            matches!(state.modal, Some(Modal::Unlock(_))),
+            "a click inside the panel must not close it"
+        );
+    }
+
+    #[test]
+    fn a_click_outside_configuration_discards_the_edits() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.config_before_modal = state.config.clone();
+        // An unsaved edit that an outside click must roll back, as `Esc` does.
+        state.config.display_full_path = !state.config_before_modal.display_full_path;
+        state.modal = Some(Modal::Configuration(ConfigurationModal::new()));
+        draw_home(&mut state);
+
+        let (x, y) = outside(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(state.modal.is_none(), "the dialog closes");
+        assert_eq!(
+            state.config.display_full_path, state.config_before_modal.display_full_path,
+            "an outside click must discard the edits, like Esc"
+        );
+    }
+
+    #[test]
+    fn a_click_outside_a_confirmation_declines_and_never_confirms() {
+        let mut state = HomeState::with_config(Configuration::default());
+        let path = "/tmp/keep.age".to_string();
+        state.config.recent_files.push(path.clone());
+        state.modal = Some(Modal::Confirmation(Confirmation::delete_recent(
+            path.clone(),
+        )));
+        draw_home(&mut state);
+
+        let (x, y) = outside(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(state.modal.is_none(), "the confirmation is gone");
+        assert!(
+            state.config.recent_files.iter().any(|p| p == &path),
+            "an outside click declines: the file must not be dropped"
+        );
+    }
+
+    #[test]
+    fn a_right_click_outside_the_unlock_prompt_is_ignored() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Unlock(UnlockPrompt::new(
+            "/tmp/vault.age".to_string(),
+            vec![1, 2, 3],
+        )));
+        draw_home(&mut state);
+
+        let (x, y) = outside(panel(&state));
+        click(&mut state, event::MouseButton::Right, x, y);
+
+        assert!(
+            matches!(state.modal, Some(Modal::Unlock(_))),
+            "only the left button dismisses"
+        );
+
+        // The same cell with the left button does close, bracketing the guard.
+        click(&mut state, event::MouseButton::Left, x, y);
+        assert!(state.modal.is_none(), "the left button still dismisses");
+    }
+
+    #[test]
+    fn a_click_outside_the_export_wizard_closes_it() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::Export(ExportWizard::new()));
+        draw_home(&mut state);
+
+        let (x, y) = outside(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(
+            state.modal.is_none(),
+            "an outside click is the wizard's Esc"
+        );
+    }
+
+    #[test]
+    fn a_click_outside_the_share_passphrase_step_closes_it() {
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::SharePassphrase(SharePassphrase::new(
+            "/tmp/bundle".to_string(),
+        )));
+        draw_home(&mut state);
+
+        let (x, y) = outside(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(state.modal.is_none(), "an outside click is the step's Esc");
+    }
+
+    #[test]
+    fn a_click_outside_about_still_dismisses_it() {
+        // About satisfies the guard's `None` branch and keeps its existing
+        // "any left click closes" behaviour.
+        let mut state = HomeState::with_config(Configuration::default());
+        state.modal = Some(Modal::About(About));
+        draw_home(&mut state);
+
+        click(&mut state, event::MouseButton::Left, 0, 0);
+
+        assert!(
+            state.modal.is_none(),
+            "About still closes on any left click"
+        );
     }
 }

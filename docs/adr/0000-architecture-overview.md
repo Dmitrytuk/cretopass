@@ -15,7 +15,9 @@ snapshot back to an age-encrypted JSON file.
 | `theming` | [0004](../../src/theming/docs/adr/0004-theming.md) | Centralized keybindings, styles, icons, UI strings, the switchable [dark and light colour schemes](0019-runtime-colour-scheme-switching.md) ([0015](0015-default-dark-colour-scheme.md)), the title-bar `Status`/`Spinner` ([0011](0011-animated-status-spinner.md)), and the shared status bar ([0014](0014-status-bar-unification.md)) |
 | `generator` | [0012](0012-password-generator.md) | Password generation — strict leaf, depends only on `rand`; TUI-free and tree-free |
 | `share` | [0023](0023-sharing-a-vault-subtree.md) | Share flow, UI-agnostic: the recipient's masked password pair (`Passphrase`), wrapped by the Tree and Home modals |
-| `clipboard` | [0025](0025-clipboard-gateway.md) | System clipboard gateway — `arboard` on every platform with a command-line helper fallback; the one place a secret reaches the OS clipboard |
+| `clipboard` | [0025](0025-clipboard-gateway.md) | System clipboard gateway — `arboard` on every platform with a command-line helper fallback; the one place a secret reaches the OS clipboard, in both directions (copy and clipboard paste) |
+| `terminal` | [0026](0026-deterministic-mouse-input.md) | Terminal lifecycle — raw mode, the alternate screen, bracketed paste and mouse capture in one place, with one `restore()` reused by the panic hook |
+| `hitbox` | [0026](0026-deterministic-mouse-input.md) | Mouse hit-testing — a strict leaf over `ratatui`/`crossterm`; `HitBox<T>`/`HitMap<T>` map a click to the topmost recorded region's target |
 | `tree` | [0005](../../src/tree/docs/adr/0005-tree-module.md) | Tree data model, state machine, rendering, async event loop |
 | `vault` | [0006](../../src/vault/docs/adr/0006-vault-module.md) | Home screen, active vault state, configuration persistence |
 | `file_browser` | [0007](../../src/file_browser/docs/adr/0007-file-browser.md) | OS directory browser overlay with mounted-disk locations and hidden-entry toggle; listings and disk enumeration run off the UI thread, and browsing reads no file contents ([0024](0024-browsing-never-reads-file-contents.md)) |
@@ -49,7 +51,14 @@ password pair that the Tree and Home share flows both use, and never imports
 The `clipboard` module is a strict leaf below `tree`: `tree::widget::orchestrator`
 calls `clipboard::copy_text` when the Detail modal reports a copy, and the module
 owns the process-wide `arboard::Clipboard` handle without importing `TreeState`
-([0025](0025-clipboard-gateway.md)).
+([0025](0025-clipboard-gateway.md)). `clipboard::paste_text` is the read side: the
+two event loops read it once for `Ctrl+V` and hand the text to the active surface.
+
+`hitbox` is a strict leaf below every screen: each renderer records the `HitBox`es of
+its clickable rows, and the event loop turns a click into the same `Action` its key
+would produce ([0026](0026-deterministic-mouse-input.md)). `terminal` wraps `lib.rs`'s
+setup and teardown, and enabling mouse capture there is what makes those clicks and
+the wheel reach the app at all.
 
 ## Core design principles
 
@@ -66,8 +75,8 @@ owns the process-wide `arboard::Clipboard` handle without importing `TreeState`
 
 | Crate | Used by | Purpose |
 |-------|---------|---------|
-| `ratatui` 0.28 | tree, vault, file_browser, cursor, theming | TUI rendering |
-| `crossterm` 0.28 (`event-stream`) | lib, tree, vault | terminal events, raw mode, async event stream |
+| `ratatui` 0.28 | tree, vault, file_browser, cursor, theming, terminal, hitbox | TUI rendering |
+| `crossterm` 0.28 (`event-stream`) | lib, tree, vault, terminal, hitbox | terminal events, raw mode, mouse capture, async event stream |
 | `tokio` 1 (`rt`, `sync`, `macros`, `time`) | tree | current-thread runtime, `select!`, save-event channel, spinner `interval` and bounded `timeout` |
 | `futures-util` 0.3 | tree | `StreamExt::next` for `EventStream` |
 | `age` 0.11 | crypt | passphrase-based encryption |

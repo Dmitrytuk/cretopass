@@ -4,11 +4,20 @@
 use crate::file_browser::FileBrowserSession;
 use crate::file_handling;
 use crate::generator::PasswordParams;
+use crate::hitbox::HitMap;
 use crate::theming::{Palette, Spinner, Status, set_palette, texts};
 use crate::vault::active_file::ActiveVaultState;
 use crate::vault::utils::{self, Configuration};
 
 use super::modal::{Modal, UnlockPrompt};
+
+/// What a click on the Home screen means, outside any modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HomeHit {
+    /// A menu item or a recent file, by its combined row index (the menu items
+    /// come first, then the recent files).
+    MenuItem(usize),
+}
 
 pub struct HomeState {
     pub(super) selected: usize,
@@ -30,6 +39,8 @@ pub struct HomeState {
     /// Password-generator settings for this app run; seeded into each opened
     /// tree and copied back when it exits. Never persisted to the config file.
     pub generator: PasswordParams,
+    /// The menu rows' clickable regions, refilled by the renderer every frame.
+    pub(super) hits: HitMap<HomeHit>,
 }
 
 impl Default for HomeState {
@@ -71,6 +82,7 @@ impl HomeState {
             spinner: Spinner::default(),
             browser_session: FileBrowserSession::default(),
             generator: PasswordParams::default(),
+            hits: HitMap::default(),
         }
     }
 

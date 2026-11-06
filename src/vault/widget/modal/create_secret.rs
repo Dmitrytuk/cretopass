@@ -9,9 +9,10 @@ use zeroize::Zeroizing;
 
 use super::HomeAction;
 use crate::cursor::{FieldEdit, PairVerdict, SecretFieldGroup, password_field_spans};
+use crate::hitbox::{HitMap, is_left};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{display_path, make_overlay, paint_overlay};
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
@@ -28,6 +29,11 @@ pub struct CreateSecretPrompt {
     file_path: String,
     fields: SecretFieldGroup,
     error: Option<String>,
+    /// The clickable field rows recorded by the renderer.
+    hits: HitMap<usize>,
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it dismisses the dialog, like `Esc`.
+    rect: Option<Rect>,
 }
 
 impl CreateSecretPrompt {
@@ -37,6 +43,8 @@ impl CreateSecretPrompt {
             file_path,
             fields: SecretFieldGroup::with_fields(LABELS.len()),
             error: None,
+            hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -74,6 +82,14 @@ impl CreateSecretPrompt {
         }
     }
 
+    /// Pastes the clipboard's text into the focused password field,
+    /// single-line only.
+    pub fn handle_paste(&mut self, text: &str) {
+        if self.fields.paste_clipboard(text) {
+            self.error = None;
+        }
+    }
+
     /// Validates the pair: empty means "no passphrase" (a separate confirmation),
     /// mismatched re-shows the dialog, anything else can be created.
     fn confirm(&mut self) -> Option<HomeAction> {
@@ -90,10 +106,29 @@ impl CreateSecretPrompt {
         }
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect, display_full_path: bool) {
+    /// A left click on a field row focuses that field; the right button is
+    /// ignored.
+    pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) {
+        if !is_left(button) {
+            return;
+        }
+        if let Some(index) = self.hits.hit(x, y, button) {
+            self.fields.focus(index);
+        }
+    }
+
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it dismisses the dialog, like `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
+    }
+
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, display_full_path: bool) {
+        self.hits.clear();
         let shown_path = display_path(&self.file_path, display_full_path);
 
         let overlay_area = make_overlay(area, if self.error.is_some() { 10 } else { 9 });
+        self.rect = Some(overlay_area);
         let block = Block::default()
             .title(texts::HOME_CREATE_SECRET)
             .borders(Borders::ALL)
@@ -124,6 +159,13 @@ impl CreateSecretPrompt {
         }
 
         lines.push(Line::from(""));
+
+        let inner = block.inner(overlay_area);
+        let visible = LABELS.len().min(inner.height.saturating_sub(3) as usize);
+        for index in 0..visible {
+            let rect = Rect::new(inner.x, inner.y + 3 + index as u16, inner.width, 1);
+            self.hits.push(rect, MouseButton::Left, index);
+        }
 
         paint_overlay(
             frame,

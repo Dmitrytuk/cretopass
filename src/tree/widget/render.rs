@@ -1,5 +1,6 @@
 //! Drawing the Tree screen: the bordered tree view and its title bar.
 
+use crossterm::event::MouseButton;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -7,7 +8,8 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-use super::state::TreeState;
+use super::state::{TreeHit, TreeState};
+use crate::hitbox::HitMap;
 use crate::theming::{ElementStyle, Icon};
 
 /// Zero-sized type serving as a namespace for the tree rendering function.
@@ -15,6 +17,20 @@ pub struct TreeWidget;
 
 impl TreeWidget {
     pub fn render(frame: &mut Frame, area: Rect, state: &TreeState) {
+        let mut hits = HitMap::default();
+        Self::render_with_hits(frame, area, state, &mut hits);
+    }
+
+    /// Draws the tree and records a clickable region for every visible row.
+    ///
+    /// Kept separate from the public [`TreeWidget::render`] so the internal
+    /// retained [`TreeHit`] type never leaks into the crate's public surface.
+    pub(crate) fn render_with_hits(
+        frame: &mut Frame,
+        area: Rect,
+        state: &TreeState,
+        hits: &mut HitMap<TreeHit>,
+    ) {
         let base_title = state
             .active_vault_path
             .as_deref()
@@ -90,6 +106,19 @@ impl TreeWidget {
         let scroll_row = state
             .selected
             .saturating_sub(inner_height.saturating_sub(1) / 2);
+
+        // Record one clickable region per visible line, so a click resolves to
+        // the row index rather than a screen coordinate the caller re-derives.
+        for offset in 0..inner.height as usize {
+            if state.visible.get(scroll_row + offset).is_none() {
+                break;
+            }
+            let rect = Rect::new(inner.x, inner.y + offset as u16, inner.width, 1);
+            let row = TreeHit::Row(scroll_row + offset);
+            hits.push(rect, MouseButton::Left, row);
+            hits.push(rect, MouseButton::Right, row);
+        }
+
         let paragraph = Paragraph::new(text)
             .style(ElementStyle::TreeRow.style())
             .scroll((scroll_row as u16, 0));

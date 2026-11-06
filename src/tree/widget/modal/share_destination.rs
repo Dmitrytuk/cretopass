@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -55,7 +55,30 @@ impl ShareDestination {
         key: KeyEvent,
         _state: &mut TreeState,
     ) -> Option<TreeAction> {
-        match file_browser::handle_key(key, &mut self.browser) {
+        let action = file_browser::handle_key(key, &mut self.browser);
+        self.route(action)
+    }
+
+    /// Applies a click in the share destination browser.
+    ///
+    /// Clicks only navigate (a directory) or select (a file) — the bundle folder
+    /// is named with `n` and committed with `e`/Enter-in-input, exactly as for the
+    /// keyboard — so this never reports an action of its own. Mirrors
+    /// [`Self::handle_key`].
+    pub(crate) fn handle_click(
+        &mut self,
+        button: MouseButton,
+        x: u16,
+        y: u16,
+        _state: &mut TreeState,
+    ) -> Option<TreeAction> {
+        let action = file_browser::handle_click(button, x, y, &mut self.browser);
+        self.route(action)
+    }
+
+    /// Turns what the browser reported into a [`TreeAction`].
+    fn route(&mut self, action: Option<FileBrowserAction>) -> Option<TreeAction> {
+        match action {
             None => None,
             Some(FileBrowserAction::Cancelled) => {
                 // Abandon any in-flight listing explicitly before the modal
@@ -77,6 +100,11 @@ impl ShareDestination {
     /// The directory and hidden-entry memory for the next browser opening.
     pub(crate) fn session(&self) -> FileBrowserSession {
         self.browser.session()
+    }
+
+    /// Applies pasted `text` to the browser's active text surface.
+    pub(crate) fn handle_paste(&mut self, text: &str) {
+        file_browser::handle_paste(text, &mut self.browser);
     }
 
     /// Whether the browser has a directory listing in flight.

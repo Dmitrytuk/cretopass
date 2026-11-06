@@ -19,4 +19,4 @@ mod locations;
 mod rename;
 mod text_edit;
 
-pub use keys::handle_key;
+pub use keys::{handle_click, handle_key, handle_paste};

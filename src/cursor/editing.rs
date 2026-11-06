@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use ratatui::style::Style;
 use ratatui::text::Span;
 
@@ -54,6 +56,49 @@ pub fn insert_char_at(text: &mut String, cursor: &mut usize, c: char) {
     let pos = (*cursor).min(text.len());
     text.insert(pos, c);
     *cursor = pos + c.len_utf8();
+}
+
+/// Inserts the whole string `s` at the cursor, advancing the cursor past it.
+///
+/// The cursor is clamped to the text length and, defensively, walked back to a
+/// char boundary first, so a stray offset can never panic the insertion. An
+/// empty `s` changes nothing.
+pub fn insert_str_at(text: &mut String, cursor: &mut usize, s: &str) {
+    let mut pos = (*cursor).min(text.len());
+    if !text.is_char_boundary(pos) {
+        pos = cursor_left(text, pos);
+    }
+    text.insert_str(pos, s);
+    *cursor = pos + s.len();
+}
+
+/// How a pasted string is sanitised before it enters a single-line field.
+///
+/// A terminal clipboard often carries trailing newlines or entirely unrelated
+/// text; the policy is the one place that decides what a field will accept, so
+/// every paste surface funnels through the same rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PastePolicy {
+    /// A single-line field: line breaks are dropped, everything else kept.
+    SingleLine,
+    /// A digits-only field (the generator length): everything but ASCII digits
+    /// is dropped.
+    Digits,
+}
+
+impl PastePolicy {
+    /// Returns the form of `text` this policy accepts, borrowing when nothing
+    /// needs to be removed.
+    pub fn clean(self, text: &str) -> Cow<'_, str> {
+        match self {
+            Self::SingleLine if text.contains(['\r', '\n']) => {
+                Cow::Owned(text.chars().filter(|c| *c != '\r' && *c != '\n').collect())
+            }
+            Self::SingleLine => Cow::Borrowed(text),
+            Self::Digits if text.chars().all(|c| c.is_ascii_digit()) => Cow::Borrowed(text),
+            Self::Digits => Cow::Owned(text.chars().filter(char::is_ascii_digit).collect()),
+        }
+    }
 }
 
 /// The style for a list row: the selection background when `is_selected`, the
@@ -171,5 +216,51 @@ mod tests {
         insert_char_at(&mut text, &mut cursor, 'é');
         assert_eq!(text, "aé");
         assert_eq!(cursor, 3);
+    }
+
+    #[test]
+    fn insert_str_inserts_whole_string_and_advances() {
+        let mut text = "aç".to_string();
+        let mut cursor = 1; // between `a` and `ç`
+        insert_str_at(&mut text, &mut cursor, "XY");
+        assert_eq!(text, "aXYç");
+        assert_eq!(cursor, 3);
+    }
+
+    #[test]
+    fn insert_str_appends_when_the_cursor_is_past_the_end() {
+        let mut text = "ab".to_string();
+        let mut cursor = 99;
+        insert_str_at(&mut text, &mut cursor, "c");
+        assert_eq!(text, "abc");
+        assert_eq!(cursor, 3);
+    }
+
+    #[test]
+    fn insert_str_on_a_stray_mid_char_cursor_lands_on_a_boundary() {
+        let mut text = "é".to_string(); // 2 bytes
+        let mut cursor = 1; // inside `é`
+        insert_str_at(&mut text, &mut cursor, "a");
+        assert_eq!(text, "aé");
+        assert_eq!(cursor, 1);
+    }
+
+    #[test]
+    fn single_line_policy_drops_line_breaks_and_borrows_when_clean() {
+        assert_eq!(PastePolicy::SingleLine.clean("a\r\nb\nc"), "abc");
+        assert!(matches!(
+            PastePolicy::SingleLine.clean("plain"),
+            Cow::Borrowed("plain")
+        ));
+    }
+
+    #[test]
+    fn digits_policy_keeps_only_ascii_digits_and_borrows_when_clean() {
+        assert_eq!(PastePolicy::Digits.clean("1a2b3"), "123");
+        assert_eq!(PastePolicy::Digits.clean("no digits"), "");
+        assert!(matches!(
+            PastePolicy::Digits.clean("42"),
+            Cow::Borrowed("42")
+        ));
     }
 }

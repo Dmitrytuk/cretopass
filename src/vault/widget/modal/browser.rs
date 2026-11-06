@@ -9,7 +9,7 @@
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -94,6 +94,28 @@ impl BrowserModal {
             }
             Some(FileBrowserAction::Selected(path)) => Some(self.selected(path)),
         }
+    }
+
+    /// Applies a click: selecting a directory or activating a file reports the
+    /// same [`HomeAction`] a key press would. Mirrors [`BrowserModal::handle_key`].
+    pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) -> Option<HomeAction> {
+        match file_browser::handle_click(button, x, y, &mut self.state) {
+            None => None,
+            Some(FileBrowserAction::Cancelled) => {
+                self.state.cancel();
+                Some(HomeAction::Close)
+            }
+            Some(FileBrowserAction::Renamed { from, to }) => {
+                Some(HomeAction::RenameFile { from, to })
+            }
+            Some(FileBrowserAction::Selected(path)) => Some(self.selected(path)),
+        }
+    }
+
+    /// Applies pasted `text` to the browser's active text surface (the name or
+    /// rename input, or the search box).
+    pub fn handle_paste(&mut self, text: &str) {
+        file_browser::handle_paste(text, &mut self.state);
     }
 
     /// What accepting `path` means, which is why the browser was opened.

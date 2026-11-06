@@ -10,7 +10,8 @@ use ratatui::text::Span;
 use zeroize::{Zeroize, Zeroizing};
 
 use super::editing::{
-    backspace_at, cursor_left, cursor_right, delete_at, insert_char_at, split_at_cursor,
+    PastePolicy, backspace_at, cursor_left, cursor_right, delete_at, insert_char_at, insert_str_at,
+    split_at_cursor,
 };
 use crate::theming::{Action, ElementStyle};
 
@@ -54,6 +55,14 @@ impl SecretField {
     /// Inserts `c` at the cursor and advances past it.
     pub fn insert(&mut self, c: char) {
         insert_char_at(&mut self.text, &mut self.cursor, c);
+    }
+
+    /// Inserts the whole string `text` at the cursor and advances past it.
+    ///
+    /// `text` is expected to be already sanitised by the caller's
+    /// [`PastePolicy`]; the field itself only places it.
+    pub fn paste(&mut self, text: &str) {
+        insert_str_at(&mut self.text, &mut self.cursor, text);
     }
 
     /// Removes the character before the cursor; a no-op at the start.
@@ -200,11 +209,44 @@ impl SecretFieldGroup {
         self.focused = self.focused.saturating_sub(1);
     }
 
+    /// Focuses the field at `index`, ignoring an out-of-range index.
+    ///
+    /// Used by the screens to turn a click on a field row into a focus change.
+    pub fn focus(&mut self, index: usize) {
+        if index < self.fields.len() {
+            self.focused = index;
+        }
+    }
+
     /// Runs `action` on the focused field.
     pub fn apply(&mut self, action: impl FnOnce(&mut SecretField)) {
         if let Some(field) = self.fields.get_mut(self.focused) {
             action(field);
         }
+    }
+
+    /// Inserts the whole string `text` into the focused field.
+    ///
+    /// Like [`SecretField::paste`], `text` is expected to be already sanitised
+    /// by the caller; this only routes it to the focused field.
+    pub fn paste(&mut self, text: &str) {
+        self.apply(|field| field.paste(text));
+    }
+
+    /// Pastes clipboard `text` into the focused field, single-line only.
+    ///
+    /// A masked field is always single-line, so this is the entry point every
+    /// password prompt uses. The sanitised copy is held in a [`Zeroizing`]
+    /// buffer: it usually holds a secret, and the single-line pass can allocate
+    /// one when the clipboard carries line breaks. Returns `true` when something
+    /// was inserted, so a caller only clears its rejection on a real paste.
+    pub fn paste_clipboard(&mut self, text: &str) -> bool {
+        let cleaned = Zeroizing::new(PastePolicy::SingleLine.clean(text).into_owned());
+        if cleaned.is_empty() {
+            return false;
+        }
+        self.paste(&cleaned);
+        true
     }
 
     /// Applies a dispatched prompt key to the group, reporting what it did.
@@ -408,6 +450,41 @@ mod tests {
 
         assert_eq!(group.field(0).text(), "a");
         assert_eq!(group.field(1).text(), "b");
+    }
+
+    #[test]
+    fn paste_inserts_into_the_focused_field_at_the_cursor() {
+        let mut field = typed("ac");
+        field.move_left(); // between `a` and `c`
+        field.paste("b");
+
+        assert_eq!(field.text(), "abc");
+        assert_eq!(field.cursor(), 2);
+    }
+
+    #[test]
+    fn group_paste_targets_only_the_focused_field() {
+        let mut group = SecretFieldGroup::with_fields(2);
+        group.paste("one");
+        group.next_field();
+        group.paste("two");
+
+        assert_eq!(group.field(0).text(), "one");
+        assert_eq!(group.field(1).text(), "two");
+    }
+
+    #[test]
+    fn paste_clipboard_joins_lines_and_reports_a_real_paste() {
+        let mut group = SecretFieldGroup::with_fields(1);
+
+        assert!(group.paste_clipboard("pw\n"));
+        assert_eq!(group.field(0).text(), "pw");
+
+        assert!(
+            !group.paste_clipboard("\n\r\n"),
+            "a clipped-away paste inserts nothing"
+        );
+        assert_eq!(group.field(0).text(), "pw");
     }
 
     #[test]

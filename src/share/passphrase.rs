@@ -96,6 +96,13 @@ impl Passphrase {
         &self.fields
     }
 
+    /// Focuses the field at `index`, ignoring an out-of-range index.
+    ///
+    /// Used by the screens to turn a click on a field row into a focus change.
+    pub fn focus(&mut self, index: usize) {
+        self.fields.focus(index);
+    }
+
     /// Applies a dispatched key that edits the fields or moves between them.
     ///
     /// Cancel and Confirm are the screen's to interpret, so they are ignored
@@ -106,6 +113,14 @@ impl Passphrase {
             self.fields.apply_action(action),
             FieldEdit::Inserted | FieldEdit::Deleted
         ) {
+            self.error = None;
+        }
+    }
+
+    /// Pastes clipboard `text` into the focused field, single-line only,
+    /// clearing a previous rejection the way typing does.
+    pub fn paste(&mut self, text: &str) {
+        if self.fields.paste_clipboard(text) {
             self.error = None;
         }
     }
@@ -193,6 +208,28 @@ mod tests {
         passphrase.apply(Action::Backspace);
 
         assert!(passphrase.error().is_none());
+    }
+
+    #[test]
+    fn paste_edits_the_focused_field_and_clears_the_report() {
+        let mut passphrase = Passphrase::new();
+        typed(&mut passphrase, "pw", "other");
+        passphrase.submit();
+        assert!(passphrase.error().is_some());
+
+        passphrase.paste("fix");
+
+        assert_eq!(passphrase.fields().field(0).text(), "fixpw");
+        assert!(passphrase.error().is_none());
+    }
+
+    #[test]
+    fn an_empty_paste_is_a_no_op() {
+        let mut passphrase = Passphrase::new();
+        passphrase.paste("");
+
+        assert_eq!(passphrase.fields().field(0).text(), "");
+        assert_eq!(passphrase.fields().focused_index(), 0);
     }
 
     #[test]

@@ -3,13 +3,14 @@
 //! Opened with `?`. There is nothing to type into it, so any key dismisses it,
 //! exactly as its hint promises.
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::TreeAction;
+use crate::hitbox::is_left;
 use crate::theming::{ElementStyle, texts};
 use crate::tree::widget::TreeState;
 
@@ -25,6 +26,17 @@ impl Help {
         _state: &mut TreeState,
     ) -> Option<TreeAction> {
         Some(TreeAction::Close)
+    }
+
+    /// A left click anywhere dismisses the modal; the right button is ignored.
+    pub(crate) fn handle_click(
+        &mut self,
+        button: MouseButton,
+        _x: u16,
+        _y: u16,
+        _state: &mut TreeState,
+    ) -> Option<TreeAction> {
+        is_left(button).then_some(TreeAction::Close)
     }
 
     /// Draws the key-binding list centred over `area`.

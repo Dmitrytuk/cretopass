@@ -1,11 +1,12 @@
 //! The file list and its scroll-margin viewport maths.
 
+use crossterm::event::MouseButton;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 
-use crate::file_browser::state::FileBrowserState;
+use crate::file_browser::state::{BrowserHit, FileBrowserState, FocusTarget};
 use crate::theming::{ElementStyle, Icon, texts};
 
 /// Context lines kept visible above/below the selection while scrolling,
@@ -61,6 +62,16 @@ pub(super) fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBr
 
     update_scroll(&mut state.scroll, sel_pos, indices.len(), list_height);
     let scroll = state.scroll;
+
+    // Record the clickable rows before the borrowing `visible` build below.
+    if state.focus == FocusTarget::List {
+        for (offset, &index) in indices.iter().skip(scroll).take(list_height).enumerate() {
+            let rect = Rect::new(area.x, area.y + offset as u16, area.width, 1);
+            state
+                .hits
+                .push(rect, MouseButton::Left, BrowserHit::Entry(index));
+        }
+    }
 
     let visible: Vec<Line> = indices
         .iter()

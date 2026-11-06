@@ -2,10 +2,16 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
+use crate::cursor::insert_str_at;
 use crate::file_browser::state::{FileBrowserAction, FileBrowserState, FocusTarget};
 use crate::file_handling;
 
 use super::text_edit::handle_text_edit;
+
+/// Inserts the already-sanitised `text` into the rename input at its cursor.
+pub(super) fn handle_rename_paste(state: &mut FileBrowserState, text: &str) {
+    insert_str_at(&mut state.rename_name, &mut state.rename_cursor, text);
+}
 
 pub(super) fn handle_rename_key(
     key: KeyEvent,

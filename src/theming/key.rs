@@ -1,4 +1,31 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+
+/// Whether `key` is the `Ctrl+V` clipboard-paste chord.
+///
+/// Checked once per event loop, before any dispatcher, so the `v` can never
+/// reach a plain-char match that would otherwise type the letter. `Ctrl+Shift+V`
+/// counts too: a shifted `V` arrives uppercase, and terminals report their own
+/// paste that way.
+pub fn is_clipboard_paste(key: &KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+}
+
+/// Maps a mouse wheel tick to the navigation key it stands for.
+///
+/// A tick is a directional scroll with no modifiers, so it reuses the `Up`/`Down`
+/// bindings every screen already has: the wheel and the arrows run the same
+/// dispatch, with no per-screen coordinate math. Every other mouse event — a
+/// click, a drag, a move — maps to `None`, because those are hit-tested against
+/// a screen's own targets rather than translated into keys.
+pub fn wheel_nav_key(mouse: &MouseEvent) -> Option<KeyEvent> {
+    let code = match mouse.kind {
+        MouseEventKind::ScrollUp => KeyCode::Up,
+        MouseEventKind::ScrollDown => KeyCode::Down,
+        _ => return None,
+    };
+    Some(KeyEvent::new(code, KeyModifiers::NONE))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Action {
@@ -683,6 +710,58 @@ mod tests {
 
     fn ctrl(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn ctrl_v_is_the_clipboard_paste_chord() {
+        assert!(is_clipboard_paste(&ctrl(KeyCode::Char('v'))));
+        assert!(
+            is_clipboard_paste(&KeyEvent::new(
+                KeyCode::Char('V'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT
+            )),
+            "a shifted Ctrl+V is still the paste chord"
+        );
+        assert!(
+            !is_clipboard_paste(&key(KeyCode::Char('v'))),
+            "a bare `v` must keep typing"
+        );
+        assert!(
+            !is_clipboard_paste(&ctrl(KeyCode::Char('c'))),
+            "only `v` pastes"
+        );
+    }
+
+    fn mouse(kind: MouseEventKind) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn wheel_ticks_map_to_the_arrow_keys() {
+        assert_eq!(
+            wheel_nav_key(&mouse(MouseEventKind::ScrollUp)).map(|k| k.code),
+            Some(KeyCode::Up)
+        );
+        assert_eq!(
+            wheel_nav_key(&mouse(MouseEventKind::ScrollDown)).map(|k| k.code),
+            Some(KeyCode::Down)
+        );
+    }
+
+    #[test]
+    fn clicks_and_moves_are_not_navigation_keys() {
+        assert_eq!(wheel_nav_key(&mouse(MouseEventKind::Moved)), None);
+        assert_eq!(
+            wheel_nav_key(&mouse(MouseEventKind::Down(
+                crossterm::event::MouseButton::Left
+            ))),
+            None
+        );
     }
 
     #[test]

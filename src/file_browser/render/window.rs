@@ -24,6 +24,7 @@ const DEFAULT_HEIGHT: u16 = 18;
 /// The renderer also maintains the list viewport offsets so the cursor moves
 /// inside the scroll margin before the viewport follows it.
 pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowserState) {
+    state.hits.clear();
     let overlay_area = make_overlay(area);
 
     // Clear overlay area first, then draw block borders on top

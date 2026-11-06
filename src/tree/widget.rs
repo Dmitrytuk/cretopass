@@ -33,6 +33,7 @@ pub(crate) use modal::{
 pub(crate) use orchestrator::execute;
 pub(crate) use save::SaveExit;
 pub(crate) use state::AddPosition;
+pub(crate) use state::TreeHit;
 
 /// Items the tree's tests reach for; the production build uses them only inside
 /// this module tree.

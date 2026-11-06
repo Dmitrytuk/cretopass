@@ -7,11 +7,12 @@
 
 use std::borrow::Cow;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::HomeAction;
+use crate::hitbox::is_left;
 use crate::theming::{AlertKind, ElementStyle, render_alert, texts};
 
 /// A one-line message shown over Home until the user acknowledges it.
@@ -42,6 +43,11 @@ impl Alert {
     /// Any key dismisses the alert: there is nothing to type into it.
     pub fn handle_key(&mut self, _key: KeyEvent) -> Option<HomeAction> {
         Some(HomeAction::Close)
+    }
+
+    /// A left click anywhere dismisses the alert; the right button is ignored.
+    pub fn handle_click(&mut self, button: MouseButton, _x: u16, _y: u16) -> Option<HomeAction> {
+        is_left(button).then_some(HomeAction::Close)
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {

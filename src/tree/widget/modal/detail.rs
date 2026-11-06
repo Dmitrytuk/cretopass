@@ -9,22 +9,29 @@
 //! that in-memory work; every effect outside the process is still a
 //! [`TreeAction`].
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use zeroize::Zeroizing;
 
 use super::TreeAction;
 use super::chrome::{centered_rect, make_overlay_area};
 use crate::cursor::{
-    backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
-    selected_span,
+    PastePolicy, backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at,
+    insert_char_at, insert_str_at, selected_span,
 };
 use crate::generator::{self, PasswordLength, PasswordParams};
+use crate::hitbox::{HitMap, is_left};
 use crate::theming::{Action, ElementStyle, Icon, texts};
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{FormFocus, FormPending, FormRow, FormState, GeneratorModal, TreeState};
+
+/// A key with no modifiers, for a click that stands in for a key press.
+fn plain_key(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::NONE)
+}
 
 /// Rows of the password-generator modal, in display order.
 pub(crate) const GENERATOR_ROW_LENGTH: usize = 0;
@@ -45,6 +52,27 @@ pub(crate) struct Detail {
     form: Option<FormState>,
     /// The Popup nested over the Form, if any.
     popup: DetailPopup,
+    /// The clickable regions this modal's renderer recorded for the last frame.
+    hits: HitMap<DetailHit>,
+    /// The topmost overlay the renderer drew last frame, or `None` before the
+    /// first frame. An outside click closes exactly one nesting level, matching
+    /// `Esc` (see [`Modal::handle_click`](super::Modal::handle_click)).
+    rect: Option<Rect>,
+}
+
+/// A clickable region of the Detail modal, recorded by its renderer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DetailHit {
+    /// A browsed extra-field row.
+    Field(usize),
+    /// A row of the Add/Edit form.
+    FormRow(usize),
+    /// An entry of the field-type picker.
+    PickerItem(usize),
+    /// A parameter row of the password-generator modal.
+    GeneratorRow(usize),
+    /// A cell of the symbol checklist.
+    SymbolCell(usize),
 }
 
 /// A Popup nested over the Detail modal.
@@ -90,6 +118,8 @@ impl Detail {
             selected: 0,
             form: Some(FormState::new_edit(node)),
             popup: DetailPopup::None,
+            hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -99,6 +129,8 @@ impl Detail {
             selected: 0,
             form: Some(FormState::new_add()),
             popup: DetailPopup::None,
+            hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -133,6 +165,162 @@ impl Detail {
             DetailPopup::SymbolChecklist(_) => Screen::SymbolChecklist,
             DetailPopup::ConfirmDeleteField { .. } => Screen::ConfirmDeleteField,
         }
+    }
+
+    /// Applies pasted `text` to the modal's active typing surface.
+    ///
+    /// Only the three surfaces that accept typed text take a paste: the Form's
+    /// scratch buffer at its Input level, the Custom field-name prompt, and the
+    /// generator's length row (digits only). Browsing and the passive screens
+    /// ignore it. `state` is part of the modal contract and unused here: every
+    /// surface pastes into buffers the modal already owns.
+    pub(crate) fn handle_paste(&mut self, text: &str, _state: &mut TreeState) {
+        match self.screen() {
+            Screen::Form => {
+                let cleaned = Zeroizing::new(PastePolicy::SingleLine.clean(text).into_owned());
+                if cleaned.is_empty() {
+                    return;
+                }
+                let Some(scratch) = self.form.as_mut().and_then(|form| form.scratch.as_mut())
+                else {
+                    return;
+                };
+                insert_str_at(&mut scratch.text, &mut scratch.cursor, &cleaned);
+            }
+            Screen::CustomFieldName => {
+                let cleaned = PastePolicy::SingleLine.clean(text);
+                if cleaned.is_empty() {
+                    return;
+                }
+                if let DetailPopup::CustomFieldName { input } = &mut self.popup {
+                    input.push_str(&cleaned);
+                }
+            }
+            Screen::GeneratePassword => {
+                let cleaned = PastePolicy::Digits.clean(text);
+                if cleaned.is_empty() {
+                    return;
+                }
+                if let DetailPopup::GeneratePassword(modal) = &mut self.popup
+                    && modal.selected == GENERATOR_ROW_LENGTH
+                {
+                    paste_generator_length(modal, &cleaned);
+                }
+            }
+            Screen::Browse
+            | Screen::SelectFieldType
+            | Screen::SymbolChecklist
+            | Screen::ConfirmDeleteField => {}
+        }
+    }
+
+    /// Applies a click at `(x, y)` by hit-testing the regions the renderer
+    /// recorded and then activating the target the way its key would.
+    ///
+    /// The click first moves the selection to the clicked row; a repeat click on
+    /// the already-selected row activates it. The right button is meaningful only
+    /// on a browsed field row, where it copies the field's value.
+    pub(crate) fn handle_click(
+        &mut self,
+        button: MouseButton,
+        x: u16,
+        y: u16,
+        state: &mut TreeState,
+    ) -> Option<TreeAction> {
+        let target = self.hits.hit(x, y, button)?;
+        match target {
+            DetailHit::Field(index) => self.click_field(index, button, state),
+            DetailHit::FormRow(index) if is_left(button) => self.click_form_row(index, state),
+            DetailHit::PickerItem(index) if is_left(button) => self.click_picker_item(index, state),
+            DetailHit::GeneratorRow(index) if is_left(button) => {
+                self.click_generator_row(index, state)
+            }
+            DetailHit::SymbolCell(index) if is_left(button) => self.click_symbol_cell(index, state),
+            _ => None,
+        }
+    }
+
+    /// The topmost overlay drawn last frame: the Form, a nested Popup, or the
+    /// card being browsed.
+    ///
+    /// The containment check in [`Modal::handle_click`](super::Modal::handle_click)
+    /// uses this to turn a click outside the active overlay into one `Esc`, which
+    /// is what unwinds exactly one nesting level.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
+    }
+
+    /// A click on a browsed field row: select it, or on a repeat open the Form.
+    fn click_field(
+        &mut self,
+        index: usize,
+        button: MouseButton,
+        state: &mut TreeState,
+    ) -> Option<TreeAction> {
+        let was_selected = self.selected == index;
+        self.selected = index;
+        match button {
+            MouseButton::Left if was_selected => self.handle_key(plain_key(KeyCode::Enter), state),
+            MouseButton::Right => self.handle_key(plain_key(KeyCode::Char('y')), state),
+            _ => None,
+        }
+    }
+
+    /// A click on a form row: select it, or on a repeat enter it.
+    fn click_form_row(&mut self, index: usize, state: &mut TreeState) -> Option<TreeAction> {
+        let form = self.form.as_mut()?;
+        let was_selected = form.selected_row == index;
+        form.select_row(&state.root, index);
+        if was_selected {
+            self.handle_key(plain_key(KeyCode::Enter), state)
+        } else {
+            None
+        }
+    }
+
+    /// A click on a field-type picker entry: select it, or on a repeat choose it.
+    fn click_picker_item(&mut self, index: usize, state: &mut TreeState) -> Option<TreeAction> {
+        if index >= picker_items().len() {
+            return None;
+        }
+        let was_selected =
+            matches!(&self.popup, DetailPopup::SelectFieldType { selected } if *selected == index);
+        if let DetailPopup::SelectFieldType { selected } = &mut self.popup {
+            *selected = index;
+        }
+        if was_selected {
+            self.handle_key(plain_key(KeyCode::Enter), state)
+        } else {
+            None
+        }
+    }
+
+    /// A click on a generator parameter row: select it, or on a repeat act on it.
+    fn click_generator_row(&mut self, index: usize, state: &mut TreeState) -> Option<TreeAction> {
+        if index >= GENERATOR_ROWS {
+            return None;
+        }
+        let was_selected =
+            matches!(&self.popup, DetailPopup::GeneratePassword(modal) if modal.selected == index);
+        if let DetailPopup::GeneratePassword(modal) = &mut self.popup {
+            modal.selected = index;
+        }
+        if was_selected {
+            self.handle_key(plain_key(KeyCode::Enter), state)
+        } else {
+            None
+        }
+    }
+
+    /// A click on a symbol-checklist cell selects and toggles it in one gesture.
+    fn click_symbol_cell(&mut self, index: usize, state: &mut TreeState) -> Option<TreeAction> {
+        if index >= generator::SYMBOLS.len() {
+            return None;
+        }
+        if let DetailPopup::SymbolChecklist(modal) = &mut self.popup {
+            modal.selected = index;
+        }
+        self.handle_key(plain_key(KeyCode::Char(' ')), state)
     }
 
     /// Keys while browsing the Node's extra fields.
@@ -717,8 +905,12 @@ impl Detail {
         None
     }
 
-    /// Draws the active screen over `area`.
-    pub(crate) fn render(&self, frame: &mut Frame, area: Rect, state: &TreeState) {
+    /// Draws the active screen over `area`, refilling the clickable regions.
+    pub(crate) fn render(&mut self, frame: &mut Frame, area: Rect, state: &TreeState) {
+        self.hits.clear();
+        // Reset before drawing: a screen that bails out (no Node, no Form) must
+        // leave `rect` as `None`, so it cannot be dismissed by a stray click.
+        self.rect = None;
         match self.screen() {
             Screen::Browse => self.render_browse(frame, area, state),
             Screen::Form => self.render_form(frame, area, state),
@@ -726,12 +918,22 @@ impl Detail {
             Screen::CustomFieldName => self.render_custom_field_name(frame, area),
             Screen::GeneratePassword => {
                 if let DetailPopup::GeneratePassword(modal) = &self.popup {
-                    render_generate_password_overlay(frame, area, modal);
+                    self.rect = Some(render_generate_password_overlay(
+                        frame,
+                        area,
+                        modal,
+                        &mut self.hits,
+                    ));
                 }
             }
             Screen::SymbolChecklist => {
                 if let DetailPopup::SymbolChecklist(modal) = &self.popup {
-                    render_symbol_checklist_overlay(frame, area, modal);
+                    self.rect = Some(render_symbol_checklist_overlay(
+                        frame,
+                        area,
+                        modal,
+                        &mut self.hits,
+                    ));
                 }
             }
             Screen::ConfirmDeleteField => self.render_confirm_delete(frame, area, state),
@@ -739,12 +941,13 @@ impl Detail {
     }
 
     /// Draws the browsed Node's ExtraFields.
-    fn render_browse(&self, frame: &mut Frame, area: Rect, state: &TreeState) {
+    fn render_browse(&mut self, frame: &mut Frame, area: Rect, state: &TreeState) {
         let Some(node) = state.current_node_ref() else {
             return;
         };
 
         let overlay_area = make_overlay_area(area, node.extra_fields.len(), 3);
+        self.rect = Some(overlay_area);
 
         let block = Block::default()
             .title(format!(" {} ", node.name))
@@ -767,10 +970,23 @@ impl Detail {
         frame.render_widget(Clear, overlay_area);
         frame.render_widget(block, overlay_area);
         frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+
+        // The first line is blank, so field `i` is drawn on `inner.y + 1 + i`.
+        // Only rows the card actually shows can be clicked.
+        let visible = node
+            .extra_fields
+            .len()
+            .min(inner.height.saturating_sub(1) as usize);
+        for i in 0..visible {
+            let rect = Rect::new(inner.x, inner.y + 1 + i as u16, inner.width, 1);
+            self.hits.push(rect, MouseButton::Left, DetailHit::Field(i));
+            self.hits
+                .push(rect, MouseButton::Right, DetailHit::Field(i));
+        }
     }
 
     /// Draws the Add/Edit form.
-    fn render_form(&self, frame: &mut Frame, area: Rect, state: &TreeState) {
+    fn render_form(&mut self, frame: &mut Frame, area: Rect, state: &TreeState) {
         let Some(form) = self.form.as_ref() else {
             return;
         };
@@ -779,11 +995,18 @@ impl Detail {
         } else {
             texts::OVERLAY_EDIT_NODE
         };
-        render_edit_overlay(frame, area, form, &state.root, title);
+        self.rect = Some(render_edit_overlay(
+            frame,
+            area,
+            form,
+            &state.root,
+            title,
+            &mut self.hits,
+        ));
     }
 
     /// Draws the field-type picker.
-    fn render_select_field_type(&self, frame: &mut Frame, area: Rect) {
+    fn render_select_field_type(&mut self, frame: &mut Frame, area: Rect) {
         if self.form.is_none() {
             return;
         }
@@ -793,6 +1016,7 @@ impl Detail {
         let items = picker_items();
 
         let overlay_area = centered_rect(area, area.width / 2, 8);
+        self.rect = Some(overlay_area);
 
         let block = Block::default()
             .title(texts::OVERLAY_SELECT_FIELD_TYPE)
@@ -812,15 +1036,23 @@ impl Detail {
         frame.render_widget(Clear, overlay_area);
         frame.render_widget(block, overlay_area);
         frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+
+        let visible = items.len().min(inner.height as usize);
+        for i in 0..visible {
+            let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
+            self.hits
+                .push(rect, MouseButton::Left, DetailHit::PickerItem(i));
+        }
     }
 
     /// Draws the Custom field-name prompt.
-    fn render_custom_field_name(&self, frame: &mut Frame, area: Rect) {
+    fn render_custom_field_name(&mut self, frame: &mut Frame, area: Rect) {
         let DetailPopup::CustomFieldName { input } = &self.popup else {
             return;
         };
 
         let overlay_area = centered_rect(area, area.width / 2, 4);
+        self.rect = Some(overlay_area);
 
         let block = Block::default()
             .title(texts::OVERLAY_CUSTOM_FIELD_NAME)
@@ -839,7 +1071,7 @@ impl Detail {
     }
 
     /// Draws the delete-field confirmation.
-    fn render_confirm_delete(&self, frame: &mut Frame, area: Rect, state: &TreeState) {
+    fn render_confirm_delete(&mut self, frame: &mut Frame, area: Rect, state: &TreeState) {
         let Some(form) = self.form.as_ref() else {
             return;
         };
@@ -854,6 +1086,7 @@ impl Detail {
             .unwrap_or_default();
 
         let overlay_area = centered_rect(area, area.width / 2, 4);
+        self.rect = Some(overlay_area);
 
         let block = Block::default()
             .title(texts::OVERLAY_CONFIRM_DELETE)
@@ -964,6 +1197,12 @@ impl Detail {
         matches!(self.popup, DetailPopup::SelectFieldType { .. })
     }
 
+    /// Whether the delete-field confirmation is up.
+    #[cfg(test)]
+    pub(crate) fn is_confirm_delete(&self) -> bool {
+        matches!(self.popup, DetailPopup::ConfirmDeleteField { .. })
+    }
+
     /// Focuses entry `index` of the field-type picker.
     #[cfg(test)]
     pub(crate) fn set_picker_selected(&mut self, index: usize) {
@@ -1041,6 +1280,25 @@ where
     if let Some(scratch) = form.scratch.as_mut() {
         edit(&mut scratch.text, &mut scratch.cursor);
     }
+}
+
+/// Pastes `digits` into the generator's length field.
+///
+/// Mirrors typing a digit on the length row: a fresh field is replaced rather
+/// than appended to, and the three-digit cap is preserved. `digits` is already
+/// reduced to ASCII digits by [`PastePolicy::Digits`].
+fn paste_generator_length(modal: &mut GeneratorModal, digits: &str) {
+    if modal.length_fresh {
+        modal.length_input.clear();
+        modal.length_cursor = 0;
+        modal.length_fresh = false;
+    }
+    for c in digits.chars() {
+        if modal.length_input.len() < 3 {
+            insert_char_at(&mut modal.length_input, &mut modal.length_cursor, c);
+        }
+    }
+    modal.error = None;
 }
 
 /// Records a committed change on the form's node.
@@ -1192,7 +1450,14 @@ fn field_display<'a>(
 }
 
 /// Renders the Add/Edit form overlay.
-fn render_edit_overlay(frame: &mut Frame, area: Rect, form: &FormState, root: &Node, title: &str) {
+fn render_edit_overlay(
+    frame: &mut Frame,
+    area: Rect,
+    form: &FormState,
+    root: &Node,
+    title: &str,
+    hits: &mut HitMap<DetailHit>,
+) -> Rect {
     let node = form.node(root);
     let rows = form.rows(root);
     let current = form.selected_row.min(rows.len() - 1);
@@ -1253,6 +1518,16 @@ fn render_edit_overlay(frame: &mut Frame, area: Rect, form: &FormState, root: &N
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+
+    // Every form row is one line tall, starting at the overlay's first inner
+    // row. Only rows the card actually shows can be clicked.
+    let visible = rows.len().min(inner.height as usize);
+    for i in 0..visible {
+        let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
+        hits.push(rect, MouseButton::Left, DetailHit::FormRow(i));
+    }
+
+    overlay_area
 }
 
 /// Selects the help-bar hint for the Add/Edit form.
@@ -1283,7 +1558,12 @@ pub(crate) fn form_hint(form: &FormState, root: &Node) -> &'static str {
 }
 
 /// Renders the password-generator parameter modal.
-fn render_generate_password_overlay(frame: &mut Frame, area: Rect, modal: &GeneratorModal) {
+fn render_generate_password_overlay(
+    frame: &mut Frame,
+    area: Rect,
+    modal: &GeneratorModal,
+    hits: &mut HitMap<DetailHit>,
+) -> Rect {
     let has_error = modal.error.is_some();
     let content_height = 3 + u16::from(has_error);
     let overlay_height = (content_height + 2).min(area.height);
@@ -1337,14 +1617,31 @@ fn render_generate_password_overlay(frame: &mut Frame, area: Rect, modal: &Gener
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+
+    // The three parameter rows are the overlay's first three inner lines; a
+    // terminal shorter than that shows fewer of them.
+    let visible = GENERATOR_ROWS.min(inner.height as usize);
+    for row in 0..visible {
+        let rect = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
+        hits.push(rect, MouseButton::Left, DetailHit::GeneratorRow(row));
+    }
+
+    overlay_area
 }
 
 /// Renders the per-symbol checklist as a grid of checkbox cells.
-fn render_symbol_checklist_overlay(frame: &mut Frame, area: Rect, modal: &GeneratorModal) {
+fn render_symbol_checklist_overlay(
+    frame: &mut Frame,
+    area: Rect,
+    modal: &GeneratorModal,
+    hits: &mut HitMap<DetailHit>,
+) -> Rect {
     let rows = u16::try_from(generator::SYMBOLS.len().div_ceil(SYMBOL_COLUMNS))
         .expect("symbol checklist rows fit in a terminal height");
     let overlay_height = (rows + 2).min(area.height);
-    let width = u16::try_from(SYMBOL_COLUMNS * 9)
+    // `+ 2` for the borders: the inner width must hold all three 9-wide columns,
+    // or the last column would be drawn but not clickable.
+    let width = u16::try_from(SYMBOL_COLUMNS * 9 + 2)
         .expect("symbol checklist width fits in a terminal")
         .min(area.width);
     let overlay_area = Rect {
@@ -1387,6 +1684,24 @@ fn render_symbol_checklist_overlay(frame: &mut Frame, area: Rect, modal: &Genera
     frame.render_widget(Clear, overlay_area);
     frame.render_widget(block, overlay_area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+
+    // One clickable cell per symbol, nine columns wide, in the grid's own rows.
+    // Bound by the drawn card so a tiny terminal cannot record cells off it.
+    for row in 0..rows.min(inner.height) {
+        for column in 0..SYMBOL_COLUMNS {
+            if (column as u16 + 1) * 9 > inner.width {
+                break;
+            }
+            let index = usize::from(row) * SYMBOL_COLUMNS + column;
+            if index >= generator::SYMBOLS.len() {
+                break;
+            }
+            let rect = Rect::new(inner.x + column as u16 * 9, inner.y + row, 9, 1);
+            hits.push(rect, MouseButton::Left, DetailHit::SymbolCell(index));
+        }
+    }
+
+    overlay_area
 }
 
 #[cfg(test)]
@@ -1504,5 +1819,251 @@ mod tests {
                 .handle_key(key(KeyCode::Char('y')), &mut state)
                 .is_none()
         );
+    }
+
+    // ── Clipboard paste per surface ──
+
+    fn ctrl(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    fn editing_password(value: &str) -> (Detail, TreeState) {
+        let mut node = Node::new("Root");
+        node.extra_fields.push(ExtraField {
+            field_type: FieldType::Password,
+            value: value.to_string(),
+        });
+        let detail = Detail::editing(&node);
+        (detail, TreeState::new(node))
+    }
+
+    fn scratch_text(detail: &Detail) -> Option<&str> {
+        detail
+            .form()
+            .and_then(|form| form.scratch.as_ref())
+            .map(|scratch| scratch.text.as_str())
+    }
+
+    #[test]
+    fn form_paste_joins_lines_into_the_input_scratch() {
+        let node = Node::new("Root");
+        let mut detail = Detail::editing(&node);
+        let mut state = TreeState::new(node);
+        let _ = detail.handle_key(key(KeyCode::Char('i')), &mut state); // Nav -> Input
+
+        detail.handle_paste("ab\r\ncd\nef", &mut state);
+
+        assert_eq!(scratch_text(&detail), Some("Rootabcdef"));
+    }
+
+    #[test]
+    fn a_paste_that_cleans_away_to_nothing_changes_nothing() {
+        let node = Node::new("Root");
+        let mut detail = Detail::editing(&node);
+        let mut state = TreeState::new(node);
+        let _ = detail.handle_key(key(KeyCode::Char('i')), &mut state);
+
+        detail.handle_paste("\r\n", &mut state);
+
+        assert_eq!(scratch_text(&detail), Some("Root"));
+    }
+
+    #[test]
+    fn custom_field_name_paste_appends_single_line_text() {
+        let mut detail = Detail::browse();
+        let mut state = TreeState::new(Node::new("Root"));
+        detail.popup = DetailPopup::CustomFieldName {
+            input: "Web".to_string(),
+        };
+
+        detail.handle_paste("Site\r\nLogin", &mut state);
+
+        match &detail.popup {
+            DetailPopup::CustomFieldName { input } => assert_eq!(input, "WebSiteLogin"),
+            other => panic!("expected the custom-name prompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn generator_length_paste_keeps_only_digits() {
+        let (mut detail, mut state) = editing_password("old");
+        detail.form_mut().select_row(&state.root, 1); // the Password field
+        let _ = detail.handle_key(key(KeyCode::Char('i')), &mut state); // Nav -> Input
+        let _ = detail.handle_key(ctrl(KeyCode::Char('g')), &mut state); // open the generator
+
+        detail.handle_paste("1a2b3", &mut state);
+
+        match &detail.popup {
+            DetailPopup::GeneratePassword(modal) => assert_eq!(modal.length_input, "123"),
+            other => panic!("expected the password generator, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn generator_length_paste_is_capped_at_three_digits() {
+        let (mut detail, mut state) = editing_password("old");
+        detail.form_mut().select_row(&state.root, 1);
+        let _ = detail.handle_key(key(KeyCode::Char('i')), &mut state);
+        let _ = detail.handle_key(ctrl(KeyCode::Char('g')), &mut state);
+
+        detail.handle_paste("12345", &mut state);
+
+        match &detail.popup {
+            DetailPopup::GeneratePassword(modal) => assert_eq!(modal.length_input, "123"),
+            other => panic!("expected the password generator, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn generator_paste_on_another_row_changes_nothing() {
+        let (mut detail, mut state) = editing_password("old");
+        detail.form_mut().select_row(&state.root, 1);
+        let _ = detail.handle_key(key(KeyCode::Char('i')), &mut state);
+        let _ = detail.handle_key(ctrl(KeyCode::Char('g')), &mut state);
+        // Move off the length row onto the symbols row.
+        let _ = detail.handle_key(key(KeyCode::Char('j')), &mut state);
+        let before = match &detail.popup {
+            DetailPopup::GeneratePassword(modal) => modal.length_input.clone(),
+            other => panic!("expected the password generator, got {other:?}"),
+        };
+
+        detail.handle_paste("123", &mut state);
+
+        match &detail.popup {
+            DetailPopup::GeneratePassword(modal) => assert_eq!(modal.length_input, before),
+            other => panic!("expected the password generator, got {other:?}"),
+        }
+    }
+
+    // ── Click hit-testing ──
+
+    /// Draws the modal so its renderer fills `detail.hits`.
+    fn draw(detail: &mut Detail, state: &TreeState) {
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
+            .expect("a test terminal");
+        terminal
+            .draw(|frame| detail.render(frame, frame.area(), state))
+            .expect("a test draw");
+    }
+
+    /// The first cell whose click resolves to `target` for `button`.
+    fn point_for(hits: &HitMap<DetailHit>, target: DetailHit, button: MouseButton) -> (u16, u16) {
+        for y in 0..24u16 {
+            for x in 0..80u16 {
+                if hits.hit(x, y, button) == Some(target) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("no hit region for {target:?}");
+    }
+
+    #[test]
+    fn a_click_selects_a_field_and_a_repeat_opens_the_form() {
+        let (mut detail, mut state) = detail_with_fields();
+        draw(&mut detail, &state);
+        let (x, y) = point_for(&detail.hits, DetailHit::Field(1), MouseButton::Left);
+
+        // The first click only moves the selection.
+        assert!(
+            detail
+                .handle_click(MouseButton::Left, x, y, &mut state)
+                .is_none()
+        );
+        assert_eq!(detail.selected, 1);
+        assert!(detail.form().is_none());
+
+        // The repeat click opens the Form on that field.
+        let _ = detail.handle_click(MouseButton::Left, x, y, &mut state);
+        assert!(detail.form().is_some(), "a repeat click opens the form");
+    }
+
+    #[test]
+    fn a_right_click_copies_the_field_value() {
+        let (mut detail, mut state) = detail_with_fields();
+        draw(&mut detail, &state);
+        let (x, y) = point_for(&detail.hits, DetailHit::Field(0), MouseButton::Right);
+
+        match detail.handle_click(MouseButton::Right, x, y, &mut state) {
+            Some(TreeAction::CopyToClipboard { text }) => assert_eq!(text, "a"),
+            other => panic!("expected a clipboard copy, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_click_on_a_checklist_cell_toggles_it() {
+        let (mut detail, mut state) = editing_password("old");
+        detail.form_mut().select_row(&state.root, 1);
+        let _ = detail.handle_key(key(KeyCode::Char('i')), &mut state);
+        let _ = detail.handle_key(ctrl(KeyCode::Char('g')), &mut state);
+        // Symbols row -> checklist.
+        let _ = detail.handle_key(key(KeyCode::Char('j')), &mut state);
+        let _ = detail.handle_key(key(KeyCode::Enter), &mut state);
+        assert!(detail.is_symbol_checklist());
+
+        draw(&mut detail, &state);
+        let before = match &detail.popup {
+            DetailPopup::SymbolChecklist(modal) => modal.params.symbols.len(),
+            other => panic!("expected the symbol checklist, got {other:?}"),
+        };
+        let (x, y) = point_for(&detail.hits, DetailHit::SymbolCell(0), MouseButton::Left);
+        let _ = detail.handle_click(MouseButton::Left, x, y, &mut state);
+
+        match &detail.popup {
+            DetailPopup::SymbolChecklist(modal) => {
+                assert_ne!(modal.params.symbols.len(), before, "the cell toggled");
+            }
+            other => panic!("expected the symbol checklist, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_click_on_a_form_row_selects_then_enters() {
+        let (mut detail, mut state) = detail_with_fields();
+        // Open the form for the selected node.
+        let _ = detail.handle_key(key(KeyCode::Char('i')), &mut state);
+        draw(&mut detail, &state);
+
+        // Rows are Name(0), Extra(0)(1), Extra(1)(2), Extra(2)(3), AddButton(4).
+        let (x, y) = point_for(&detail.hits, DetailHit::FormRow(2), MouseButton::Left);
+        assert!(
+            detail
+                .handle_click(MouseButton::Left, x, y, &mut state)
+                .is_none()
+        );
+        assert_eq!(detail.form().unwrap().selected_row, 2);
+
+        let _ = detail.handle_click(MouseButton::Left, x, y, &mut state);
+        assert_eq!(detail.form().unwrap().focus, FormFocus::Input);
+    }
+
+    #[test]
+    fn a_short_card_records_no_field_hits_below_it() {
+        // A 30-field node on a 6-row terminal: the card is clamped, so the extra
+        // rows are never drawn — and must not be clickable either, or a
+        // right-click on the status bar would copy an off-screen secret.
+        let mut node = Node::new("Root");
+        for i in 0..30 {
+            node.extra_fields.push(ExtraField {
+                field_type: FieldType::Login,
+                value: format!("v{i}"),
+            });
+        }
+        let mut detail = Detail::browse();
+        let state = TreeState::new(node);
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 6))
+            .expect("a test terminal");
+        terminal
+            .draw(|frame| detail.render(frame, frame.area(), &state))
+            .expect("a test draw");
+
+        for x in 0..80u16 {
+            for y in 0..6u16 {
+                assert!(
+                    detail.hits.hit(x, y, MouseButton::Right).is_none() || y < 5,
+                    "a field was clickable outside the card at ({x}, {y})"
+                );
+            }
+        }
     }
 }

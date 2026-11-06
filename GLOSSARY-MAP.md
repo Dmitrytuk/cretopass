@@ -16,3 +16,5 @@
 - **Vault / Secrets Tree → Cursor**: the masked password fields (`SecretField`) live in Cursor and are wrapped by the prompts of Vault and the Share flow.
 - **Secrets Tree → cretopass**: the Detail modal copies a field to the **System clipboard** through the app-wide `clipboard` gateway; the write's success or failure is reported.
 - **Vault / Secrets Tree / File Browser → Theming**: each screen maps its own mode to a `(label, style, hint)` triple and calls the shared Status bar renderer; the screens never draw status chrome themselves.
+- **Vault / Secrets Tree / File Browser → Theming**: every renderer records the **Hit-box**es of its rows, and a **Click** is turned into the same `Action` its key would produce; the **Wheel** scrolls every list through that same dispatch.
+- **Vault / Secrets Tree → cretopass**: a **Clipboard paste** (`Ctrl+V`) reads the **System clipboard** through the `clipboard` gateway into the focused field; the Tree's internal Paste operations are unrelated.
