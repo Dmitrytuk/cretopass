@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The title-bar spinner now animates on Windows. Its Braille frames are not in
+  the WGL4 fonts the Windows console ships, so Windows substituted one static
+  placeholder glyph for every frame; the spinner now falls back to a WGL4-safe
+  half-block set on Windows and keeps Braille on non-Windows terminals with a
+  UTF-8 locale ([ADR 0011](docs/adr/0011-animated-status-spinner.md)).
+
 ## [1.1.0] - 2026-11-06
 
 ### Added
