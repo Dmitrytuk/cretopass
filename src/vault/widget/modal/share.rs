@@ -16,7 +16,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
 use crate::cursor::password_field_spans;
-use crate::hitbox::ClickSurface;
+use crate::hitbox::{ClickSurface, record_rows};
 use crate::share::{Passphrase, PassphraseSubmit};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{display_path, make_overlay, paint_overlay};
@@ -137,10 +137,7 @@ impl SharePassphrase {
 
         let inner = block.inner(overlay_area);
         let visible = LABELS.len().min(inner.height.saturating_sub(3) as usize);
-        for index in 0..visible {
-            let rect = Rect::new(inner.x, inner.y + 3 + index as u16, inner.width, 1);
-            self.clicks.record(rect, index);
-        }
+        record_rows(&mut self.clicks, inner, 3, visible, |index| index);
 
         paint_overlay(
             frame,

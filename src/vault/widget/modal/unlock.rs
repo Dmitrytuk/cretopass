@@ -9,7 +9,7 @@ use zeroize::Zeroizing;
 
 use super::HomeAction;
 use crate::cursor::{FieldEdit, SecretFieldGroup, secret_field_spans};
-use crate::hitbox::ClickSurface;
+use crate::hitbox::{ClickSurface, record_rows};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{display_path, make_overlay, paint_overlay};
 use crossterm::event::{KeyEvent, MouseButton};
@@ -138,10 +138,10 @@ impl UnlockPrompt {
         lines.push(Line::from(""));
 
         let inner = block.inner(overlay_area);
-        if inner.height > 3 {
-            self.clicks
-                .record(Rect::new(inner.x, inner.y + 3, inner.width, 1), 0);
-        }
+        // The field row sits three lines below the panel top; it exists only when
+        // the panel is tall enough to draw it.
+        let count = usize::from(inner.height > 3);
+        record_rows(&mut self.clicks, inner, 3, count, |_| 0);
 
         paint_overlay(
             frame,

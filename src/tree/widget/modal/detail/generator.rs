@@ -21,7 +21,7 @@ use crate::cursor::{
     selected_span,
 };
 use crate::generator::{self, PasswordLength, PasswordParams};
-use crate::hitbox::ClickSurface;
+use crate::hitbox::{ClickSurface, record_rows};
 use crate::theming::{Action, ElementStyle, Icon, texts};
 use crate::tree::widget::{GeneratorModal, TreeState};
 
@@ -359,10 +359,7 @@ pub(super) fn render_generate_password_overlay(
     // The three parameter rows are the overlay's first three inner lines; a
     // terminal shorter than that shows fewer of them.
     let visible = GENERATOR_ROWS.min(inner.height as usize);
-    for row in 0..visible {
-        let rect = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
-        clicks.record(rect, DetailHit::GeneratorRow(row));
-    }
+    record_rows(clicks, inner, 0, visible, DetailHit::GeneratorRow);
 
     overlay_area
 }

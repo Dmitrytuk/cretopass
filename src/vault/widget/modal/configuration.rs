@@ -13,7 +13,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
-use crate::hitbox::ClickSurface;
+use crate::hitbox::{ClickSurface, record_rows};
 use crate::theming::{Action, ElementStyle, Icon, scheme_label, texts};
 use crate::vault::utils::Configuration;
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
@@ -123,10 +123,7 @@ impl ConfigurationModal {
 
         let inner = block.inner(overlay_area);
         let visible = SETTINGS.len().min(inner.height.saturating_sub(1) as usize);
-        for i in 0..visible {
-            let rect = Rect::new(inner.x, inner.y + 1 + i as u16, inner.width, 1);
-            self.clicks.record(rect, i);
-        }
+        record_rows(&mut self.clicks, inner, 1, visible, |i| i);
 
         paint_overlay(
             frame,

@@ -19,7 +19,7 @@ use crate::cursor::{
     backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
 };
 use crate::generator;
-use crate::hitbox::ClickSurface;
+use crate::hitbox::{ClickSurface, record_rows};
 use crate::theming::{Action, ElementStyle, Icon, texts};
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{FormFocus, FormPending, FormRow, FormState, GeneratorModal, TreeState};
@@ -488,10 +488,7 @@ fn render_edit_overlay(
     // Every form row is one line tall, starting at the overlay's first inner
     // row. Only rows the card actually shows can be clicked.
     let visible = rows.len().min(inner.height as usize);
-    for i in 0..visible {
-        let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
-        clicks.record(rect, DetailHit::FormRow(i));
-    }
+    record_rows(clicks, inner, 0, visible, DetailHit::FormRow);
 
     overlay_area
 }

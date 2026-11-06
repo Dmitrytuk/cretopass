@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
 use crate::file_handling::ExportFormat;
-use crate::hitbox::ClickSurface;
+use crate::hitbox::{ClickSurface, record_rows};
 use crate::theming::{Action, ElementStyle, Icon, texts};
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
 
@@ -142,10 +142,7 @@ fn render_format_list(
     let visible = texts::EXPORT_TYPE_ITEMS
         .len()
         .min(inner.height.saturating_sub(1) as usize);
-    for i in 0..visible {
-        let rect = Rect::new(inner.x, inner.y + 1 + i as u16, inner.width, 1);
-        clicks.record(rect, i);
-    }
+    record_rows(clicks, inner, 1, visible, |i| i);
 
     paint_overlay(
         frame,

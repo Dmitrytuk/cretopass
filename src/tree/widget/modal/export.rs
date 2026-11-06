@@ -15,7 +15,7 @@ use super::TreeAction;
 use super::chrome::centered_rect;
 use crate::cursor::selected_span;
 use crate::file_handling::ExportFormat;
-use crate::hitbox::ClickSurface;
+use crate::hitbox::{ClickSurface, record_rows};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::TreeState;
@@ -198,10 +198,7 @@ impl ExportWizard {
         frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 
         let visible = texts::EXPORT_NODE_OPTIONS.len().min(inner.height as usize);
-        for i in 0..visible {
-            let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
-            self.clicks.record(rect, i);
-        }
+        record_rows(&mut self.clicks, inner, 0, visible, |i| i);
     }
 
     /// Draws the format step.
@@ -228,10 +225,7 @@ impl ExportWizard {
         frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 
         let visible = texts::EXPORT_TYPE_ITEMS.len().min(inner.height as usize);
-        for i in 0..visible {
-            let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
-            self.clicks.record(rect, i);
-        }
+        record_rows(&mut self.clicks, inner, 0, visible, |i| i);
     }
 }
 

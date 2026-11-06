@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use super::TreeAction;
 use super::chrome::centered_rect;
 use crate::cursor::password_field_spans;
-use crate::hitbox::ClickSurface;
+use crate::hitbox::{ClickSurface, record_rows};
 use crate::share::{Passphrase, PassphraseSubmit, SharePassword};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::Node;
@@ -205,10 +205,7 @@ impl SharePassphrase {
 
         // Lines: blank, file, blank, then one line per field.
         let visible = LABELS.len().min(inner.height.saturating_sub(3) as usize);
-        for index in 0..visible {
-            let rect = Rect::new(inner.x, inner.y + 3 + index as u16, inner.width, 1);
-            self.clicks.record(rect, index);
-        }
+        record_rows(&mut self.clicks, inner, 3, visible, |index| index);
     }
 
     /// Draws the "share without a password?" confirmation.

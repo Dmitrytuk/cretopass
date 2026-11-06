@@ -163,6 +163,47 @@ impl<T: Copy> ClickSurface<T> {
     }
 }
 
+/// A hit collection [`record_rows`] can fill: both a screen's [`HitMap`] and a
+/// modal's [`ClickSurface`] answer a left click on a drawn row.
+pub(crate) trait RowSink<T> {
+    /// Records a left click on the one-line `rect` as `target`.
+    fn record_row(&mut self, rect: Rect, target: T);
+}
+
+impl<T> RowSink<T> for HitMap<T> {
+    fn record_row(&mut self, rect: Rect, target: T) {
+        self.push(rect, MouseButton::Left, target);
+    }
+}
+
+impl<T> RowSink<T> for ClickSurface<T> {
+    fn record_row(&mut self, rect: Rect, target: T) {
+        self.record(rect, target);
+    }
+}
+
+/// Records one clickable one-line row per drawn line.
+///
+/// `inner` is the clickable area, `first_line` the row offset of the first item
+/// within it, and `count` how many rows were actually drawn. Row `i` is recorded
+/// at `inner.y + first_line + i` as `target(i)` for a left click, so the
+/// off-by-one reasoning between what a renderer drew and what a click can reach
+/// lives once. A surface that also answers another button, or maps a scrolled
+/// viewport onto its rows (the Tree screen and the Detail modal's browsed field
+/// rows), keeps its own loop.
+pub(crate) fn record_rows<T>(
+    sink: &mut impl RowSink<T>,
+    inner: Rect,
+    first_line: u16,
+    count: usize,
+    mut target: impl FnMut(usize) -> T,
+) {
+    for i in 0..count {
+        let rect = Rect::new(inner.x, inner.y + first_line + i as u16, inner.width, 1);
+        sink.record_row(rect, target(i));
+    }
+}
+
 /// Whether `button` at `(x, y)` is a click outside `panel`, once it has been
 /// drawn.
 ///
@@ -258,6 +299,34 @@ mod tests {
 
         assert_eq!(surface.panel(), None);
         assert_eq!(surface.target_at(MouseButton::Left, 3, 3), None);
+    }
+
+    #[test]
+    fn record_rows_places_each_row_at_its_offset() {
+        // `first_line` is relative to `inner`, so row 0 lands at `inner.y + 3`.
+        let inner = Rect::new(4, 2, 10, 5);
+        let mut surface: ClickSurface<usize> = ClickSurface::default();
+        record_rows(&mut surface, inner, 3, 2, |i| i * 10);
+
+        assert_eq!(surface.target_at(MouseButton::Left, 4, 5), Some(0));
+        assert_eq!(surface.target_at(MouseButton::Left, 4, 6), Some(10));
+        assert_eq!(surface.target_at(MouseButton::Left, 4, 4), None);
+        assert_eq!(surface.target_at(MouseButton::Left, 4, 7), None);
+
+        // A zero count records nothing: the caller's "did the row fit?" guard.
+        let mut empty: ClickSurface<usize> = ClickSurface::default();
+        record_rows(&mut empty, inner, 3, 0, |i| i);
+        assert_eq!(empty.target_at(MouseButton::Left, 4, 5), None);
+    }
+
+    #[test]
+    fn record_rows_fills_a_plain_hit_map_too() {
+        let mut hits: HitMap<usize> = HitMap::default();
+        record_rows(&mut hits, Rect::new(0, 0, 3, 4), 0, 2, |i| i);
+
+        assert_eq!(hits.hit(0, 0, MouseButton::Left), Some(0));
+        assert_eq!(hits.hit(0, 1, MouseButton::Left), Some(1));
+        assert_eq!(hits.hit(0, 2, MouseButton::Left), None);
     }
 
     #[test]

@@ -15,6 +15,7 @@ use super::super::chrome::centered_rect;
 use super::form::commit_form_change;
 use super::{Detail, DetailHit, DetailPopup, TreeAction, plain_key};
 use crate::cursor::{cursor_field_spans, selected_span};
+use crate::hitbox::record_rows;
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::{ExtraField, FieldType};
 use crate::tree::widget::{FormFocus, TreeState};
@@ -247,10 +248,7 @@ impl Detail {
         frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 
         let visible = items.len().min(inner.height as usize);
-        for i in 0..visible {
-            let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
-            self.clicks.record(rect, DetailHit::PickerItem(i));
-        }
+        record_rows(&mut self.clicks, inner, 0, visible, DetailHit::PickerItem);
     }
 
     /// Draws the Custom field-name prompt.

@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use super::TreeAction;
 use super::chrome::centered_rect;
 use crate::cursor::selected_span;
-use crate::hitbox::ClickSurface;
+use crate::hitbox::{ClickSurface, record_rows};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::TreeState;
@@ -120,10 +120,7 @@ impl ShareWizard {
         frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 
         let visible = texts::SHARE_SCOPE_OPTIONS.len().min(inner.height as usize);
-        for i in 0..visible {
-            let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
-            self.clicks.record(rect, i);
-        }
+        record_rows(&mut self.clicks, inner, 0, visible, |i| i);
     }
 
     /// Badge and hint for the tree status bar while the wizard is open.
