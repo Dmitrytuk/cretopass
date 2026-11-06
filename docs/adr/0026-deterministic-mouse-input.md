@@ -45,9 +45,8 @@ Rules that follow from it:
   (a nested confirmation steps back one level), discards Configuration edits, or
   declines a Confirmation. A click can still never answer `y`. A modal that has not
   been drawn yet records no panel, so a stray click cannot dismiss it. The File
-  Browser-backed export/share destination steps are a deliberate exception: their
-  clickable list fills most of the screen, so a click beside it reads as a near-miss
-  rather than a request to abandon the whole flow.
+  Browser follows the rule as well: its centered overlay is the panel, so a click
+  beside it runs the browser's `Esc`, closing it or unwinding one of its popups.
 - **Destructive prompts take no clicks.** The Tree's confirmation prompts
   (delete-field, share-without-password) record no hit-boxes, the File Browser's
   click handler returns early while a delete/overwrite confirm is pending (its list
