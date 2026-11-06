@@ -41,7 +41,7 @@ _Avoid_: generator config, password defaults
 **Tree**: The main workspace where the node tree is navigated, searched, and edited. Entered from Home after opening a secret file.
 _Avoid_: Tree view, Tree app, Workspace
 
-**Modal**: A window that takes over the keyboard until it is dismissed. At most one is open at a time, over the Tree's Normal navigation. Nothing outside it reacts to keys while it is up. Help, Detail, Alert, Export, and the File Browser are Modals. A left click outside its panel does what `Esc` does, one nested level per click — including the File Browser-backed destination steps.
+**Modal**: A window that takes over the keyboard until it is dismissed. At most one is open at a time, over the Tree's Normal navigation. Nothing outside it reacts to keys while it is up. Help, Detail, Alert, Export, and the File Browser are Modals. A left click outside its panel does what `Esc` does: it closes the Modal or unwinds one drawn Popup, one level per click — including the File Browser-backed destination steps.
 _Avoid_: Overlay, Dialog, Window
 
 **Popup**: A window nested inside a Modal — the Form inside Detail, or the field-type picker inside Form. It never outlives the Modal that opened it and returns to it when dismissed.

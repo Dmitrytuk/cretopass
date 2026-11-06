@@ -45,8 +45,11 @@ Rules that follow from it:
   (a nested confirmation steps back one level), discards Configuration edits, or
   declines a Confirmation. A click can still never answer `y`. A modal that has not
   been drawn yet records no panel, so a stray click cannot dismiss it. The File
-  Browser follows the rule as well: its centered overlay is the panel, so a click
-  beside it runs the browser's `Esc`, closing it or unwinding one of its popups.
+  Browser follows the rule as well: its panel is the topmost popup it drew, or its
+  centered overlay when it drew none, so a click beside it runs the browser's `Esc`
+  — closing it or unwinding one of its *drawn* popups. A transient key-prefix that
+  draws nothing (the `a` add-file/folder prefix) is not a level: with no popup up,
+  the click closes the browser.
 - **Destructive prompts take no clicks.** The Tree's confirmation prompts
   (delete-field, share-without-password) record no hit-boxes, the File Browser's
   click handler returns early while a delete/overwrite confirm is pending (its list

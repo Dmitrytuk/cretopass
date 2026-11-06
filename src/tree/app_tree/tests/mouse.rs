@@ -462,6 +462,112 @@ fn a_click_outside_the_delete_confirmation_declines() {
 }
 
 #[test]
+fn an_outside_click_closes_the_locations_overlay_not_the_export_destination() {
+    let mut state = export_destination_state();
+    // `D` opens the Locations overlay as a popup over the browser.
+    handle_form(key(KeyCode::Char('D')), &mut state);
+    draw(&mut state);
+
+    let (x, y) = outside_point(panel(&state));
+    click(&mut state, MouseButton::Left, x, y);
+
+    assert!(
+        matches!(state.modal, Some(Modal::ExportDestination(_))),
+        "one outside click unwinds only the Locations overlay"
+    );
+
+    // Back on the browser's list, the next `Esc` closes the whole browser.
+    handle_form(key(KeyCode::Esc), &mut state);
+    assert!(
+        state.modal.is_none(),
+        "the overlay was the one level the click unwound"
+    );
+}
+
+#[test]
+fn an_outside_click_declines_a_pending_export_overwrite() {
+    let dir = tempfile::tempdir().unwrap();
+    // The suggested destination already exists, so `e` asks before overwriting.
+    let target = dir.path().join("vault_Work.json");
+    std::fs::write(&target, b"keep").unwrap();
+
+    let mut state = state_with_a_child();
+    state.modal = Some(Modal::ExportDestination(Box::new(ExportDestination::new(
+        Node::new("Work"),
+        false,
+        ExportFormat::Json,
+        Some(&dir.path().join("vault.age")),
+        &FileBrowserSession::default(),
+    ))));
+    handle_form(key(KeyCode::Char('e')), &mut state);
+    draw(&mut state);
+
+    let (x, y) = outside_point(panel(&state));
+    click(&mut state, MouseButton::Left, x, y);
+
+    assert_eq!(
+        std::fs::read(&target).unwrap(),
+        b"keep".to_vec(),
+        "an outside click must not overwrite the file"
+    );
+    assert!(
+        matches!(state.modal, Some(Modal::ExportDestination(_))),
+        "the browser stays open with the prompt declined"
+    );
+
+    // The confirmation was declined: the next `Esc` closes the browser instead
+    // of standing on it.
+    handle_form(key(KeyCode::Esc), &mut state);
+    assert!(
+        state.modal.is_none(),
+        "the pending overwrite was declined, not confirmed"
+    );
+}
+
+#[test]
+fn an_outside_click_declines_a_pending_share_overwrite() {
+    let dir = tempfile::tempdir().unwrap();
+    // The suggested bundle folder (`vault_Work`) already exists and is not empty,
+    // so Enter in the name input asks before writing into it.
+    let bundle = dir.path().join("vault_Work");
+    std::fs::create_dir(&bundle).unwrap();
+    std::fs::write(bundle.join("HOW-TO-OPEN.txt"), b"old").unwrap();
+
+    let mut state = state_with_a_child();
+    state.modal = Some(Modal::ShareDestination(Box::new(ShareDestination::new(
+        Node::new("Work"),
+        false,
+        Some(&dir.path().join("vault.age")),
+        &FileBrowserSession::default(),
+    ))));
+    // `n` opens the folder-name input; Enter commits it and raises the prompt.
+    handle_form(key(KeyCode::Char('n')), &mut state);
+    handle_form(key(KeyCode::Enter), &mut state);
+    draw(&mut state);
+    assert!(
+        rendered_text(&mut state).contains("Confirm Overwrite"),
+        "the share overwrite confirmation is pending"
+    );
+
+    let (x, y) = outside_point(panel(&state));
+    click(&mut state, MouseButton::Left, x, y);
+
+    assert_eq!(
+        std::fs::read(bundle.join("HOW-TO-OPEN.txt")).unwrap(),
+        b"old".to_vec(),
+        "an outside click must not write into the folder"
+    );
+    assert!(
+        matches!(state.modal, Some(Modal::ShareDestination(_))),
+        "the browser stays open with the prompt declined"
+    );
+    assert!(
+        !rendered_text(&mut state).contains("Confirm Overwrite"),
+        "the confirmation was declined, not left pending"
+    );
+}
+
+#[test]
 fn a_click_just_past_the_panel_edge_closes_it() {
     // The point `point_in` rules out is the first cell past the panel's
     // right edge, where an off-by-one would hide.

@@ -230,7 +230,7 @@ pub fn handle_click(
     {
         return None;
     }
-    match state.clicks.target_at(button, x, y) {
+    match state.clicks.target_at(MouseButton::Left, x, y) {
         Some(BrowserHit::Entry(index)) => click_entry(index, state),
         Some(BrowserHit::Location(index)) => click_location(index, state),
         None => None,

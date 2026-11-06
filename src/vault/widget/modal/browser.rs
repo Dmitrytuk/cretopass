@@ -75,6 +75,12 @@ impl BrowserModal {
         &mut self.state
     }
 
+    /// The browser's own state, for tests that need to inspect it.
+    #[cfg(test)]
+    pub fn state(&self) -> &FileBrowserState {
+        &self.state
+    }
+
     /// The directory and hidden-entry memory for the next opening.
     pub fn session(&self) -> FileBrowserSession {
         self.state.session()
