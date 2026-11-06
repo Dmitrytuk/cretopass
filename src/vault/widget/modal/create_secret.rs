@@ -9,7 +9,7 @@ use zeroize::Zeroizing;
 
 use super::HomeAction;
 use crate::cursor::{FieldEdit, PairVerdict, SecretFieldGroup, password_field_spans};
-use crate::hitbox::{HitMap, is_left};
+use crate::hitbox::ClickSurface;
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{display_path, make_overlay, paint_overlay};
 use crossterm::event::{KeyEvent, MouseButton};
@@ -29,11 +29,9 @@ pub struct CreateSecretPrompt {
     file_path: String,
     fields: SecretFieldGroup,
     error: Option<String>,
-    /// The clickable field rows recorded by the renderer.
-    hits: HitMap<usize>,
-    /// The panel the renderer drew last frame, or `None` before the first frame.
-    /// A left click outside it dismisses the dialog, like `Esc`.
-    rect: Option<Rect>,
+    /// The clickable field rows and the panel the renderer drew, so a left click
+    /// focuses a field and a click outside the panel dismisses the dialog.
+    clicks: ClickSurface<usize>,
 }
 
 impl CreateSecretPrompt {
@@ -43,8 +41,7 @@ impl CreateSecretPrompt {
             file_path,
             fields: SecretFieldGroup::with_fields(LABELS.len()),
             error: None,
-            hits: HitMap::default(),
-            rect: None,
+            clicks: ClickSurface::default(),
         }
     }
 
@@ -106,13 +103,10 @@ impl CreateSecretPrompt {
         }
     }
 
-    /// A left click on a field row focuses that field; the right button is
+    /// A left click on a field row focuses that field; any other button is
     /// ignored.
     pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) {
-        if !is_left(button) {
-            return;
-        }
-        if let Some(index) = self.hits.hit(x, y, button) {
+        if let Some(index) = self.clicks.target_at(button, x, y) {
             self.fields.focus(index);
         }
     }
@@ -120,15 +114,15 @@ impl CreateSecretPrompt {
     /// The panel the renderer drew last frame, or `None` before the first frame.
     /// A left click outside it dismisses the dialog, like `Esc`.
     pub(crate) fn panel_rect(&self) -> Option<Rect> {
-        self.rect
+        self.clicks.panel()
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect, display_full_path: bool) {
-        self.hits.clear();
+        self.clicks.clear();
         let shown_path = display_path(&self.file_path, display_full_path);
 
         let overlay_area = make_overlay(area, if self.error.is_some() { 10 } else { 9 });
-        self.rect = Some(overlay_area);
+        self.clicks.set_panel(overlay_area);
         let block = Block::default()
             .title(texts::HOME_CREATE_SECRET)
             .borders(Borders::ALL)
@@ -164,7 +158,7 @@ impl CreateSecretPrompt {
         let visible = LABELS.len().min(inner.height.saturating_sub(3) as usize);
         for index in 0..visible {
             let rect = Rect::new(inner.x, inner.y + 3 + index as u16, inner.width, 1);
-            self.hits.push(rect, MouseButton::Left, index);
+            self.clicks.record(rect, index);
         }
 
         paint_overlay(

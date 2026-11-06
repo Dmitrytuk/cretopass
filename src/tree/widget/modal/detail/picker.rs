@@ -5,7 +5,7 @@
 //! to append, the custom-name prompt collects a label for a `Custom` field, and
 //! the confirmation removes a field.
 
-use crossterm::event::{KeyCode, KeyEvent, MouseButton};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
@@ -225,7 +225,7 @@ impl Detail {
         let items = picker_items();
 
         let overlay_area = centered_rect(area, area.width / 2, 8);
-        self.rect = Some(overlay_area);
+        self.clicks.set_panel(overlay_area);
 
         let block = Block::default()
             .title(texts::OVERLAY_SELECT_FIELD_TYPE)
@@ -249,8 +249,7 @@ impl Detail {
         let visible = items.len().min(inner.height as usize);
         for i in 0..visible {
             let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
-            self.hits
-                .push(rect, MouseButton::Left, DetailHit::PickerItem(i));
+            self.clicks.record(rect, DetailHit::PickerItem(i));
         }
     }
 
@@ -261,7 +260,7 @@ impl Detail {
         };
 
         let overlay_area = centered_rect(area, area.width / 2, 4);
-        self.rect = Some(overlay_area);
+        self.clicks.set_panel(overlay_area);
 
         let block = Block::default()
             .title(texts::OVERLAY_CUSTOM_FIELD_NAME)
@@ -300,7 +299,7 @@ impl Detail {
             .unwrap_or_default();
 
         let overlay_area = centered_rect(area, area.width / 2, 4);
-        self.rect = Some(overlay_area);
+        self.clicks.set_panel(overlay_area);
 
         let block = Block::default()
             .title(texts::OVERLAY_CONFIRM_DELETE)

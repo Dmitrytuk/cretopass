@@ -93,6 +93,87 @@ impl<T: Copy> HitMap<T> {
     }
 }
 
+/// The clickable rows of one panel together with the panel's own rectangle.
+///
+/// A modal keeps one of these: each frame it [`clear`](ClickSurface::clear)s the
+/// surface, [`set_panel`](ClickSurface::set_panel)s the rect it drew, and
+/// [`record`](ClickSurface::record)s one row per clickable line. A click is then
+/// either a [`target_at`](ClickSurface::target_at) row or, via [`clicked_outside`],
+/// a miss the dispatcher turns into the modal's `Esc`. Bundling the panel with
+/// the rows is what lets every modal share the dismissal rule instead of
+/// re-deriving `is_left && panel && !point_in`.
+#[derive(Debug)]
+pub(crate) struct ClickSurface<T> {
+    panel: Option<Rect>,
+    hits: HitMap<T>,
+}
+
+impl<T> Default for ClickSurface<T> {
+    fn default() -> Self {
+        Self {
+            panel: None,
+            hits: HitMap::default(),
+        }
+    }
+}
+
+impl<T> ClickSurface<T> {
+    /// Forgets every region **and the panel**, ready to record the next frame.
+    ///
+    /// Dropping the panel matters: a renderer that forgets to [`set_panel`] this
+    /// frame leaves its modal undismissable, rather than dismissable against a
+    /// stale rect.
+    ///
+    /// [`set_panel`]: ClickSurface::set_panel
+    pub(crate) fn clear(&mut self) {
+        self.panel = None;
+        self.hits.clear();
+    }
+
+    /// Remembers the panel rectangle the renderer drew this frame.
+    pub(crate) fn set_panel(&mut self, rect: Rect) {
+        self.panel = Some(rect);
+    }
+
+    /// Records a left click anywhere inside `rect` as `target`.
+    pub(crate) fn record(&mut self, rect: Rect, target: T) {
+        self.record_with(rect, MouseButton::Left, target);
+    }
+
+    /// Records a click with an explicit `button` inside `rect` as `target`.
+    ///
+    /// The common case is a left-clickable row ([`record`](ClickSurface::record));
+    /// this is for the rare surface that answers a second button too, like the
+    /// Detail modal's browsed field rows, where the right button copies a value.
+    pub(crate) fn record_with(&mut self, rect: Rect, button: MouseButton, target: T) {
+        self.hits.push(rect, button, target);
+    }
+
+    /// The panel rectangle once it has been drawn, or `None` before the first
+    /// frame — so a modal that was never rendered survives a stray click.
+    pub(crate) fn panel(&self) -> Option<Rect> {
+        self.panel
+    }
+}
+
+impl<T: Copy> ClickSurface<T> {
+    /// The target of a click at `(x, y)`, if it hit a recorded row.
+    pub(crate) fn target_at(&self, button: MouseButton, x: u16, y: u16) -> Option<T> {
+        self.hits.hit(x, y, button)
+    }
+}
+
+/// Whether `button` at `(x, y)` is a click outside `panel`, once it has been
+/// drawn.
+///
+/// This is the modal's "outside click = Esc" rule, defined once. It is a free
+/// function rather than only a [`ClickSurface`] method because a screen's modal
+/// dispatcher is a sum type: it can hand over only the active variant's *panel*
+/// (through `panel_rect`), not that variant's whole surface.
+pub(crate) fn clicked_outside(panel: Option<Rect>, button: MouseButton, x: u16, y: u16) -> bool {
+    is_left(button) && panel.is_some_and(|rect| !point_in(rect, x, y))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,6 +218,46 @@ mod tests {
         let mut hits = map();
         hits.clear();
         assert_eq!(hits.hit(0, 0, MouseButton::Left), None);
+    }
+
+    #[test]
+    fn click_surface_resolves_rows_and_reports_outside_clicks() {
+        let mut surface: ClickSurface<Target> = ClickSurface::default();
+        assert_eq!(surface.panel(), None);
+        assert!(
+            !clicked_outside(surface.panel(), MouseButton::Left, 0, 0),
+            "an unrendered panel is never 'outside'"
+        );
+
+        surface.set_panel(Rect::new(2, 2, 6, 3));
+        surface.record(Rect::new(2, 3, 6, 1), Target::A);
+
+        assert_eq!(surface.panel(), Some(Rect::new(2, 2, 6, 3)));
+        assert_eq!(surface.target_at(MouseButton::Left, 3, 3), Some(Target::A));
+        assert_eq!(surface.target_at(MouseButton::Left, 3, 2), None);
+        assert_eq!(
+            surface.target_at(MouseButton::Right, 3, 3),
+            None,
+            "record is left-only; the modals' dropped guards depend on it"
+        );
+        assert!(!clicked_outside(surface.panel(), MouseButton::Left, 3, 3));
+        assert!(clicked_outside(surface.panel(), MouseButton::Left, 0, 0));
+        assert!(
+            !clicked_outside(surface.panel(), MouseButton::Right, 0, 0),
+            "only the left button dismisses"
+        );
+    }
+
+    #[test]
+    fn clearing_a_click_surface_forgets_panel_and_rows() {
+        let mut surface: ClickSurface<Target> = ClickSurface::default();
+        surface.set_panel(Rect::new(2, 2, 6, 3));
+        surface.record(Rect::new(2, 3, 6, 1), Target::A);
+
+        surface.clear();
+
+        assert_eq!(surface.panel(), None);
+        assert_eq!(surface.target_at(MouseButton::Left, 3, 3), None);
     }
 
     #[test]

@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use super::TreeAction;
 use super::chrome::centered_rect;
 use crate::cursor::password_field_spans;
-use crate::hitbox::{HitMap, is_left};
+use crate::hitbox::ClickSurface;
 use crate::share::{Passphrase, PassphraseSubmit, SharePassword};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::Node;
@@ -39,11 +39,9 @@ pub(crate) struct SharePassphrase {
     passphrase: Passphrase,
     /// Whether the "share without a password?" confirmation is showing.
     confirming_empty: bool,
-    /// The clickable field regions recorded by the renderer.
-    hits: HitMap<usize>,
-    /// The panel the renderer drew last frame, or `None` before the first frame.
-    /// An outside click steps back one level, like `Esc`.
-    rect: Option<Rect>,
+    /// The clickable field regions and the panel the renderer drew, so a left
+    /// click focuses a field and a click outside the panel steps back one level.
+    clicks: ClickSurface<usize>,
 }
 
 impl SharePassphrase {
@@ -56,8 +54,7 @@ impl SharePassphrase {
             dest,
             passphrase: Passphrase::new(),
             confirming_empty: false,
-            hits: HitMap::default(),
-            rect: None,
+            clicks: ClickSurface::default(),
         }
     }
 
@@ -118,10 +115,10 @@ impl SharePassphrase {
         y: u16,
         _state: &mut TreeState,
     ) -> Option<TreeAction> {
-        if !is_left(button) || self.confirming_empty {
+        if self.confirming_empty {
             return None;
         }
-        if let Some(index) = self.hits.hit(x, y, button) {
+        if let Some(index) = self.clicks.target_at(button, x, y) {
             self.passphrase.focus(index);
         }
         None
@@ -130,7 +127,7 @@ impl SharePassphrase {
     /// The panel the renderer drew last frame, or `None` before the first frame.
     /// An outside click steps back one level, like `Esc`.
     pub(crate) fn panel_rect(&self) -> Option<Rect> {
-        self.rect
+        self.clicks.panel()
     }
 
     /// Whether the passwordless confirmation is the screen showing.
@@ -151,9 +148,10 @@ impl SharePassphrase {
 
     /// Draws the password step, or the passwordless confirmation over it.
     pub(crate) fn render(&mut self, frame: &mut Frame, area: Rect) {
-        self.hits.clear();
+        self.clicks.clear();
         if self.confirming_empty {
-            self.rect = Some(self.render_empty_confirm(frame, area));
+            let panel = self.render_empty_confirm(frame, area);
+            self.clicks.set_panel(panel);
             return;
         }
 
@@ -163,7 +161,7 @@ impl SharePassphrase {
             9
         };
         let overlay_area = centered_rect(area, area.width.saturating_mul(3) / 5, height);
-        self.rect = Some(overlay_area);
+        self.clicks.set_panel(overlay_area);
         let block = Block::default()
             .title(texts::SHARE_TITLE_PASSPHRASE)
             .borders(Borders::ALL)
@@ -209,7 +207,7 @@ impl SharePassphrase {
         let visible = LABELS.len().min(inner.height.saturating_sub(3) as usize);
         for index in 0..visible {
             let rect = Rect::new(inner.x, inner.y + 3 + index as u16, inner.width, 1);
-            self.hits.push(rect, MouseButton::Left, index);
+            self.clicks.record(rect, index);
         }
     }
 

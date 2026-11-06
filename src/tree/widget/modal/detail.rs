@@ -30,7 +30,7 @@ use zeroize::Zeroizing;
 
 use super::TreeAction;
 use crate::cursor::{PastePolicy, insert_str_at};
-use crate::hitbox::HitMap;
+use crate::hitbox::ClickSurface;
 use crate::theming::{ElementStyle, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::{FormPending, FormState, GeneratorModal, TreeState};
@@ -64,12 +64,10 @@ pub(crate) struct Detail {
     form: Option<FormState>,
     /// The Popup nested over the Form, if any.
     popup: DetailPopup,
-    /// The clickable regions this modal's renderer recorded for the last frame.
-    hits: HitMap<DetailHit>,
-    /// The topmost overlay the renderer drew last frame, or `None` before the
-    /// first frame. An outside click closes exactly one nesting level, matching
-    /// `Esc` (see [`Modal::handle_click`](super::Modal::handle_click)).
-    rect: Option<Rect>,
+    /// The clickable regions this modal's renderer recorded for the last frame,
+    /// together with the topmost panel it drew. An outside click closes exactly
+    /// one nesting level, matching `Esc`.
+    clicks: ClickSurface<DetailHit>,
 }
 
 /// A clickable region of the Detail modal, recorded by its renderer.
@@ -130,8 +128,7 @@ impl Detail {
             selected: 0,
             form: Some(FormState::new_edit(node)),
             popup: DetailPopup::None,
-            hits: HitMap::default(),
-            rect: None,
+            clicks: ClickSurface::default(),
         }
     }
 
@@ -141,8 +138,7 @@ impl Detail {
             selected: 0,
             form: Some(FormState::new_add()),
             popup: DetailPopup::None,
-            hits: HitMap::default(),
-            rect: None,
+            clicks: ClickSurface::default(),
         }
     }
 
@@ -239,7 +235,7 @@ impl Detail {
         y: u16,
         state: &mut TreeState,
     ) -> Option<TreeAction> {
-        let target = self.hits.hit(x, y, button)?;
+        let target = self.clicks.target_at(button, x, y)?;
         match target {
             DetailHit::Field(index) => self.click_field(index, button, state),
             DetailHit::FormRow(index) if crate::hitbox::is_left(button) => {
@@ -265,15 +261,14 @@ impl Detail {
     /// uses this to turn a click outside the active overlay into one `Esc`, which
     /// is what unwinds exactly one nesting level.
     pub(crate) fn panel_rect(&self) -> Option<Rect> {
-        self.rect
+        self.clicks.panel()
     }
 
     /// Draws the active screen over `area`, refilling the clickable regions.
     pub(crate) fn render(&mut self, frame: &mut Frame, area: Rect, state: &TreeState) {
-        self.hits.clear();
         // Reset before drawing: a screen that bails out (no Node, no Form) must
-        // leave `rect` as `None`, so it cannot be dismissed by a stray click.
-        self.rect = None;
+        // leave the panel as `None`, so it cannot be dismissed by a stray click.
+        self.clicks.clear();
         match self.screen() {
             Screen::Browse => self.render_browse(frame, area, state),
             Screen::Form => self.render_form(frame, area, state),
@@ -281,22 +276,24 @@ impl Detail {
             Screen::CustomFieldName => self.render_custom_field_name(frame, area),
             Screen::GeneratePassword => {
                 if let DetailPopup::GeneratePassword(modal) = &self.popup {
-                    self.rect = Some(generator::render_generate_password_overlay(
+                    let panel = generator::render_generate_password_overlay(
                         frame,
                         area,
                         modal,
-                        &mut self.hits,
-                    ));
+                        &mut self.clicks,
+                    );
+                    self.clicks.set_panel(panel);
                 }
             }
             Screen::SymbolChecklist => {
                 if let DetailPopup::SymbolChecklist(modal) = &self.popup {
-                    self.rect = Some(generator::render_symbol_checklist_overlay(
+                    let panel = generator::render_symbol_checklist_overlay(
                         frame,
                         area,
                         modal,
-                        &mut self.hits,
-                    ));
+                        &mut self.clicks,
+                    );
+                    self.clicks.set_panel(panel);
                 }
             }
             Screen::ConfirmDeleteField => self.render_confirm_delete(frame, area, state),

@@ -20,8 +20,10 @@ turned into the same `Action` its key would produce. Two new leaf modules carry 
   `crossterm`, like `generator` and `clipboard`. `HitBox<T>` pairs a `Rect` with the
   target a click there means; `HitMap<T>` records one per clickable region each frame
   and resolves a click to the **topmost** matching box, so a modal's rows outrank the
-  screen rows behind them. It is generic over the screen's own target, so policy —
-  what a click *means* — stays in the screen.
+  screen rows behind them. A modal groups its map with the panel it drew in a
+  `ClickSurface<T>`, so recording rows and the outside-click rule are shared, not
+  re-derived per modal. It is generic over the screen's own target, so policy — what a
+  click *means* — stays in the screen.
 
 Rules that follow from it:
 

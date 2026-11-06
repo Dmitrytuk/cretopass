@@ -232,7 +232,7 @@ fn generator_paste_on_another_row_changes_nothing() {
 
 // ── Click hit-testing ──
 
-/// Draws the modal so its renderer fills `detail.hits`.
+/// Draws the modal so its renderer fills `detail.clicks`.
 fn draw(detail: &mut Detail, state: &TreeState) {
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24))
         .expect("a test terminal");
@@ -242,10 +242,14 @@ fn draw(detail: &mut Detail, state: &TreeState) {
 }
 
 /// The first cell whose click resolves to `target` for `button`.
-fn point_for(hits: &HitMap<DetailHit>, target: DetailHit, button: MouseButton) -> (u16, u16) {
+fn point_for(
+    clicks: &ClickSurface<DetailHit>,
+    target: DetailHit,
+    button: MouseButton,
+) -> (u16, u16) {
     for y in 0..24u16 {
         for x in 0..80u16 {
-            if hits.hit(x, y, button) == Some(target) {
+            if clicks.target_at(button, x, y) == Some(target) {
                 return (x, y);
             }
         }
@@ -257,7 +261,7 @@ fn point_for(hits: &HitMap<DetailHit>, target: DetailHit, button: MouseButton) -
 fn a_click_selects_a_field_and_a_repeat_opens_the_form() {
     let (mut detail, mut state) = detail_with_fields();
     draw(&mut detail, &state);
-    let (x, y) = point_for(&detail.hits, DetailHit::Field(1), MouseButton::Left);
+    let (x, y) = point_for(&detail.clicks, DetailHit::Field(1), MouseButton::Left);
 
     // The first click only moves the selection.
     assert!(
@@ -277,7 +281,7 @@ fn a_click_selects_a_field_and_a_repeat_opens_the_form() {
 fn a_right_click_copies_the_field_value() {
     let (mut detail, mut state) = detail_with_fields();
     draw(&mut detail, &state);
-    let (x, y) = point_for(&detail.hits, DetailHit::Field(0), MouseButton::Right);
+    let (x, y) = point_for(&detail.clicks, DetailHit::Field(0), MouseButton::Right);
 
     match detail.handle_click(MouseButton::Right, x, y, &mut state) {
         Some(TreeAction::CopyToClipboard { text }) => assert_eq!(text, "a"),
@@ -301,7 +305,7 @@ fn a_click_on_a_checklist_cell_toggles_it() {
         DetailPopup::SymbolChecklist(modal) => modal.params.symbols.len(),
         other => panic!("expected the symbol checklist, got {other:?}"),
     };
-    let (x, y) = point_for(&detail.hits, DetailHit::SymbolCell(0), MouseButton::Left);
+    let (x, y) = point_for(&detail.clicks, DetailHit::SymbolCell(0), MouseButton::Left);
     let _ = detail.handle_click(MouseButton::Left, x, y, &mut state);
 
     match &detail.popup {
@@ -320,7 +324,7 @@ fn a_click_on_a_form_row_selects_then_enters() {
     draw(&mut detail, &state);
 
     // Rows are Name(0), Extra(0)(1), Extra(1)(2), Extra(2)(3), AddButton(4).
-    let (x, y) = point_for(&detail.hits, DetailHit::FormRow(2), MouseButton::Left);
+    let (x, y) = point_for(&detail.clicks, DetailHit::FormRow(2), MouseButton::Left);
     assert!(
         detail
             .handle_click(MouseButton::Left, x, y, &mut state)
@@ -355,7 +359,7 @@ fn a_short_card_records_no_field_hits_below_it() {
     for x in 0..80u16 {
         for y in 0..6u16 {
             assert!(
-                detail.hits.hit(x, y, MouseButton::Right).is_none() || y < 5,
+                detail.clicks.target_at(MouseButton::Right, x, y).is_none() || y < 5,
                 "a field was clickable outside the card at ({x}, {y})"
             );
         }

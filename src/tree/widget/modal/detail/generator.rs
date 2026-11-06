@@ -5,7 +5,7 @@
 //! summary row that expands into the checklist). Confirming writes the generated
 //! value into the focused field through the form's commit helpers.
 
-use crossterm::event::{KeyCode, KeyEvent, MouseButton};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
@@ -21,7 +21,7 @@ use crate::cursor::{
     selected_span,
 };
 use crate::generator::{self, PasswordLength, PasswordParams};
-use crate::hitbox::HitMap;
+use crate::hitbox::ClickSurface;
 use crate::theming::{Action, ElementStyle, Icon, texts};
 use crate::tree::widget::{GeneratorModal, TreeState};
 
@@ -300,7 +300,7 @@ pub(super) fn render_generate_password_overlay(
     frame: &mut Frame,
     area: Rect,
     modal: &GeneratorModal,
-    hits: &mut HitMap<DetailHit>,
+    clicks: &mut ClickSurface<DetailHit>,
 ) -> Rect {
     let has_error = modal.error.is_some();
     let content_height = 3 + u16::from(has_error);
@@ -361,7 +361,7 @@ pub(super) fn render_generate_password_overlay(
     let visible = GENERATOR_ROWS.min(inner.height as usize);
     for row in 0..visible {
         let rect = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
-        hits.push(rect, MouseButton::Left, DetailHit::GeneratorRow(row));
+        clicks.record(rect, DetailHit::GeneratorRow(row));
     }
 
     overlay_area
@@ -372,7 +372,7 @@ pub(super) fn render_symbol_checklist_overlay(
     frame: &mut Frame,
     area: Rect,
     modal: &GeneratorModal,
-    hits: &mut HitMap<DetailHit>,
+    clicks: &mut ClickSurface<DetailHit>,
 ) -> Rect {
     let rows = u16::try_from(generator::SYMBOLS.len().div_ceil(SYMBOL_COLUMNS))
         .expect("symbol checklist rows fit in a terminal height");
@@ -435,7 +435,7 @@ pub(super) fn render_symbol_checklist_overlay(
                 break;
             }
             let rect = Rect::new(inner.x + column as u16 * 9, inner.y + row, 9, 1);
-            hits.push(rect, MouseButton::Left, DetailHit::SymbolCell(index));
+            clicks.record(rect, DetailHit::SymbolCell(index));
         }
     }
 

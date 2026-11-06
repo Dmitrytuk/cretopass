@@ -15,7 +15,7 @@ use super::TreeAction;
 use super::chrome::centered_rect;
 use crate::cursor::selected_span;
 use crate::file_handling::ExportFormat;
-use crate::hitbox::{HitMap, is_left};
+use crate::hitbox::ClickSurface;
 use crate::theming::{Action, ElementStyle, texts};
 use crate::tree::node::Node;
 use crate::tree::widget::TreeState;
@@ -40,11 +40,9 @@ pub(crate) struct ExportWizard {
     include_children: bool,
     /// Focused row on the current step (0/1 for scope, 0/1/2 for format).
     selected: usize,
-    /// The clickable row regions recorded by the renderer.
-    hits: HitMap<usize>,
-    /// The panel the renderer drew last frame, or `None` before the first frame.
-    /// An outside click closes the wizard, like `Esc`.
-    rect: Option<Rect>,
+    /// The clickable row regions and the panel the renderer drew, so a left click
+    /// selects a row and a click outside the panel closes the wizard.
+    clicks: ClickSurface<usize>,
 }
 
 impl ExportWizard {
@@ -55,8 +53,7 @@ impl ExportWizard {
             step: Step::Scope,
             include_children: false,
             selected: 0,
-            hits: HitMap::default(),
-            rect: None,
+            clicks: ClickSurface::default(),
         }
     }
 
@@ -120,10 +117,7 @@ impl ExportWizard {
         y: u16,
         state: &mut TreeState,
     ) -> Option<TreeAction> {
-        if !is_left(button) {
-            return None;
-        }
-        let row = self.hits.hit(x, y, button)?;
+        let row = self.clicks.target_at(button, x, y)?;
         let count = match self.step {
             Step::Scope => texts::EXPORT_NODE_OPTIONS.len(),
             Step::Format => texts::EXPORT_TYPE_ITEMS.len(),
@@ -143,7 +137,7 @@ impl ExportWizard {
     /// The panel the renderer drew last frame, or `None` before the first frame.
     /// An outside click closes the wizard, like `Esc`.
     pub(crate) fn panel_rect(&self) -> Option<Rect> {
-        self.rect
+        self.clicks.panel()
     }
 
     /// The format the current selection stands for.
@@ -157,7 +151,7 @@ impl ExportWizard {
 
     /// Draws the active step over `area`.
     pub(crate) fn render(&mut self, frame: &mut Frame, area: Rect) {
-        self.hits.clear();
+        self.clicks.clear();
         match self.step {
             Step::Scope => self.render_scope(frame, area),
             Step::Format => self.render_format(frame, area),
@@ -183,7 +177,7 @@ impl ExportWizard {
     /// Draws the scope step.
     fn render_scope(&mut self, frame: &mut Frame, area: Rect) {
         let overlay_area = centered_rect(area, area.width / 2, 6);
-        self.rect = Some(overlay_area);
+        self.clicks.set_panel(overlay_area);
 
         let block = Block::default()
             .title(texts::OVERLAY_EXPORT_NODE)
@@ -206,14 +200,14 @@ impl ExportWizard {
         let visible = texts::EXPORT_NODE_OPTIONS.len().min(inner.height as usize);
         for i in 0..visible {
             let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
-            self.hits.push(rect, MouseButton::Left, i);
+            self.clicks.record(rect, i);
         }
     }
 
     /// Draws the format step.
     fn render_format(&mut self, frame: &mut Frame, area: Rect) {
         let overlay_area = centered_rect(area, area.width / 2, 7);
-        self.rect = Some(overlay_area);
+        self.clicks.set_panel(overlay_area);
 
         let block = Block::default()
             .title(texts::EXPORT_SELECT_TITLE)
@@ -236,7 +230,7 @@ impl ExportWizard {
         let visible = texts::EXPORT_TYPE_ITEMS.len().min(inner.height as usize);
         for i in 0..visible {
             let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
-            self.hits.push(rect, MouseButton::Left, i);
+            self.clicks.record(rect, i);
         }
     }
 }

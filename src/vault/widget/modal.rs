@@ -35,7 +35,7 @@ use crossterm::event::{KeyCode, KeyEvent, MouseButton};
 use ratatui::layout::Rect;
 
 use crate::file_handling::ExportFormat;
-use crate::hitbox::{is_left, point_in};
+use crate::hitbox::clicked_outside;
 use crate::share::SharePassword;
 
 /// What the active modal asks the Home screen to do.
@@ -211,10 +211,7 @@ impl Modal {
     /// confirmation takes no in-panel clicks, so their `handle_click` returns
     /// `None` when the click lands within the panel.
     pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) -> Option<HomeAction> {
-        if is_left(button)
-            && let Some(rect) = self.panel_rect()
-            && !point_in(rect, x, y)
-        {
+        if clicked_outside(self.panel_rect(), button, x, y) {
             return self.handle_key(KeyEvent::from(KeyCode::Esc));
         }
         match self {

@@ -94,7 +94,7 @@ impl Detail {
         };
 
         let overlay_area = make_overlay_area(area, node.extra_fields.len(), 3);
-        self.rect = Some(overlay_area);
+        self.clicks.set_panel(overlay_area);
 
         let block = Block::default()
             .title(format!(" {} ", node.name))
@@ -126,9 +126,9 @@ impl Detail {
             .min(inner.height.saturating_sub(1) as usize);
         for i in 0..visible {
             let rect = Rect::new(inner.x, inner.y + 1 + i as u16, inner.width, 1);
-            self.hits.push(rect, MouseButton::Left, DetailHit::Field(i));
-            self.hits
-                .push(rect, MouseButton::Right, DetailHit::Field(i));
+            self.clicks.record(rect, DetailHit::Field(i));
+            self.clicks
+                .record_with(rect, MouseButton::Right, DetailHit::Field(i));
         }
     }
 }

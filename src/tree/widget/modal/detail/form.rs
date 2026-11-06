@@ -7,7 +7,7 @@
 //! (`Ctrl+G`), which either rerolls a login word in place or opens the password
 //! generator (see [`super::generator`]).
 
-use crossterm::event::{KeyCode, KeyEvent, MouseButton};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
@@ -19,7 +19,7 @@ use crate::cursor::{
     backspace_at, cursor_field_spans, cursor_left, cursor_right, delete_at, insert_char_at,
 };
 use crate::generator;
-use crate::hitbox::HitMap;
+use crate::hitbox::ClickSurface;
 use crate::theming::{Action, ElementStyle, Icon, texts};
 use crate::tree::node::{ExtraField, FieldType, Node};
 use crate::tree::widget::{FormFocus, FormPending, FormRow, FormState, GeneratorModal, TreeState};
@@ -225,14 +225,8 @@ impl Detail {
         } else {
             texts::OVERLAY_EDIT_NODE
         };
-        self.rect = Some(render_edit_overlay(
-            frame,
-            area,
-            form,
-            &state.root,
-            title,
-            &mut self.hits,
-        ));
+        let panel = render_edit_overlay(frame, area, form, &state.root, title, &mut self.clicks);
+        self.clicks.set_panel(panel);
     }
 }
 
@@ -428,7 +422,7 @@ fn render_edit_overlay(
     form: &FormState,
     root: &Node,
     title: &str,
-    hits: &mut HitMap<DetailHit>,
+    clicks: &mut ClickSurface<DetailHit>,
 ) -> Rect {
     let node = form.node(root);
     let rows = form.rows(root);
@@ -496,7 +490,7 @@ fn render_edit_overlay(
     let visible = rows.len().min(inner.height as usize);
     for i in 0..visible {
         let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
-        hits.push(rect, MouseButton::Left, DetailHit::FormRow(i));
+        clicks.record(rect, DetailHit::FormRow(i));
     }
 
     overlay_area

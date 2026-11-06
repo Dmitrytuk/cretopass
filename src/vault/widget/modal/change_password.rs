@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
 use crate::cursor::{FieldEdit, SecretFieldGroup, password_field_spans};
-use crate::hitbox::{HitMap, is_left};
+use crate::hitbox::ClickSurface;
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
 
@@ -29,11 +29,9 @@ const LABELS: [&str; 3] = [
 pub struct ChangePasswordPrompt {
     fields: SecretFieldGroup,
     error: Option<String>,
-    /// The clickable field rows recorded by the renderer.
-    hits: HitMap<usize>,
-    /// The panel the renderer drew last frame, or `None` before the first frame.
-    /// A left click outside it dismisses the dialog, like `Esc`.
-    rect: Option<Rect>,
+    /// The clickable field rows and the panel the renderer drew, so a left click
+    /// focuses a field and a click outside the panel dismisses the dialog.
+    clicks: ClickSurface<usize>,
 }
 
 impl ChangePasswordPrompt {
@@ -42,8 +40,7 @@ impl ChangePasswordPrompt {
         Self {
             fields: SecretFieldGroup::with_fields(LABELS.len()),
             error: None,
-            hits: HitMap::default(),
-            rect: None,
+            clicks: ClickSurface::default(),
         }
     }
 
@@ -99,13 +96,10 @@ impl ChangePasswordPrompt {
         }
     }
 
-    /// A left click on a field row focuses that field; the right button is
+    /// A left click on a field row focuses that field; any other button is
     /// ignored.
     pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) {
-        if !is_left(button) {
-            return;
-        }
-        if let Some(index) = self.hits.hit(x, y, button) {
+        if let Some(index) = self.clicks.target_at(button, x, y) {
             self.fields.focus(index);
         }
     }
@@ -113,13 +107,13 @@ impl ChangePasswordPrompt {
     /// The panel the renderer drew last frame, or `None` before the first frame.
     /// A left click outside it dismisses the dialog, like `Esc`.
     pub(crate) fn panel_rect(&self) -> Option<Rect> {
-        self.rect
+        self.clicks.panel()
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        self.hits.clear();
+        self.clicks.clear();
         let overlay_area = make_overlay(area, if self.error.is_some() { 12 } else { 11 });
-        self.rect = Some(overlay_area);
+        self.clicks.set_panel(overlay_area);
         let block = Block::default()
             .title(texts::HOME_CHANGE_PASSWORD)
             .borders(Borders::ALL)
@@ -150,7 +144,7 @@ impl ChangePasswordPrompt {
         let visible = LABELS.len().min(inner.height.saturating_sub(1) as usize);
         for index in 0..visible {
             let rect = Rect::new(inner.x, inner.y + 1 + index as u16, inner.width, 1);
-            self.hits.push(rect, MouseButton::Left, index);
+            self.clicks.record(rect, index);
         }
 
         paint_overlay(
@@ -245,7 +239,7 @@ mod tests {
         // The three field rows sit at inner.y + 1 + i.
         let (x, y) = (0..24u16)
             .flat_map(|y| (0..80u16).map(move |x| (x, y)))
-            .find(|&(x, y)| prompt.hits.hit(x, y, MouseButton::Left) == Some(1))
+            .find(|&(x, y)| prompt.clicks.target_at(MouseButton::Left, x, y) == Some(1))
             .expect("the second field must be clickable");
 
         prompt.handle_click(MouseButton::Left, x, y);

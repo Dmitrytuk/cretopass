@@ -17,7 +17,7 @@ snapshot back to an age-encrypted JSON file.
 | `share` | [0023](0023-sharing-a-vault-subtree.md) | Share flow, UI-agnostic: the recipient's masked password pair (`Passphrase`), wrapped by the Tree and Home modals |
 | `clipboard` | [0025](0025-clipboard-gateway.md) | System clipboard gateway — `arboard` on every platform with a command-line helper fallback; the one place a secret reaches the OS clipboard, in both directions (copy and clipboard paste) |
 | `terminal` | [0026](0026-deterministic-mouse-input.md) | Terminal lifecycle — raw mode, the alternate screen, bracketed paste and mouse capture in one place, with one `restore()` reused by the panic hook |
-| `hitbox` | [0026](0026-deterministic-mouse-input.md) | Mouse hit-testing — a strict leaf over `ratatui`/`crossterm`; `HitBox<T>`/`HitMap<T>` map a click to the topmost recorded region's target |
+| `hitbox` | [0026](0026-deterministic-mouse-input.md) | Mouse hit-testing — a strict leaf over `ratatui`/`crossterm`; `HitBox<T>`/`HitMap<T>` map a click to the topmost recorded region's target, and `ClickSurface<T>` bundles a modal's map with its panel rect |
 | `tree` | [0005](../../src/tree/docs/adr/0005-tree-module.md) | Tree data model, state machine, rendering, async event loop |
 | `vault` | [0006](../../src/vault/docs/adr/0006-vault-module.md) | Home screen, active vault state, configuration persistence |
 | `file_browser` | [0007](../../src/file_browser/docs/adr/0007-file-browser.md) | OS directory browser overlay with mounted-disk locations and hidden-entry toggle; listings and disk enumeration run off the UI thread, and browsing reads no file contents ([0024](0024-browsing-never-reads-file-contents.md)) |
