@@ -54,6 +54,10 @@ pub(crate) struct Detail {
     popup: DetailPopup,
     /// The clickable regions this modal's renderer recorded for the last frame.
     hits: HitMap<DetailHit>,
+    /// The topmost overlay the renderer drew last frame, or `None` before the
+    /// first frame. An outside click closes exactly one nesting level, matching
+    /// `Esc` (see [`Modal::handle_click`](super::Modal::handle_click)).
+    rect: Option<Rect>,
 }
 
 /// A clickable region of the Detail modal, recorded by its renderer.
@@ -115,6 +119,7 @@ impl Detail {
             form: Some(FormState::new_edit(node)),
             popup: DetailPopup::None,
             hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -125,6 +130,7 @@ impl Detail {
             form: Some(FormState::new_add()),
             popup: DetailPopup::None,
             hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -232,6 +238,16 @@ impl Detail {
             DetailHit::SymbolCell(index) if is_left(button) => self.click_symbol_cell(index, state),
             _ => None,
         }
+    }
+
+    /// The topmost overlay drawn last frame: the Form, a nested Popup, or the
+    /// card being browsed.
+    ///
+    /// The containment check in [`Modal::handle_click`](super::Modal::handle_click)
+    /// uses this to turn a click outside the active overlay into one `Esc`, which
+    /// is what unwinds exactly one nesting level.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
     }
 
     /// A click on a browsed field row: select it, or on a repeat open the Form.
@@ -892,6 +908,9 @@ impl Detail {
     /// Draws the active screen over `area`, refilling the clickable regions.
     pub(crate) fn render(&mut self, frame: &mut Frame, area: Rect, state: &TreeState) {
         self.hits.clear();
+        // Reset before drawing: a screen that bails out (no Node, no Form) must
+        // leave `rect` as `None`, so it cannot be dismissed by a stray click.
+        self.rect = None;
         match self.screen() {
             Screen::Browse => self.render_browse(frame, area, state),
             Screen::Form => self.render_form(frame, area, state),
@@ -899,12 +918,22 @@ impl Detail {
             Screen::CustomFieldName => self.render_custom_field_name(frame, area),
             Screen::GeneratePassword => {
                 if let DetailPopup::GeneratePassword(modal) = &self.popup {
-                    render_generate_password_overlay(frame, area, modal, &mut self.hits);
+                    self.rect = Some(render_generate_password_overlay(
+                        frame,
+                        area,
+                        modal,
+                        &mut self.hits,
+                    ));
                 }
             }
             Screen::SymbolChecklist => {
                 if let DetailPopup::SymbolChecklist(modal) = &self.popup {
-                    render_symbol_checklist_overlay(frame, area, modal, &mut self.hits);
+                    self.rect = Some(render_symbol_checklist_overlay(
+                        frame,
+                        area,
+                        modal,
+                        &mut self.hits,
+                    ));
                 }
             }
             Screen::ConfirmDeleteField => self.render_confirm_delete(frame, area, state),
@@ -918,6 +947,7 @@ impl Detail {
         };
 
         let overlay_area = make_overlay_area(area, node.extra_fields.len(), 3);
+        self.rect = Some(overlay_area);
 
         let block = Block::default()
             .title(format!(" {} ", node.name))
@@ -965,7 +995,14 @@ impl Detail {
         } else {
             texts::OVERLAY_EDIT_NODE
         };
-        render_edit_overlay(frame, area, form, &state.root, title, &mut self.hits);
+        self.rect = Some(render_edit_overlay(
+            frame,
+            area,
+            form,
+            &state.root,
+            title,
+            &mut self.hits,
+        ));
     }
 
     /// Draws the field-type picker.
@@ -979,6 +1016,7 @@ impl Detail {
         let items = picker_items();
 
         let overlay_area = centered_rect(area, area.width / 2, 8);
+        self.rect = Some(overlay_area);
 
         let block = Block::default()
             .title(texts::OVERLAY_SELECT_FIELD_TYPE)
@@ -1008,12 +1046,13 @@ impl Detail {
     }
 
     /// Draws the Custom field-name prompt.
-    fn render_custom_field_name(&self, frame: &mut Frame, area: Rect) {
+    fn render_custom_field_name(&mut self, frame: &mut Frame, area: Rect) {
         let DetailPopup::CustomFieldName { input } = &self.popup else {
             return;
         };
 
         let overlay_area = centered_rect(area, area.width / 2, 4);
+        self.rect = Some(overlay_area);
 
         let block = Block::default()
             .title(texts::OVERLAY_CUSTOM_FIELD_NAME)
@@ -1032,7 +1071,7 @@ impl Detail {
     }
 
     /// Draws the delete-field confirmation.
-    fn render_confirm_delete(&self, frame: &mut Frame, area: Rect, state: &TreeState) {
+    fn render_confirm_delete(&mut self, frame: &mut Frame, area: Rect, state: &TreeState) {
         let Some(form) = self.form.as_ref() else {
             return;
         };
@@ -1047,6 +1086,7 @@ impl Detail {
             .unwrap_or_default();
 
         let overlay_area = centered_rect(area, area.width / 2, 4);
+        self.rect = Some(overlay_area);
 
         let block = Block::default()
             .title(texts::OVERLAY_CONFIRM_DELETE)
@@ -1155,6 +1195,12 @@ impl Detail {
     #[cfg(test)]
     pub(crate) fn is_select_field_type(&self) -> bool {
         matches!(self.popup, DetailPopup::SelectFieldType { .. })
+    }
+
+    /// Whether the delete-field confirmation is up.
+    #[cfg(test)]
+    pub(crate) fn is_confirm_delete(&self) -> bool {
+        matches!(self.popup, DetailPopup::ConfirmDeleteField { .. })
     }
 
     /// Focuses entry `index` of the field-type picker.
@@ -1411,7 +1457,7 @@ fn render_edit_overlay(
     root: &Node,
     title: &str,
     hits: &mut HitMap<DetailHit>,
-) {
+) -> Rect {
     let node = form.node(root);
     let rows = form.rows(root);
     let current = form.selected_row.min(rows.len() - 1);
@@ -1480,6 +1526,8 @@ fn render_edit_overlay(
         let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
         hits.push(rect, MouseButton::Left, DetailHit::FormRow(i));
     }
+
+    overlay_area
 }
 
 /// Selects the help-bar hint for the Add/Edit form.
@@ -1515,7 +1563,7 @@ fn render_generate_password_overlay(
     area: Rect,
     modal: &GeneratorModal,
     hits: &mut HitMap<DetailHit>,
-) {
+) -> Rect {
     let has_error = modal.error.is_some();
     let content_height = 3 + u16::from(has_error);
     let overlay_height = (content_height + 2).min(area.height);
@@ -1577,6 +1625,8 @@ fn render_generate_password_overlay(
         let rect = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
         hits.push(rect, MouseButton::Left, DetailHit::GeneratorRow(row));
     }
+
+    overlay_area
 }
 
 /// Renders the per-symbol checklist as a grid of checkbox cells.
@@ -1585,7 +1635,7 @@ fn render_symbol_checklist_overlay(
     area: Rect,
     modal: &GeneratorModal,
     hits: &mut HitMap<DetailHit>,
-) {
+) -> Rect {
     let rows = u16::try_from(generator::SYMBOLS.len().div_ceil(SYMBOL_COLUMNS))
         .expect("symbol checklist rows fit in a terminal height");
     let overlay_height = (rows + 2).min(area.height);
@@ -1650,6 +1700,8 @@ fn render_symbol_checklist_overlay(
             hits.push(rect, MouseButton::Left, DetailHit::SymbolCell(index));
         }
     }
+
+    overlay_area
 }
 
 #[cfg(test)]

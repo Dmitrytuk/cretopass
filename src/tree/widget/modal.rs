@@ -37,10 +37,12 @@ pub(crate) use detail::{
     picker_items, render_extra_field_line,
 };
 
-use crossterm::event::{KeyEvent, MouseButton};
+use crossterm::event::{KeyCode, KeyEvent, MouseButton};
+use ratatui::layout::Rect;
 
 use super::TreeState;
 use crate::file_handling::ExportFormat;
+use crate::hitbox::{is_left, point_in};
 use crate::share::SharePassword;
 use crate::tree::node::Node;
 
@@ -163,8 +165,13 @@ impl Modal {
     /// renderer recorded and reports what the user asked for, exactly as
     /// [`Modal::handle_key`] does.
     ///
-    /// Help and Alert dismiss anywhere, so they need no recorded region; a
-    /// confirmation has no click target and reports `None`.
+    /// A left click **outside** the panel the renderer drew is the modal's `Esc`:
+    /// the existing key path runs, so the click and the key can never drift. That
+    /// closes a form, steps a wizard back, unwinds one nested popup, or declines a
+    /// confirmation — whatever `Esc` does on the active screen. Help and Alert
+    /// dismiss anywhere, so they report no panel; the File Browser-backed
+    /// ExportDestination and ShareDestination steps are a deliberate exception,
+    /// for the reason given on [`Modal::panel_rect`].
     pub(crate) fn handle_click(
         &mut self,
         button: MouseButton,
@@ -172,6 +179,12 @@ impl Modal {
         y: u16,
         state: &mut TreeState,
     ) -> Option<TreeAction> {
+        if is_left(button)
+            && let Some(rect) = self.panel_rect()
+            && !point_in(rect, x, y)
+        {
+            return self.handle_key(KeyEvent::from(KeyCode::Esc), state);
+        }
         match self {
             Self::Help(help) => help.handle_click(button, x, y, state),
             Self::Alert(alert) => alert.handle_click(button, x, y, state),
@@ -181,6 +194,28 @@ impl Modal {
             Self::Share(wizard) => wizard.handle_click(button, x, y, state),
             Self::ShareDestination(destination) => destination.handle_click(button, x, y, state),
             Self::SharePassphrase(prompt) => prompt.handle_click(button, x, y, state),
+        }
+    }
+
+    /// The panel the active modal drew last frame, when a click outside it is a
+    /// dismissal.
+    ///
+    /// `None` for the overlays that already dismiss on any click (Help, Alert) and
+    /// for the File Browser-backed destination steps. The destination steps are a
+    /// deliberate exception: their clickable list fills most of the screen, so a
+    /// click beside it is far more likely to be a near-miss on a row than a
+    /// request to abandon the whole export/share flow — they keep their own click
+    /// handling instead.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        match self {
+            Self::Detail(detail) => detail.panel_rect(),
+            Self::Export(wizard) => wizard.panel_rect(),
+            Self::Share(wizard) => wizard.panel_rect(),
+            Self::SharePassphrase(prompt) => prompt.panel_rect(),
+            Self::Help(_)
+            | Self::Alert(_)
+            | Self::ExportDestination(_)
+            | Self::ShareDestination(_) => None,
         }
     }
 }

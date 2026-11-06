@@ -42,6 +42,9 @@ pub(crate) struct ExportWizard {
     selected: usize,
     /// The clickable row regions recorded by the renderer.
     hits: HitMap<usize>,
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// An outside click closes the wizard, like `Esc`.
+    rect: Option<Rect>,
 }
 
 impl ExportWizard {
@@ -53,6 +56,7 @@ impl ExportWizard {
             include_children: false,
             selected: 0,
             hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -136,6 +140,12 @@ impl ExportWizard {
         }
     }
 
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// An outside click closes the wizard, like `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
+    }
+
     /// The format the current selection stands for.
     fn format(&self) -> ExportFormat {
         match self.selected {
@@ -173,6 +183,7 @@ impl ExportWizard {
     /// Draws the scope step.
     fn render_scope(&mut self, frame: &mut Frame, area: Rect) {
         let overlay_area = centered_rect(area, area.width / 2, 6);
+        self.rect = Some(overlay_area);
 
         let block = Block::default()
             .title(texts::OVERLAY_EXPORT_NODE)
@@ -202,6 +213,7 @@ impl ExportWizard {
     /// Draws the format step.
     fn render_format(&mut self, frame: &mut Frame, area: Rect) {
         let overlay_area = centered_rect(area, area.width / 2, 7);
+        self.rect = Some(overlay_area);
 
         let block = Block::default()
             .title(texts::EXPORT_SELECT_TITLE)
