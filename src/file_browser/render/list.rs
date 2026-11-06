@@ -66,7 +66,7 @@ pub(super) fn render_file_list(frame: &mut Frame, area: Rect, state: &mut FileBr
     // Record the clickable rows before the borrowing `visible` build below.
     if state.focus == FocusTarget::List {
         let count = indices.len().saturating_sub(scroll).min(list_height);
-        record_rows(&mut state.hits, area, 0, count, |offset| {
+        record_rows(&mut state.clicks, area, 0, count, |offset| {
             BrowserHit::Entry(indices[scroll + offset])
         });
     }

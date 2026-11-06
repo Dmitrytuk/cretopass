@@ -145,6 +145,13 @@ impl BrowserModal {
         file_browser::render_file_browser(frame, area, &mut self.state);
     }
 
+    /// The topmost panel the browser drew last frame, or `None` before its first
+    /// frame. The modal dispatcher turns a click outside it into the browser's
+    /// `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.state.panel_rect()
+    }
+
     pub fn status_parts(&self) -> (&'static str, ElementStyle, Cow<'_, str>) {
         let (mode, style, hint) = file_browser::status_parts(&self.state);
         (mode, style, Cow::Owned(hint))

@@ -24,7 +24,7 @@ const DEFAULT_HEIGHT: u16 = 18;
 /// The renderer also maintains the list viewport offsets so the cursor moves
 /// inside the scroll margin before the viewport follows it.
 pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowserState) {
-    state.hits.clear();
+    state.clicks.clear();
     let overlay_area = make_overlay(area);
 
     // Clear overlay area first, then draw block borders on top
@@ -63,8 +63,10 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
 
     // Transient prompts are centered popups stacked over the browser:
     // the active input / overwrite confirmation / delete confirmation first,
-    // the error on top.
-    if state.focus == FocusTarget::Input && state.mode == FileBrowserMode::CreateFile {
+    // the error on top. The panel follows the topmost overlay, so an outside
+    // click unwinds exactly one level, like `Esc`.
+    let topmost = if state.focus == FocusTarget::Input && state.mode == FileBrowserMode::CreateFile
+    {
         // `af` creates a file, `ad` creates a directory — match the title to it.
         let input_title = if state.creating_is_dir {
             texts::OVERLAY_NEW_DIR
@@ -78,7 +80,7 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
             texts::LABEL_NAME_INLINE,
             &state.creating_name,
             state.creating_cursor,
-        );
+        )
     } else if state.focus == FocusTarget::Input && state.mode.export_format().is_some() {
         render_input_popup(
             frame,
@@ -87,7 +89,7 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
             texts::LABEL_NAME_INLINE,
             &state.creating_name,
             state.creating_cursor,
-        );
+        )
     } else if state.focus == FocusTarget::Input && state.mode.is_share_destination() {
         render_input_popup(
             frame,
@@ -96,7 +98,7 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
             texts::LABEL_FOLDER_INLINE,
             &state.creating_name,
             state.creating_cursor,
-        );
+        )
     } else if state.focus == FocusTarget::Rename {
         render_input_popup(
             frame,
@@ -105,20 +107,23 @@ pub fn render_file_browser(frame: &mut Frame, area: Rect, state: &mut FileBrowse
             texts::LABEL_RENAME,
             &state.rename_name,
             state.rename_cursor,
-        );
+        )
     } else if state.confirm_overwrite.is_some() {
-        render_overwrite_popup(frame, overlay_area, state);
+        render_overwrite_popup(frame, overlay_area, state).unwrap_or(overlay_area)
     } else if state.confirm_delete.is_some() {
-        render_delete_popup(frame, overlay_area, state);
+        render_delete_popup(frame, overlay_area, state).unwrap_or(overlay_area)
     } else if state.focus == FocusTarget::Locations {
         // Centred on the full frame so the disk list has room. `centered_popup_sized`
         // keeps the popup off the bottom row, which is where the parent window's
         // status bar lives, so the hint stays visible.
-        render_locations_popup(frame, area, state);
-    }
+        render_locations_popup(frame, area, state)
+    } else {
+        overlay_area
+    };
+    state.clicks.set_panel(topmost);
 
-    if state.error.is_some() {
-        render_error_popup(frame, overlay_area, state);
+    if let Some(error_area) = render_error_popup(frame, overlay_area, state) {
+        state.clicks.set_panel(error_area);
     }
 }
 fn make_overlay(area: Rect) -> Rect {
@@ -174,11 +179,83 @@ fn format_label(format: ExportFormat) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use super::super::chrome::{centered_popup, centered_popup_sized};
     use super::super::fixtures::{new_state, populate_tmp, render_to_text, share_state};
+    use super::make_overlay;
     use crate::file_browser::FileBrowserMode;
+    use crate::file_browser::Location;
     use crate::file_browser::state::FocusTarget;
     use crate::file_handling;
     use crate::file_handling::ExportFormat;
+    use ratatui::layout::Rect;
+    use std::path::PathBuf;
+
+    #[test]
+    fn the_topmost_popup_becomes_the_click_panel() {
+        let area = Rect::new(0, 0, 80, 24);
+        let overlay = make_overlay(area);
+        let mut state = new_state(FileBrowserMode::CreateFile);
+        populate_tmp(&mut state);
+
+        let _ = render_to_text(&mut state);
+        assert_eq!(
+            state.clicks.panel(),
+            Some(overlay),
+            "with no popup, the browser overlay is the panel"
+        );
+
+        state.focus = FocusTarget::Input;
+        let _ = render_to_text(&mut state);
+        assert_eq!(
+            state.clicks.panel(),
+            Some(centered_popup(overlay, 4)),
+            "the focused name input becomes the topmost panel"
+        );
+
+        state.locations = (0..20)
+            .map(|i| Location {
+                label: format!("loc{i}"),
+                path: PathBuf::from(format!("/mnt/loc{i}")),
+                detail: String::new(),
+                is_home: false,
+            })
+            .collect();
+        state.focus = FocusTarget::Locations;
+        let _ = render_to_text(&mut state);
+        assert_eq!(
+            state.clicks.panel(),
+            Some(centered_popup_sized(area, 22, 3, 4, 40)),
+            "the Locations picker outranks the browser overlay"
+        );
+
+        state.locations.clear();
+        state.focus = FocusTarget::List;
+        state.confirm_delete = Some("/tmp/gone.age".to_string());
+        let _ = render_to_text(&mut state);
+        assert_eq!(
+            state.clicks.panel(),
+            Some(centered_popup(overlay, 4)),
+            "the delete confirmation becomes the panel"
+        );
+
+        state.confirm_delete = None;
+        state.confirm_overwrite = Some("/tmp/existing.json".to_string());
+        let _ = render_to_text(&mut state);
+        assert_eq!(
+            state.clicks.panel(),
+            Some(centered_popup(overlay, 4)),
+            "the overwrite confirmation becomes the panel"
+        );
+
+        state.confirm_overwrite = None;
+        state.error = Some("boom".to_string());
+        let _ = render_to_text(&mut state);
+        assert_eq!(
+            state.clicks.panel(),
+            Some(centered_popup(overlay, 4)),
+            "the error popup is the topmost panel"
+        );
+    }
 
     #[test]
     fn test_render_open_file_shows_path_bar() {

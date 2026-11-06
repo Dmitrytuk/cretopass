@@ -209,9 +209,11 @@ pub fn handle_paste(text: &str, state: &mut FileBrowserState) {
 ///
 /// Mirrors [`handle_key`]'s routing: a transient popup owns the screen and takes
 /// no clicks, and only the file list or the Locations overlay has clickable rows.
-/// A click on a directory row opens it (like `Enter`); a click on a file row
-/// selects it, and a repeat click on the already-selected file activates it — so
-/// a stray click never opens the wrong file.
+/// A click outside the panel the renderer recorded is not handled here: the
+/// owning modal dispatcher turns it into the browser's `Esc`. A click on a
+/// directory row opens it (like `Enter`); a click on a file row selects it, and a
+/// repeat click on the already-selected file activates it — so a stray click
+/// never opens the wrong file.
 pub fn handle_click(
     button: MouseButton,
     x: u16,
@@ -228,7 +230,7 @@ pub fn handle_click(
     {
         return None;
     }
-    match state.hits.hit(x, y, button) {
+    match state.clicks.target_at(button, x, y) {
         Some(BrowserHit::Entry(index)) => click_entry(index, state),
         Some(BrowserHit::Location(index)) => click_location(index, state),
         None => None,
@@ -284,7 +286,7 @@ mod tests {
     };
     use crate::file_browser::{handle_click, handle_key, handle_paste};
     use crate::file_handling;
-    use crate::hitbox::test_support::point_for;
+    use crate::hitbox::test_support::surface_point_for;
     use crate::theming::texts;
 
     // ── `a` prefix in CreateFile mode ──
@@ -726,7 +728,7 @@ mod tests {
 
     // ── Click hit-testing ──
 
-    /// Draws the browser so its renderer fills `state.hits`.
+    /// Draws the browser so its renderer fills `state.clicks`.
     fn draw(state: &mut FileBrowserState) {
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
@@ -747,7 +749,7 @@ mod tests {
 
         draw(&mut state);
         let index = state.entries.iter().position(|e| e.name == "sub").unwrap();
-        let (x, y) = point_for(&state.hits, BrowserHit::Entry(index), MouseButton::Left);
+        let (x, y) = surface_point_for(&state.clicks, BrowserHit::Entry(index), MouseButton::Left);
 
         handle_click(MouseButton::Left, x, y, &mut state);
 
@@ -782,7 +784,7 @@ mod tests {
             .unwrap();
         // Start on a different row, so the first click is a real selection.
         state.selected = other;
-        let (x, y) = point_for(&state.hits, BrowserHit::Entry(index), MouseButton::Left);
+        let (x, y) = surface_point_for(&state.clicks, BrowserHit::Entry(index), MouseButton::Left);
 
         assert_eq!(
             handle_click(MouseButton::Left, x, y, &mut state),

@@ -128,6 +128,13 @@ impl ExportDestination {
         file_browser::render_file_browser(frame, area, &mut self.browser);
     }
 
+    /// The topmost panel the browser drew last frame, or `None` before its first
+    /// frame. [`Modal::handle_click`](super::Modal::handle_click) turns a click
+    /// outside it into the browser's `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.browser.panel_rect()
+    }
+
     /// Badge and hint for the tree status bar while the browser is open.
     pub(crate) fn status_parts(&self) -> (&'static str, ElementStyle, String) {
         file_browser::status_parts(&self.browser)

@@ -1,7 +1,10 @@
 //! Mouse wheel and click hit-testing tests.
 
 use super::*;
+use crate::file_browser::FileBrowserSession;
+use crate::file_handling::ExportFormat;
 use crate::hitbox::test_support::{outside_point, point_for};
+use crate::tree::widget::{ExportDestination, ShareDestination};
 
 // ── Mouse wheel routing ──
 /// A wheel event at the top-left; only `kind` matters to the router.
@@ -346,6 +349,89 @@ fn a_click_inside_the_export_wizard_panel_off_a_row_is_a_noop() {
     assert!(
         matches!(state.modal, Some(Modal::Export(_))),
         "a click inside the panel must not close the wizard"
+    );
+}
+
+/// The export destination browser, drawn over the tree.
+fn export_destination_state() -> TreeState {
+    let mut state = state_with_a_child();
+    state.modal = Some(Modal::ExportDestination(Box::new(ExportDestination::new(
+        Node::new("Work"),
+        false,
+        ExportFormat::Json,
+        None,
+        &FileBrowserSession::default(),
+    ))));
+    state
+}
+
+/// The share destination browser, drawn over the tree.
+fn share_destination_state() -> TreeState {
+    let mut state = state_with_a_child();
+    state.modal = Some(Modal::ShareDestination(Box::new(ShareDestination::new(
+        Node::new("Work"),
+        false,
+        None,
+        &FileBrowserSession::default(),
+    ))));
+    state
+}
+
+#[test]
+fn a_click_outside_the_export_destination_browser_closes_it() {
+    let mut state = export_destination_state();
+    draw(&mut state);
+
+    let (x, y) = outside_point(panel(&state));
+    click(&mut state, MouseButton::Left, x, y);
+
+    assert!(
+        state.modal.is_none(),
+        "an outside click is the export destination's Esc"
+    );
+}
+
+#[test]
+fn a_click_inside_the_export_destination_panel_off_a_row_is_a_noop() {
+    let mut state = export_destination_state();
+    draw(&mut state);
+
+    // The panel's top-left cell is its border: inside, but no list row.
+    let rect = panel(&state);
+    click(&mut state, MouseButton::Left, rect.x, rect.y);
+
+    assert!(
+        matches!(state.modal, Some(Modal::ExportDestination(_))),
+        "a click inside the panel must not close the browser"
+    );
+}
+
+#[test]
+fn a_click_outside_the_share_destination_browser_closes_it() {
+    let mut state = share_destination_state();
+    draw(&mut state);
+
+    let (x, y) = outside_point(panel(&state));
+    click(&mut state, MouseButton::Left, x, y);
+
+    assert!(
+        state.modal.is_none(),
+        "an outside click is the share destination's Esc"
+    );
+}
+
+#[test]
+fn a_click_inside_the_share_destination_panel_off_a_row_is_a_noop() {
+    let mut state = share_destination_state();
+    draw(&mut state);
+
+    // The panel's top-left cell is its border: inside, but no list row.
+    let rect = panel(&state);
+    click(&mut state, MouseButton::Left, rect.x, rect.y);
+
+    assert!(
+        matches!(state.modal, Some(Modal::ShareDestination(_))),
+        "a click inside the panel must not close the browser"
     );
 }
 

@@ -2,11 +2,13 @@
 
 use std::path::{Path, PathBuf};
 
+use ratatui::layout::Rect;
+
 use crate::file_handling::{
     DirLoader, DiskInfo, DiskLoader, ExportFormat, FileEntry, ListingOutcome, output_path,
     suggest_export_name, suggest_share_name,
 };
-use crate::hitbox::HitMap;
+use crate::hitbox::ClickSurface;
 use crate::theming::texts;
 
 use super::locations::{dirs_home, disk_locations, home_location, preselect_location};
@@ -70,8 +72,10 @@ pub struct FileBrowserState {
     /// A path the user just deleted, awaiting the refreshed listing so the
     /// browser can tell whether the name actually disappeared.
     deleted_path: Option<PathBuf>,
-    /// The clickable rows the renderer recorded for the last frame.
-    pub(crate) hits: HitMap<BrowserHit>,
+    /// The clickable rows and the topmost panel the renderer drew for the last
+    /// frame, so a click can select a row and a click outside the panel can run
+    /// the browser's `Esc`.
+    pub(crate) clicks: ClickSurface<BrowserHit>,
 }
 
 impl FileBrowserState {
@@ -166,7 +170,7 @@ impl FileBrowserState {
             previous: None,
             select_on_load: None,
             deleted_path: None,
-            hits: HitMap::default(),
+            clicks: ClickSurface::default(),
         };
         state.loader.request(&dir, state.show_hidden);
         state
@@ -239,6 +243,15 @@ impl FileBrowserState {
             last_dir: Some(self.current_dir.clone()),
             show_hidden: self.show_hidden,
         }
+    }
+
+    /// The topmost panel the renderer drew last frame, or `None` before the
+    /// first frame.
+    ///
+    /// The owning modal turns a left click outside this rect into the browser's
+    /// `Esc`, which closes the browser or unwinds one of its popups.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.clicks.panel()
     }
 
     /// Number of entries after applying the current search query.

@@ -167,11 +167,10 @@ impl Modal {
     ///
     /// A left click **outside** the panel the renderer drew is the modal's `Esc`:
     /// the existing key path runs, so the click and the key can never drift. That
-    /// closes a form, steps a wizard back, unwinds one nested popup, or declines a
-    /// confirmation — whatever `Esc` does on the active screen. Help and Alert
-    /// dismiss anywhere, so they report no panel; the File Browser-backed
-    /// ExportDestination and ShareDestination steps are a deliberate exception,
-    /// for the reason given on [`Modal::panel_rect`].
+    /// closes a form, steps a wizard back, unwinds one nested popup, declines a
+    /// confirmation, or abandons the File Browser-backed export/share
+    /// destination — whatever `Esc` does on the active screen. Help and Alert
+    /// dismiss anywhere, so they report no panel.
     pub(crate) fn handle_click(
         &mut self,
         button: MouseButton,
@@ -197,22 +196,19 @@ impl Modal {
     /// The panel the active modal drew last frame, when a click outside it is a
     /// dismissal.
     ///
-    /// `None` for the overlays that already dismiss on any click (Help, Alert) and
-    /// for the File Browser-backed destination steps. The destination steps are a
-    /// deliberate exception: their clickable list fills most of the screen, so a
-    /// click beside it is far more likely to be a near-miss on a row than a
-    /// request to abandon the whole export/share flow — they keep their own click
-    /// handling instead.
+    /// The File Browser-backed destination steps report the browser's topmost
+    /// panel, so an outside click abandons the flow exactly as `Esc` does.
+    /// `None` is reserved for the overlays that already dismiss on any click
+    /// (Help, Alert).
     pub(crate) fn panel_rect(&self) -> Option<Rect> {
         match self {
             Self::Detail(detail) => detail.panel_rect(),
             Self::Export(wizard) => wizard.panel_rect(),
             Self::Share(wizard) => wizard.panel_rect(),
             Self::SharePassphrase(prompt) => prompt.panel_rect(),
-            Self::Help(_)
-            | Self::Alert(_)
-            | Self::ExportDestination(_)
-            | Self::ShareDestination(_) => None,
+            Self::ExportDestination(destination) => destination.panel_rect(),
+            Self::ShareDestination(destination) => destination.panel_rect(),
+            Self::Help(_) | Self::Alert(_) => None,
         }
     }
 }
