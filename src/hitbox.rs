@@ -9,6 +9,10 @@
 //!
 //! The map is generic over the screen's own target, so this module depends only
 //! on `ratatui` and `crossterm` — a strict leaf like `generator` and `clipboard`.
+//!
+//! A modal groups its map with the panel it drew in a [`ClickSurface`], and
+//! [`RowClick`] resolves the click rule every picker shares: the first click
+//! moves the selection, and a repeat click activates.
 
 use crossterm::event::MouseButton;
 use ratatui::layout::Rect;
@@ -23,8 +27,9 @@ pub(crate) fn is_left(button: MouseButton) -> bool {
 
 /// Whether the cell `(x, y)` falls inside `rect`.
 ///
-/// `ratatui` 0.28 has no `Rect::contains`, so this is the one containment
-/// definition the app hit-tests with: [`HitBox::contains`] delegates to it, and
+/// `ratatui`'s `Rect::contains` takes a `Position`; this keeps the app's
+/// `(u16, u16)` call shape and spells out the saturating edge. It is the one
+/// containment definition the app hit-tests with: [`HitMap::hit`] uses it, and
 /// a modal uses it to tell a click inside its panel from one outside it. Width
 /// and height are added with saturating arithmetic, so an overflowing rect can
 /// never wrap and report a cell outside it.
@@ -41,13 +46,6 @@ struct HitBox<T> {
     rect: Rect,
     button: MouseButton,
     target: T,
-}
-
-impl<T> HitBox<T> {
-    /// Whether `(x, y)` falls inside this box.
-    fn contains(&self, x: u16, y: u16) -> bool {
-        point_in(self.rect, x, y)
-    }
 }
 
 /// The clickable regions of one frame, in the order they were recorded.
@@ -88,9 +86,161 @@ impl<T: Copy> HitMap<T> {
         self.boxes
             .iter()
             .rev()
-            .find(|b| b.button == button && b.contains(x, y))
+            .find(|b| b.button == button && point_in(b.rect, x, y))
             .map(|b| b.target)
     }
+}
+
+/// The clickable rows of one panel together with the panel's own rectangle.
+///
+/// A modal keeps one of these: each frame it [`clear`](ClickSurface::clear)s the
+/// surface, [`set_panel`](ClickSurface::set_panel)s the rect it drew, and
+/// [`record`](ClickSurface::record)s one row per clickable line. A click is then
+/// either a [`target_at`](ClickSurface::target_at) row or, via [`clicked_outside`],
+/// a miss the dispatcher turns into the modal's `Esc`. Bundling the panel with
+/// the rows is what lets every modal share the dismissal rule instead of
+/// re-deriving `is_left && panel && !point_in`.
+#[derive(Debug)]
+pub(crate) struct ClickSurface<T> {
+    panel: Option<Rect>,
+    hits: HitMap<T>,
+}
+
+impl<T> Default for ClickSurface<T> {
+    fn default() -> Self {
+        Self {
+            panel: None,
+            hits: HitMap::default(),
+        }
+    }
+}
+
+impl<T> ClickSurface<T> {
+    /// Forgets every region **and the panel**, ready to record the next frame.
+    ///
+    /// Dropping the panel matters: a renderer that forgets to [`set_panel`] this
+    /// frame leaves its modal undismissable, rather than dismissable against a
+    /// stale rect.
+    ///
+    /// [`set_panel`]: ClickSurface::set_panel
+    pub(crate) fn clear(&mut self) {
+        self.panel = None;
+        self.hits.clear();
+    }
+
+    /// Remembers the panel rectangle the renderer drew this frame.
+    pub(crate) fn set_panel(&mut self, rect: Rect) {
+        self.panel = Some(rect);
+    }
+
+    /// Records a left click anywhere inside `rect` as `target`.
+    pub(crate) fn record(&mut self, rect: Rect, target: T) {
+        self.record_with(rect, MouseButton::Left, target);
+    }
+
+    /// Records a click with an explicit `button` inside `rect` as `target`.
+    ///
+    /// The common case is a left-clickable row ([`record`](ClickSurface::record));
+    /// this is for the rare surface that answers a second button too, like the
+    /// Detail modal's browsed field rows, where the right button copies a value.
+    pub(crate) fn record_with(&mut self, rect: Rect, button: MouseButton, target: T) {
+        self.hits.push(rect, button, target);
+    }
+
+    /// The panel rectangle once it has been drawn, or `None` before the first
+    /// frame — so a modal that was never rendered survives a stray click.
+    pub(crate) fn panel(&self) -> Option<Rect> {
+        self.panel
+    }
+}
+
+impl<T: Copy> ClickSurface<T> {
+    /// The target of a click at `(x, y)`, if it hit a recorded row.
+    pub(crate) fn target_at(&self, button: MouseButton, x: u16, y: u16) -> Option<T> {
+        self.hits.hit(x, y, button)
+    }
+}
+
+/// A hit collection [`record_rows`] can fill: both a screen's [`HitMap`] and a
+/// modal's [`ClickSurface`] answer a left click on a drawn row.
+pub(crate) trait RowSink<T> {
+    /// Records a left click on the one-line `rect` as `target`.
+    fn record_row(&mut self, rect: Rect, target: T);
+}
+
+impl<T> RowSink<T> for HitMap<T> {
+    fn record_row(&mut self, rect: Rect, target: T) {
+        self.push(rect, MouseButton::Left, target);
+    }
+}
+
+impl<T> RowSink<T> for ClickSurface<T> {
+    fn record_row(&mut self, rect: Rect, target: T) {
+        self.record(rect, target);
+    }
+}
+
+/// Records one clickable one-line row per drawn line.
+///
+/// `inner` is the clickable area, `first_line` the row offset of the first item
+/// within it, and `count` how many rows were actually drawn. Row `i` is recorded
+/// at `inner.y + first_line + i` as `target(i)` for a left click, so the
+/// off-by-one reasoning between what a renderer drew and what a click can reach
+/// lives once. A surface that also answers another button, or maps a scrolled
+/// viewport onto its rows (the Tree screen and the Detail modal's browsed field
+/// rows), keeps its own loop.
+pub(crate) fn record_rows<T>(
+    sink: &mut impl RowSink<T>,
+    inner: Rect,
+    first_line: u16,
+    count: usize,
+    mut target: impl FnMut(usize) -> T,
+) {
+    for i in 0..count {
+        let rect = Rect::new(inner.x, inner.y + first_line + i as u16, inner.width, 1);
+        sink.record_row(rect, target(i));
+    }
+}
+
+/// What a click on a selectable row resolves to.
+///
+/// The soft policy of the mouse feature (ADR 0026): the first click moves the
+/// selection to the clicked row, and only a click on the already-selected row
+/// activates it. Each screen keeps its own activation branch; this is the shared
+/// selection rule, so every picker reads the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RowClick {
+    /// The click moved the selection to a different row; it does not activate.
+    Moved,
+    /// The click landed on the already-selected row; activate it.
+    Activated,
+}
+
+impl RowClick {
+    /// Resolves a click at `clicked` against the row currently `selected`.
+    pub(crate) fn resolve(selected: usize, clicked: usize) -> Self {
+        if selected == clicked {
+            Self::Activated
+        } else {
+            Self::Moved
+        }
+    }
+
+    /// Whether the click should activate the row.
+    pub(crate) fn activated(self) -> bool {
+        matches!(self, Self::Activated)
+    }
+}
+
+/// Whether `button` at `(x, y)` is a click outside `panel`, once it has been
+/// drawn.
+///
+/// This is the modal's "outside click = Esc" rule, defined once. It is a free
+/// function rather than only a [`ClickSurface`] method because a screen's modal
+/// dispatcher is a sum type: it can hand over only the active variant's *panel*
+/// (through `panel_rect`), not that variant's whole surface.
+pub(crate) fn clicked_outside(panel: Option<Rect>, button: MouseButton, x: u16, y: u16) -> bool {
+    is_left(button) && panel.is_some_and(|rect| !point_in(rect, x, y))
 }
 
 #[cfg(test)]
@@ -140,6 +290,82 @@ mod tests {
     }
 
     #[test]
+    fn click_surface_resolves_rows_and_reports_outside_clicks() {
+        let mut surface: ClickSurface<Target> = ClickSurface::default();
+        assert_eq!(surface.panel(), None);
+        assert!(
+            !clicked_outside(surface.panel(), MouseButton::Left, 0, 0),
+            "an unrendered panel is never 'outside'"
+        );
+
+        surface.set_panel(Rect::new(2, 2, 6, 3));
+        surface.record(Rect::new(2, 3, 6, 1), Target::A);
+
+        assert_eq!(surface.panel(), Some(Rect::new(2, 2, 6, 3)));
+        assert_eq!(surface.target_at(MouseButton::Left, 3, 3), Some(Target::A));
+        assert_eq!(surface.target_at(MouseButton::Left, 3, 2), None);
+        assert_eq!(
+            surface.target_at(MouseButton::Right, 3, 3),
+            None,
+            "record is left-only; the modals' dropped guards depend on it"
+        );
+        assert!(!clicked_outside(surface.panel(), MouseButton::Left, 3, 3));
+        assert!(clicked_outside(surface.panel(), MouseButton::Left, 0, 0));
+        assert!(
+            !clicked_outside(surface.panel(), MouseButton::Right, 0, 0),
+            "only the left button dismisses"
+        );
+    }
+
+    #[test]
+    fn clearing_a_click_surface_forgets_panel_and_rows() {
+        let mut surface: ClickSurface<Target> = ClickSurface::default();
+        surface.set_panel(Rect::new(2, 2, 6, 3));
+        surface.record(Rect::new(2, 3, 6, 1), Target::A);
+
+        surface.clear();
+
+        assert_eq!(surface.panel(), None);
+        assert_eq!(surface.target_at(MouseButton::Left, 3, 3), None);
+    }
+
+    #[test]
+    fn record_rows_places_each_row_at_its_offset() {
+        // `first_line` is relative to `inner`, so row 0 lands at `inner.y + 3`.
+        let inner = Rect::new(4, 2, 10, 5);
+        let mut surface: ClickSurface<usize> = ClickSurface::default();
+        record_rows(&mut surface, inner, 3, 2, |i| i * 10);
+
+        assert_eq!(surface.target_at(MouseButton::Left, 4, 5), Some(0));
+        assert_eq!(surface.target_at(MouseButton::Left, 4, 6), Some(10));
+        assert_eq!(surface.target_at(MouseButton::Left, 4, 4), None);
+        assert_eq!(surface.target_at(MouseButton::Left, 4, 7), None);
+
+        // A zero count records nothing: the caller's "did the row fit?" guard.
+        let mut empty: ClickSurface<usize> = ClickSurface::default();
+        record_rows(&mut empty, inner, 3, 0, |i| i);
+        assert_eq!(empty.target_at(MouseButton::Left, 4, 5), None);
+    }
+
+    #[test]
+    fn record_rows_fills_a_plain_hit_map_too() {
+        let mut hits: HitMap<usize> = HitMap::default();
+        record_rows(&mut hits, Rect::new(0, 0, 3, 4), 0, 2, |i| i);
+
+        assert_eq!(hits.hit(0, 0, MouseButton::Left), Some(0));
+        assert_eq!(hits.hit(0, 1, MouseButton::Left), Some(1));
+        assert_eq!(hits.hit(0, 2, MouseButton::Left), None);
+    }
+
+    #[test]
+    fn row_click_activates_only_the_already_selected_row() {
+        assert_eq!(RowClick::resolve(2, 2), RowClick::Activated);
+        assert_eq!(RowClick::resolve(2, 3), RowClick::Moved);
+        assert!(RowClick::resolve(0, 0).activated());
+        assert!(!RowClick::resolve(0, 1).activated());
+    }
+
+    #[test]
     fn is_left_only_accepts_the_primary_button() {
         assert!(is_left(MouseButton::Left));
         assert!(!is_left(MouseButton::Right));
@@ -171,5 +397,60 @@ mod tests {
             !point_in(rect, u16::MAX, 0),
             "the saturated right edge stays exclusive"
         );
+    }
+}
+
+/// Shared helpers for the click tests on the `80x24` [`TestBackend`] screen.
+///
+/// Screen-specific routing (`click`, `panel`) stays with each screen; these are
+/// the pure geometry searches every click test repeats.
+///
+/// [`TestBackend`]: ratatui::backend::TestBackend
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    /// The first cell whose hit map answers `target` for `button`.
+    pub(crate) fn point_for<T: Copy + PartialEq + std::fmt::Debug>(
+        hits: &HitMap<T>,
+        target: T,
+        button: MouseButton,
+    ) -> (u16, u16) {
+        for y in 0..24u16 {
+            for x in 0..80u16 {
+                if hits.hit(x, y, button) == Some(target) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("no hit region for {target:?}");
+    }
+
+    /// The first cell whose click surface answers `target` for `button`.
+    pub(crate) fn surface_point_for<T: Copy + PartialEq + std::fmt::Debug>(
+        surface: &ClickSurface<T>,
+        target: T,
+        button: MouseButton,
+    ) -> (u16, u16) {
+        for y in 0..24u16 {
+            for x in 0..80u16 {
+                if surface.target_at(button, x, y) == Some(target) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("no hit region for {target:?}");
+    }
+
+    /// A cell guaranteed to fall outside `rect` on the `80x24` test screen.
+    pub(crate) fn outside_point(rect: Rect) -> (u16, u16) {
+        for y in 0..24u16 {
+            for x in 0..80u16 {
+                if !point_in(rect, x, y) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("every cell is inside {rect:?}");
     }
 }

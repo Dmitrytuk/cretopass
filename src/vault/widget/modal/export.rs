@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
 use crate::file_handling::ExportFormat;
-use crate::hitbox::{HitMap, is_left};
+use crate::hitbox::{ClickSurface, RowClick, record_rows};
 use crate::theming::{Action, ElementStyle, Icon, texts};
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
 
@@ -25,11 +25,9 @@ const FORMATS: [ExportFormat; 3] = [ExportFormat::Json, ExportFormat::Xml, Expor
 pub struct ExportWizard {
     /// Focused row of the [`texts::EXPORT_TYPE_ITEMS`] list.
     index: usize,
-    /// The clickable format rows recorded by the renderer.
-    hits: HitMap<usize>,
-    /// The panel the renderer drew last frame, or `None` before the first frame.
-    /// A left click outside it dismisses the wizard, like `Esc`.
-    rect: Option<Rect>,
+    /// The clickable format rows and the panel the renderer drew, so a left click
+    /// selects a format and a click outside the panel dismisses the wizard.
+    clicks: ClickSurface<usize>,
 }
 
 impl ExportWizard {
@@ -37,8 +35,7 @@ impl ExportWizard {
     pub fn new() -> Self {
         Self {
             index: 0,
-            hits: HitMap::default(),
-            rect: None,
+            clicks: ClickSurface::default(),
         }
     }
 
@@ -69,17 +66,14 @@ impl ExportWizard {
 
     /// A left click on a format row selects it, or on a repeat chooses it.
     pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) -> Option<HomeAction> {
-        if !is_left(button) {
-            return None;
-        }
-        let row = self.hits.hit(x, y, button)?;
+        let row = self.clicks.target_at(button, x, y)?;
         let count = FORMATS.len();
         if row >= count {
             return None;
         }
-        let was_selected = self.index == row;
+        let click = RowClick::resolve(self.index, row);
         self.index = row;
-        if was_selected {
+        if click.activated() {
             Some(HomeAction::BeginExportDestination {
                 format: FORMATS[row],
             })
@@ -91,12 +85,13 @@ impl ExportWizard {
     /// The panel the renderer drew last frame, or `None` before the first frame.
     /// A left click outside it dismisses the wizard, like `Esc`.
     pub(crate) fn panel_rect(&self) -> Option<Rect> {
-        self.rect
+        self.clicks.panel()
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        self.hits.clear();
-        self.rect = Some(render_format_list(frame, area, self.index, &mut self.hits));
+        self.clicks.clear();
+        let panel = render_format_list(frame, area, self.index, &mut self.clicks);
+        self.clicks.set_panel(panel);
     }
 
     pub fn status_parts(&self) -> (&'static str, ElementStyle, Cow<'_, str>) {
@@ -112,7 +107,7 @@ fn render_format_list(
     frame: &mut Frame,
     area: Rect,
     selected: usize,
-    hits: &mut HitMap<usize>,
+    clicks: &mut ClickSurface<usize>,
 ) -> Rect {
     let overlay_area = make_overlay(area, 9);
     let block = Block::default()
@@ -147,10 +142,7 @@ fn render_format_list(
     let visible = texts::EXPORT_TYPE_ITEMS
         .len()
         .min(inner.height.saturating_sub(1) as usize);
-    for i in 0..visible {
-        let rect = Rect::new(inner.x, inner.y + 1 + i as u16, inner.width, 1);
-        hits.push(rect, MouseButton::Left, i);
-    }
+    record_rows(clicks, inner, 1, visible, |i| i);
 
     paint_overlay(
         frame,

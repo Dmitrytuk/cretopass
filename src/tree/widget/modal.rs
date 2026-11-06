@@ -42,7 +42,7 @@ use ratatui::layout::Rect;
 
 use super::TreeState;
 use crate::file_handling::ExportFormat;
-use crate::hitbox::{is_left, point_in};
+use crate::hitbox::clicked_outside;
 use crate::share::SharePassword;
 use crate::tree::node::Node;
 
@@ -179,10 +179,7 @@ impl Modal {
         y: u16,
         state: &mut TreeState,
     ) -> Option<TreeAction> {
-        if is_left(button)
-            && let Some(rect) = self.panel_rect()
-            && !point_in(rect, x, y)
-        {
+        if clicked_outside(self.panel_rect(), button, x, y) {
             return self.handle_key(KeyEvent::from(KeyCode::Esc), state);
         }
         match self {

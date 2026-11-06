@@ -6,12 +6,12 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton};
 
-use crate::cursor::PastePolicy;
+use crate::cursor::{PastePolicy, push_char_capped, push_str_capped};
 use crate::file_browser::state::{
     AddPrefix, BrowserHit, FileBrowserAction, FileBrowserState, FocusTarget,
 };
 use crate::file_handling;
-use crate::hitbox::is_left;
+use crate::hitbox::{RowClick, is_left};
 use crate::theming::texts;
 
 use super::input::{handle_input_key, handle_input_paste};
@@ -119,11 +119,13 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
                 state.search_active = false;
                 return None;
             }
-            KeyCode::Char(c) => {
-                state.search_query.push(c);
+            KeyCode::Char(c) if !c.is_control() => {
+                push_char_capped(&mut state.search_query, c);
                 state.clamp_selection();
                 return None;
             }
+            // A control character is consumed and dropped, never routed on.
+            KeyCode::Char(_) => return None,
             KeyCode::Backspace => {
                 state.search_query.pop();
                 state.clamp_selection();
@@ -196,7 +198,7 @@ pub fn handle_paste(text: &str, state: &mut FileBrowserState) {
         FocusTarget::Input => handle_input_paste(state, &cleaned),
         FocusTarget::Rename => handle_rename_paste(state, &cleaned),
         FocusTarget::List if state.search_active => {
-            state.search_query.push_str(&cleaned);
+            push_str_capped(&mut state.search_query, &cleaned);
             state.clamp_selection();
         }
         FocusTarget::List | FocusTarget::Locations => {}
@@ -238,13 +240,13 @@ fn click_entry(index: usize, state: &mut FileBrowserState) -> Option<FileBrowser
     if index >= state.entries.len() {
         return None;
     }
-    let was_selected = state.selected == index;
+    let click = RowClick::resolve(state.selected, index);
     state.selected = index;
     // The search box takes `Enter` to end the search; a click must act, so it
     // leaves the search box first.
     state.search_active = false;
     let is_dir = state.entries[index].is_dir;
-    if is_dir || was_selected {
+    if is_dir || click.activated() {
         handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), state)
     } else {
         None
@@ -282,6 +284,7 @@ mod tests {
     };
     use crate::file_browser::{handle_click, handle_key, handle_paste};
     use crate::file_handling;
+    use crate::hitbox::test_support::point_for;
     use crate::theming::texts;
 
     // ── `a` prefix in CreateFile mode ──
@@ -329,6 +332,31 @@ mod tests {
         assert_eq!(state.entries.len(), before + 1);
 
         let _ = std::fs::remove_dir(&created);
+    }
+
+    #[test]
+    fn a_control_char_is_rejected_by_the_name_input() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        handle_key(key(KeyCode::Char('a')), &mut state);
+        handle_key(key(KeyCode::Char('d')), &mut state); // `ad` focuses the input
+        assert_eq!(state.focus, FocusTarget::Input);
+
+        handle_key(key(KeyCode::Char('x')), &mut state);
+        handle_key(key(KeyCode::Char('\u{9b}')), &mut state); // C1 CSI
+        handle_key(key(KeyCode::Char('\u{1b}')), &mut state); // ESC
+
+        assert_eq!(state.creating_name, "x", "control chars are dropped");
+    }
+
+    #[test]
+    fn a_control_char_is_rejected_by_the_search_box() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.search_active = true;
+
+        handle_key(key(KeyCode::Char('a')), &mut state);
+        handle_key(key(KeyCode::Char('\u{9b}')), &mut state);
+
+        assert_eq!(state.search_query, "a", "control chars are dropped");
     }
 
     #[test]
@@ -707,18 +735,6 @@ mod tests {
             .unwrap();
     }
 
-    /// The first cell whose click resolves to `target`.
-    fn point_for(state: &FileBrowserState, target: BrowserHit) -> (u16, u16) {
-        for y in 0..24u16 {
-            for x in 0..80u16 {
-                if state.hits.hit(x, y, MouseButton::Left) == Some(target) {
-                    return (x, y);
-                }
-            }
-        }
-        panic!("no hit region for {target:?}");
-    }
-
     #[test]
     fn a_click_on_a_directory_row_opens_it() {
         let dir = tempfile::tempdir().unwrap();
@@ -731,7 +747,7 @@ mod tests {
 
         draw(&mut state);
         let index = state.entries.iter().position(|e| e.name == "sub").unwrap();
-        let (x, y) = point_for(&state, BrowserHit::Entry(index));
+        let (x, y) = point_for(&state.hits, BrowserHit::Entry(index), MouseButton::Left);
 
         handle_click(MouseButton::Left, x, y, &mut state);
 
@@ -766,7 +782,7 @@ mod tests {
             .unwrap();
         // Start on a different row, so the first click is a real selection.
         state.selected = other;
-        let (x, y) = point_for(&state, BrowserHit::Entry(index));
+        let (x, y) = point_for(&state.hits, BrowserHit::Entry(index), MouseButton::Left);
 
         assert_eq!(
             handle_click(MouseButton::Left, x, y, &mut state),

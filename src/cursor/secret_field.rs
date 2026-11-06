@@ -236,17 +236,20 @@ impl SecretFieldGroup {
     /// Pastes clipboard `text` into the focused field, single-line only.
     ///
     /// A masked field is always single-line, so this is the entry point every
-    /// password prompt uses. The sanitised copy is held in a [`Zeroizing`]
-    /// buffer: it usually holds a secret, and the single-line pass can allocate
-    /// one when the clipboard carries line breaks. Returns `true` when something
-    /// was inserted, so a caller only clears its rejection on a real paste.
+    /// password prompt uses. The cleaned text borrows the caller's buffer when
+    /// nothing needs stripping — the common case, and the caller already holds
+    /// it in a [`Zeroizing`] buffer — so no second copy of the secret is made.
+    /// Only a rewritten paste allocates, and [`PastePolicy::apply_cleaned`] wipes
+    /// that copy. Returns `true` when something was inserted, so a caller only
+    /// clears its rejection on a real paste.
     pub fn paste_clipboard(&mut self, text: &str) -> bool {
-        let cleaned = Zeroizing::new(PastePolicy::SingleLine.clean(text).into_owned());
-        if cleaned.is_empty() {
-            return false;
-        }
-        self.paste(&cleaned);
-        true
+        PastePolicy::SingleLine.apply_cleaned(text, |cleaned| {
+            if cleaned.is_empty() {
+                return false;
+            }
+            self.paste(cleaned);
+            true
+        })
     }
 
     /// Applies a dispatched prompt key to the group, reporting what it did.
@@ -346,6 +349,22 @@ impl SecretFieldGroup {
         }
         self.focused = 0;
         self.show = false;
+    }
+}
+
+/// Pastes clipboard `text` into `fields`, clearing `error` when something was
+/// actually inserted.
+///
+/// The unlock, create-secret, change-password and share-passphrase prompts all
+/// run exactly this on a paste. Keeping it here means the "clear a rejection
+/// only after a real insert" rule lives once, not four times.
+pub(crate) fn paste_clearing_error(
+    fields: &mut SecretFieldGroup,
+    error: &mut Option<String>,
+    text: &str,
+) {
+    if fields.paste_clipboard(text) {
+        *error = None;
     }
 }
 
@@ -485,6 +504,23 @@ mod tests {
             "a clipped-away paste inserts nothing"
         );
         assert_eq!(group.field(0).text(), "pw");
+    }
+
+    #[test]
+    fn a_real_paste_clears_the_rejection_but_a_clipped_away_one_does_not() {
+        let mut fields = SecretFieldGroup::with_fields(1);
+        let mut error = Some("wrong password".to_string());
+
+        paste_clearing_error(&mut fields, &mut error, "\n");
+        assert_eq!(
+            error.as_deref(),
+            Some("wrong password"),
+            "nothing was inserted, so the rejection stays"
+        );
+
+        paste_clearing_error(&mut fields, &mut error, "pw");
+        assert!(error.is_none(), "a real paste clears the rejection");
+        assert_eq!(fields.field(0).text(), "pw");
     }
 
     #[test]

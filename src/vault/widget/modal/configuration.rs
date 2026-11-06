@@ -13,7 +13,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::HomeAction;
-use crate::hitbox::{HitMap, is_left};
+use crate::hitbox::{ClickSurface, RowClick, record_rows};
 use crate::theming::{Action, ElementStyle, Icon, scheme_label, texts};
 use crate::vault::utils::Configuration;
 use crate::vault::widget::chrome::{make_overlay, paint_overlay};
@@ -38,11 +38,9 @@ const SETTINGS: [Setting; 3] = [
 /// The Home configuration dialog.
 pub struct ConfigurationModal {
     selected: usize,
-    /// The clickable setting rows recorded by the renderer.
-    hits: HitMap<usize>,
-    /// The panel the renderer drew last frame, or `None` before the first frame.
-    /// A left click outside it discards the edits, like `Esc`.
-    rect: Option<Rect>,
+    /// The clickable setting rows and the panel the renderer drew, so a left
+    /// click selects a setting and a click outside the panel discards the edits.
+    clicks: ClickSurface<usize>,
 }
 
 impl ConfigurationModal {
@@ -50,8 +48,7 @@ impl ConfigurationModal {
     pub fn new() -> Self {
         Self {
             selected: 0,
-            hits: HitMap::default(),
-            rect: None,
+            clicks: ClickSurface::default(),
         }
     }
 
@@ -76,16 +73,13 @@ impl ConfigurationModal {
 
     /// A left click on a row selects it, or on a repeat toggles it.
     pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) -> Option<HomeAction> {
-        if !is_left(button) {
-            return None;
-        }
-        let row = self.hits.hit(x, y, button)?;
+        let row = self.clicks.target_at(button, x, y)?;
         if row >= SETTINGS.len() {
             return None;
         }
-        let was_selected = self.selected == row;
+        let click = RowClick::resolve(self.selected, row);
         self.selected = row;
-        if was_selected {
+        if click.activated() {
             Some(HomeAction::ToggleSetting(SETTINGS[row]))
         } else {
             None
@@ -95,13 +89,13 @@ impl ConfigurationModal {
     /// The panel the renderer drew last frame, or `None` before the first frame.
     /// A left click outside it discards the edits, like `Esc`.
     pub(crate) fn panel_rect(&self) -> Option<Rect> {
-        self.rect
+        self.clicks.panel()
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect, config: &Configuration) {
-        self.hits.clear();
+        self.clicks.clear();
         let overlay_area = make_overlay(area, 10);
-        self.rect = Some(overlay_area);
+        self.clicks.set_panel(overlay_area);
         let block = Block::default()
             .title(texts::CONFIG_TITLE)
             .borders(Borders::ALL)
@@ -129,10 +123,7 @@ impl ConfigurationModal {
 
         let inner = block.inner(overlay_area);
         let visible = SETTINGS.len().min(inner.height.saturating_sub(1) as usize);
-        for i in 0..visible {
-            let rect = Rect::new(inner.x, inner.y + 1 + i as u16, inner.width, 1);
-            self.hits.push(rect, MouseButton::Left, i);
-        }
+        record_rows(&mut self.clicks, inner, 1, visible, |i| i);
 
         paint_overlay(
             frame,
@@ -261,7 +252,7 @@ mod tests {
 
         let (x, y) = (0..24u16)
             .flat_map(|y| (0..80u16).map(move |x| (x, y)))
-            .find(|&(x, y)| modal.hits.hit(x, y, MouseButton::Left) == Some(1))
+            .find(|&(x, y)| modal.clicks.target_at(MouseButton::Left, x, y) == Some(1))
             .expect("the second setting must be clickable");
 
         assert!(modal.handle_click(MouseButton::Left, x, y).is_none());

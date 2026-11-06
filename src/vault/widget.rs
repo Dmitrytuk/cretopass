@@ -27,7 +27,7 @@ use crate::clipboard;
 use crate::hitbox::is_left;
 use crate::theming::SPINNER_TICK;
 use crate::theming::Status;
-use crate::theming::{is_clipboard_paste, wheel_nav_key};
+use crate::theming::{KeyRoute, route_key, wheel_nav_key};
 
 use menu::handle_home_key;
 use modal::Modal;
@@ -46,14 +46,15 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             render(f, area, &mut state);
         })?;
 
-        // While the File Browser is waiting for a directory listing, keep
-        // redrawing on the spinner tick so the UI never looks frozen — but still
-        // read keys, so Esc closes the browser immediately while the fs call is
-        // stuck on another thread.
-        if browser_is_loading(&state) {
-            // Apply any completed listing every iteration, so a result is never
-            // stuck behind a stream of keys.
+        // While the File Browser is waiting for a directory listing, or a
+        // clipboard read is in flight, keep redrawing on the spinner tick so the
+        // UI never looks frozen — but still read keys, so Esc closes the browser
+        // immediately while the fs call is stuck on another thread.
+        if browser_is_loading(&state) || state.paste.is_some() {
+            // Apply any completed listing/paste every iteration, so a result is
+            // never stuck behind a stream of keys.
             poll_browser_listing(&mut state);
+            poll_paste(&mut state);
             if event::poll(SPINNER_TICK)? {
                 handle_event(event::read()?, &mut state, terminal)?;
             } else {
@@ -66,31 +67,6 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     }
 }
 
-/// Where a key press goes once it has been read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum KeyRoute {
-    /// Read the system clipboard and paste it.
-    Paste,
-    /// Hand the key to the Home menu.
-    Menu,
-    /// Hand the key to the active modal.
-    Modal,
-}
-
-/// Classifies a key press before it reaches any handler.
-///
-/// The clipboard-paste chord is checked first, so `Ctrl+V` can never fall
-/// through to a text field and type the letter `v`.
-fn key_route(key: &event::KeyEvent, state: &HomeState) -> KeyRoute {
-    if is_clipboard_paste(key) {
-        KeyRoute::Paste
-    } else if state.modal.is_none() {
-        KeyRoute::Menu
-    } else {
-        KeyRoute::Modal
-    }
-}
-
 /// Handles one terminal event: a `Ctrl+V` is serviced as a clipboard paste, a
 /// term-native (bracketed) paste is applied to the active input, a key press
 /// goes to the menu or the active modal, and anything else is ignored.
@@ -100,11 +76,13 @@ fn handle_event<B: Backend>(
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     match event {
-        Event::Key(key) if key.kind == KeyEventKind::Press => match key_route(&key, state) {
-            KeyRoute::Paste => paste_from_clipboard(state),
-            KeyRoute::Menu => handle_home_key(key, state, terminal)?,
-            KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
-        },
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
+            match route_key(&key, state.modal.is_some()) {
+                KeyRoute::Paste => paste_from_clipboard(state),
+                KeyRoute::Screen => handle_home_key(key, state, terminal)?,
+                KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
+            }
+        }
         Event::Paste(text) => {
             // The event buffer can hold a secret; wipe it on drop, like the
             // `Ctrl+V` source does.
@@ -134,10 +112,10 @@ fn handle_mouse<B: Backend>(
                 return Ok(());
             }
             if let Some(key) = wheel_nav_key(&mouse) {
-                match key_route(&key, state) {
+                match route_key(&key, state.modal.is_some()) {
                     // A wheel tick carries no modifiers, so it is never the paste chord.
                     KeyRoute::Paste => {}
-                    KeyRoute::Menu => handle_home_key(key, state, terminal)?,
+                    KeyRoute::Screen => handle_home_key(key, state, terminal)?,
                     KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
                 }
             }
@@ -202,27 +180,37 @@ fn apply_paste(text: &str, state: &mut HomeState) {
     }
 }
 
-/// Reads the system clipboard and applies it to the active surface.
-fn paste_from_clipboard(state: &mut HomeState) {
-    paste_into(state, clipboard::paste_text);
-}
-
-/// Applies the result of `read` to the active surface.
+/// Starts a clipboard read for a `Ctrl+V`, if the active modal can accept one.
 ///
-/// An unreadable or empty clipboard is a silent no-op: pasting must never show
-/// a false success or disturb the field. With no modal open — the menu itself
-/// has no text input — the read is skipped entirely: it is synchronous, and a
-/// hung X11 clipboard owner must not freeze the UI for a `Ctrl+V` that provably
-/// does nothing. Taking the read as an argument is what lets the skip and the
-/// failure path be tested without a display.
-fn paste_into(
-    state: &mut HomeState,
-    read: impl FnOnce() -> Result<Zeroizing<String>, clipboard::ClipboardError>,
-) {
-    if state.modal.is_none() {
+/// The read runs on a worker ([`clipboard::PasteJob`]) because a hung X11
+/// selection owner must not freeze the event loop; [`poll_paste`] picks the
+/// result up on the spinner tick. With no modal — the menu itself has no text
+/// input — the read is skipped entirely. A job already in flight is left alone.
+fn paste_from_clipboard(state: &mut HomeState) {
+    if state.modal.is_none() || state.paste.is_some() {
         return;
     }
-    if let Ok(text) = read() {
+    state.paste = clipboard::PasteJob::spawn().ok();
+}
+
+/// Applies the result of an in-flight clipboard read, if any.
+///
+/// An unreadable, timed-out or empty clipboard is a silent no-op: pasting must
+/// never show a false success or disturb the field.
+fn poll_paste(state: &mut HomeState) {
+    let Some(result) = state.paste.as_mut().and_then(clipboard::PasteJob::poll) else {
+        return;
+    };
+    state.paste = None;
+    apply_paste_result(result, state);
+}
+
+/// Applies a finished clipboard read to the active modal.
+fn apply_paste_result(
+    result: Result<Zeroizing<String>, clipboard::ClipboardError>,
+    state: &mut HomeState,
+) {
+    if let Ok(text) = result {
         apply_paste(&text, state);
     }
 }
@@ -338,6 +326,7 @@ mod tests {
     use super::*;
     use crate::file_browser::{FileBrowserMode, FileBrowserSession};
     use crate::file_handling;
+    use crate::hitbox::test_support::outside_point;
     use crate::theming::{Palette, texts};
     use crate::vault::active_file::ActiveVaultState;
     use crate::vault::utils::Configuration;
@@ -864,14 +853,13 @@ mod tests {
     fn a_paste_with_no_modal_skips_the_clipboard_read() {
         let mut state = HomeState::with_config(Configuration::default());
         assert!(state.modal.is_none());
-        let mut read = false;
 
-        paste_into(&mut state, || {
-            read = true;
-            Ok(Zeroizing::new("ignored".to_string()))
-        });
+        paste_from_clipboard(&mut state);
 
-        assert!(!read, "the synchronous read must be skipped with no modal");
+        assert!(
+            state.paste.is_none(),
+            "no clipboard worker is started with no modal"
+        );
     }
 
     #[test]
@@ -882,9 +870,10 @@ mod tests {
             vec![1],
         )));
 
-        paste_into(&mut state, || {
-            Err(clipboard::ClipboardError::Read("no display".to_string()))
-        });
+        apply_paste_result(
+            Err(clipboard::ClipboardError::Read("no display".to_string())),
+            &mut state,
+        );
 
         match &state.modal {
             Some(Modal::Unlock(prompt)) => assert_eq!(prompt.typed().as_str(), ""),
@@ -908,12 +897,21 @@ mod tests {
             vec![1],
         )));
 
-        assert_eq!(key_route(&paste_key(), &with_modal), KeyRoute::Paste);
-        assert_eq!(key_route(&bare_v(), &with_modal), KeyRoute::Modal);
+        assert_eq!(
+            route_key(&paste_key(), with_modal.modal.is_some()),
+            KeyRoute::Paste
+        );
+        assert_eq!(
+            route_key(&bare_v(), with_modal.modal.is_some()),
+            KeyRoute::Modal
+        );
 
         let menu = HomeState::with_config(Configuration::default());
-        assert_eq!(key_route(&paste_key(), &menu), KeyRoute::Paste);
-        assert_eq!(key_route(&bare_v(), &menu), KeyRoute::Menu);
+        assert_eq!(
+            route_key(&paste_key(), menu.modal.is_some()),
+            KeyRoute::Paste
+        );
+        assert_eq!(route_key(&bare_v(), menu.modal.is_some()), KeyRoute::Screen);
     }
 
     // ── Mouse wheel routing ──
@@ -1068,18 +1066,6 @@ mod tests {
             .unwrap();
     }
 
-    /// A cell guaranteed to fall outside `rect` on the 80×24 test screen.
-    fn outside(rect: Rect) -> (u16, u16) {
-        for y in 0..24u16 {
-            for x in 0..80u16 {
-                if !crate::hitbox::point_in(rect, x, y) {
-                    return (x, y);
-                }
-            }
-        }
-        panic!("every cell is inside {rect:?}");
-    }
-
     /// The panel the active modal drew, when a click outside it dismisses.
     fn panel(state: &HomeState) -> Rect {
         state
@@ -1104,7 +1090,7 @@ mod tests {
         )));
         draw_home(&mut state);
 
-        let (x, y) = outside(panel(&state));
+        let (x, y) = outside_point(panel(&state));
         click(&mut state, event::MouseButton::Left, x, y);
 
         assert!(
@@ -1141,7 +1127,7 @@ mod tests {
         state.modal = Some(Modal::Configuration(ConfigurationModal::new()));
         draw_home(&mut state);
 
-        let (x, y) = outside(panel(&state));
+        let (x, y) = outside_point(panel(&state));
         click(&mut state, event::MouseButton::Left, x, y);
 
         assert!(state.modal.is_none(), "the dialog closes");
@@ -1161,7 +1147,7 @@ mod tests {
         )));
         draw_home(&mut state);
 
-        let (x, y) = outside(panel(&state));
+        let (x, y) = outside_point(panel(&state));
         click(&mut state, event::MouseButton::Left, x, y);
 
         assert!(state.modal.is_none(), "the confirmation is gone");
@@ -1180,7 +1166,7 @@ mod tests {
         )));
         draw_home(&mut state);
 
-        let (x, y) = outside(panel(&state));
+        let (x, y) = outside_point(panel(&state));
         click(&mut state, event::MouseButton::Right, x, y);
 
         assert!(
@@ -1199,7 +1185,7 @@ mod tests {
         state.modal = Some(Modal::Export(ExportWizard::new()));
         draw_home(&mut state);
 
-        let (x, y) = outside(panel(&state));
+        let (x, y) = outside_point(panel(&state));
         click(&mut state, event::MouseButton::Left, x, y);
 
         assert!(
@@ -1216,7 +1202,7 @@ mod tests {
         )));
         draw_home(&mut state);
 
-        let (x, y) = outside(panel(&state));
+        let (x, y) = outside_point(panel(&state));
         click(&mut state, event::MouseButton::Left, x, y);
 
         assert!(state.modal.is_none(), "an outside click is the step's Esc");

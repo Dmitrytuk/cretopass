@@ -12,7 +12,7 @@
 
 use zeroize::Zeroizing;
 
-use crate::cursor::{FieldEdit, PairVerdict, SecretFieldGroup};
+use crate::cursor::{FieldEdit, PairVerdict, SecretFieldGroup, paste_clearing_error};
 use crate::theming::{Action, texts};
 
 /// What confirming the password pair produced.
@@ -120,9 +120,7 @@ impl Passphrase {
     /// Pastes clipboard `text` into the focused field, single-line only,
     /// clearing a previous rejection the way typing does.
     pub fn paste(&mut self, text: &str) {
-        if self.fields.paste_clipboard(text) {
-            self.error = None;
-        }
+        paste_clearing_error(&mut self.fields, &mut self.error, text);
     }
 
     /// Validates the pair and reports what it means.

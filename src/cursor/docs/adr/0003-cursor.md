@@ -30,6 +30,12 @@ descriptions.
 | `backspace_at(text, cursor) → usize` | Remove the char left of the cursor, return the new offset |
 | `delete_at(text, cursor)` | Remove the char under the cursor |
 | `insert_char_at(text, cursor, c)` | Insert a char, advancing `cursor` past it |
+| `insert_str_at(text, cursor, s)` | Insert a string at `cursor`, stopping at `MAX_FIELD_BYTES` |
+| `push_str_capped(target, s)` | Append to a cursor-less `String`, stopping at `MAX_FIELD_BYTES` |
+| `push_char_capped(target, c)` | Append one typed char to a cursor-less `String`, same bound |
+| `strip_control_chars(text) → Cow<str>` | Drop every control character (single-line fields) |
+| `PastePolicy::clean(text) → Cow<str>` | Sanitise a paste: `SingleLine` drops control chars, `Digits` keeps ASCII digits; both truncate at `MAX_FIELD_BYTES` |
+| `PastePolicy::apply_cleaned(text, f)` | Run `f` on the cleaned text; borrows the caller's buffer when nothing is rewritten, otherwise runs on a `Zeroizing` copy |
 | `selected_style(is_selected) → Style` | Style for a multi-row selected item |
 | `selected_span(text, is_selected) → Span` | Render a list row with the `▸`/pad prefix |
 | `cursor_field_spans(label, text, cursor) → Vec<Span>` | Render `text` with an inverted cursor cell under the byte offset |
@@ -38,7 +44,47 @@ descriptions.
 
 `editing` is re-exported `pub`; `secret_field` is re-exported `pub(crate)` — the
 password prompts are its only consumers, so the public surface stays the
-low-level primitives.
+low-level primitives. `strip_control_chars`, `MAX_FIELD_BYTES`,
+`push_str_capped`, `push_char_capped` and `PastePolicy::apply_cleaned` are
+`pub(crate)`: only the paste policy and the in-crate cursor-less fields call
+them, so the `pub use editing::*` glob does not widen the crate's public API.
+
+## Sanitising pasted text
+
+`ratatui`'s `Span` renderer filters only `\n` and writes any other control
+character straight into a cell, so a clipboard payload carrying a raw `ESC` (or
+`BEL`, C1, …) could drive the terminal after a paste. `PastePolicy::SingleLine`
+therefore routes every paste through `strip_control_chars`, which drops **every**
+control character; `PastePolicy::Digits` keeps only ASCII digits. Typed input is
+guarded the same way before any insert: `theming::Action::insert` rejects a
+control character, and the File Browser's text-edit and search handlers apply
+the same rule.
+
+This is a deliberate tightening: a control character can no longer be typed or
+pasted into a field, so a value that previously carried one (a tab pasted into a
+passphrase) must be re-entered.
+
+## Bounding pasted text
+
+A bracketed paste hands over whatever the terminal buffered, and the clipboard
+helpers (`arboard` and the command-line fallbacks) are uncapped, so an untrusted
+payload can be arbitrarily large before the app sees it. `MAX_FIELD_BYTES`
+(8 KiB) bounds what one field retains:
+
+- `PastePolicy::clean` truncates an accepted paste to the bound before
+  sanitising, so a huge payload never becomes a huge `String` in the field.
+- `insert_char_at`, `insert_str_at`, `push_str_capped` and `push_char_capped`
+  stop at the bound, so typed input and repeated pastes cannot grow a field past
+  it either.
+- Truncation always lands on a UTF-8 char boundary; the cursor-less fields
+  (search boxes, custom field-name prompt) append both pasted text and typed
+  characters through the bounded helpers.
+- The bound covers what a field *retains*. The terminal's own paste buffer and
+  the clipboard source can still transiently hold a larger payload before the
+  app sanitises it; that peak is outside this crate.
+
+The bound is a memory guard, not field validation: a value already loaded from a
+vault may be longer than 8 KiB and is left untouched — only new insertion stops.
 
 ## Editing quirks
 
@@ -60,6 +106,14 @@ low-level primitives.
   `Match` otherwise.
 - **Mask length is one `*` per byte**, not per character, so the byte-offset
   cursor stays aligned with the mask for multi-byte input.
+- `paste_clearing_error(fields, error, text)` is the one paste entry point for
+  the four masked-password prompts: it inserts through
+  `SecretFieldGroup::paste_clipboard` and clears the prompt's rejection only
+  when a real insert happened.
+- `SecretFieldGroup::paste_clipboard` borrows the clipboard buffer when the
+  single-line policy has nothing to strip (`PastePolicy::apply_cleaned`), so a
+  secret already held in a `Zeroizing` buffer is not copied a second time; only
+  a rewritten paste allocates, and that copy is wiped.
 
 ## Dependencies
 

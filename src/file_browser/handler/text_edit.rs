@@ -6,10 +6,13 @@ use crossterm::event::KeyCode;
 /// Right, Home, End).  Returns `true` if the key was consumed by editing.
 pub(super) fn handle_text_edit(cursor: &mut usize, text: &mut String, key: KeyCode) -> bool {
     match key {
-        KeyCode::Char(c) => {
+        KeyCode::Char(c) if !c.is_control() => {
             crate::cursor::insert_char_at(text, cursor, c);
             true
         }
+        // A control character — a C1 control, or a paste on a terminal that
+        // ignored bracketed paste — is consumed and dropped, never stored.
+        KeyCode::Char(_) => true,
         KeyCode::Backspace => {
             if *cursor > 0 {
                 *cursor = crate::cursor::backspace_at(text, *cursor);

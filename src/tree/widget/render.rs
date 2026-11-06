@@ -16,6 +16,12 @@ use crate::theming::{ElementStyle, Icon};
 pub struct TreeWidget;
 
 impl TreeWidget {
+    /// Draws the tree without recording click regions.
+    ///
+    /// This is the public convenience wrapper for a caller that only wants the
+    /// screen drawn; it allocates a throwaway `HitMap`. The event loop calls
+    /// `TreeWidget::render_with_hits` instead, so a click can map to the row
+    /// it hit.
     pub fn render(frame: &mut Frame, area: Rect, state: &TreeState) {
         let mut hits = HitMap::default();
         Self::render_with_hits(frame, area, state, &mut hits);

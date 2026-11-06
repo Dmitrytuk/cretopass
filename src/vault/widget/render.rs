@@ -5,7 +5,6 @@
 
 use std::borrow::Cow;
 
-use crossterm::event::MouseButton;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
@@ -15,6 +14,7 @@ use crate::theming::{ElementStyle, Icon, paint_background, render_status_bar, te
 
 use super::modal::Modal;
 use super::state::{HomeHit, HomeState}; // ── Rendering ──
+use crate::hitbox::record_rows;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
     // Own the background: paint SURFACE across the whole screen first so the
@@ -35,7 +35,8 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut HomeState) {
     }
 
     match &mut modal {
-        Some(Modal::FileBrowser(_)) => {}
+        // The File Browser returned above; this arm only satisfies exhaustiveness.
+        Some(Modal::FileBrowser(_)) => unreachable!("the File Browser returned above"),
         Some(Modal::Alert(alert)) => alert.render(frame, area),
         Some(Modal::About(about)) => about.render(frame, area),
         Some(Modal::Confirmation(confirmation)) => confirmation.render(frame, area),
@@ -156,27 +157,18 @@ pub(super) fn render_home_window(frame: &mut Frame, area: Rect, state: &mut Home
     // be clicked.
     let menu_len = texts::MENU_ITEMS.len();
     let visible_menu = menu_len.min(inner.height.saturating_sub(1) as usize);
-    for i in 0..visible_menu {
-        let rect = Rect::new(inner.x, inner.y + 1 + i as u16, inner.width, 1);
-        state
-            .hits
-            .push(rect, MouseButton::Left, HomeHit::MenuItem(i));
-    }
+    record_rows(&mut state.hits, inner, 1, visible_menu, HomeHit::MenuItem);
     let recent_rows = inner
         .height
         .saturating_sub(4 + u16::try_from(menu_len).unwrap_or(u16::MAX));
     let visible_recent = state.config.recent_files.len().min(recent_rows as usize);
-    for j in 0..visible_recent {
-        let rect = Rect::new(
-            inner.x,
-            inner.y + 4 + menu_len as u16 + j as u16,
-            inner.width,
-            1,
-        );
-        state
-            .hits
-            .push(rect, MouseButton::Left, HomeHit::MenuItem(menu_len + j));
-    }
+    record_rows(
+        &mut state.hits,
+        inner,
+        4 + menu_len as u16,
+        visible_recent,
+        |j| HomeHit::MenuItem(menu_len + j),
+    );
 
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 

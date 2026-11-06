@@ -49,8 +49,8 @@ cargo doc --no-deps   # if public API was touched
 
 ## 2. Project Structure
 
-- One concept per module. Keep files under ~500 lines; split when they grow.
-- Declare every module with a **facade file**: `module_name.rs` at the parent level, which re-exports the public API from sub-modules placed one-per-file inside the same-named directory (`module_name/`). `mod.rs` is forbidden.
+- One concept per module. The ~500-line figure is a soft guide: split when a file grows **sub-concerns**, not merely when it grows long. A single concept that needs more lines (or a large `#[cfg(test)]` module) stays one file; length alone is not a reason to invent structure.
+- Declare every module **that has sub-concerns** with a **facade file**: `module_name.rs` at the parent level, which re-exports the public API from sub-modules placed one-per-file inside the same-named directory (`module_name/`). `mod.rs` is forbidden. A single-concept leaf module (`clipboard.rs`, `hitbox.rs`, `terminal.rs`) stays flat even as it grows long: wrapping one concept in a directory adds indirection, not structure.
 - `lib.rs` / `main.rs` should be thin: re-exports, top-level docs, and wiring only.
 - For binaries: put logic in a library crate, keep `main.rs` to argument parsing + calling `lib::run()`.
 - Use `pub(crate)` by default for internal items. Only `pub` what is meant to be a stable API.

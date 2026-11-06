@@ -1,6 +1,7 @@
 //! The Home screen's state: the menu cursor, the open vault, and the screen-wide
 //! decorations a modal needs (busy status, spinner phase, browser memory).
 
+use crate::clipboard::PasteJob;
 use crate::file_browser::FileBrowserSession;
 use crate::file_handling;
 use crate::generator::PasswordParams;
@@ -41,6 +42,9 @@ pub struct HomeState {
     pub generator: PasswordParams,
     /// The menu rows' clickable regions, refilled by the renderer every frame.
     pub(super) hits: HitMap<HomeHit>,
+    /// A `Ctrl+V` clipboard read in flight, if any. The event loop polls it so a
+    /// hung selection owner never freezes the UI.
+    pub(super) paste: Option<PasteJob>,
 }
 
 impl Default for HomeState {
@@ -83,6 +87,7 @@ impl HomeState {
             browser_session: FileBrowserSession::default(),
             generator: PasswordParams::default(),
             hits: HitMap::default(),
+            paste: None,
         }
     }
 

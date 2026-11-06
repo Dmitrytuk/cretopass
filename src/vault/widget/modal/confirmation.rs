@@ -113,7 +113,9 @@ impl Confirmation {
     }
 
     /// The panel the renderer drew last frame, or `None` before the first frame.
-    /// A left click outside it declines, like `Esc` — never accepts.
+    /// A left click outside it declines, like `Esc` — never accepts. This prompt
+    /// records no clickable rows, so it keeps only its panel and not a full
+    /// [`ClickSurface`](crate::hitbox::ClickSurface).
     pub(crate) fn panel_rect(&self) -> Option<Rect> {
         self.rect
     }

@@ -6,7 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKi
 /// reach a plain-char match that would otherwise type the letter. `Ctrl+Shift+V`
 /// counts too: a shifted `V` arrives uppercase, and terminals report their own
 /// paste that way.
-pub fn is_clipboard_paste(key: &KeyEvent) -> bool {
+pub(crate) fn is_clipboard_paste(key: &KeyEvent) -> bool {
     key.modifiers.contains(KeyModifiers::CONTROL)
         && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
 }
@@ -18,13 +18,45 @@ pub fn is_clipboard_paste(key: &KeyEvent) -> bool {
 /// dispatch, with no per-screen coordinate math. Every other mouse event — a
 /// click, a drag, a move — maps to `None`, because those are hit-tested against
 /// a screen's own targets rather than translated into keys.
-pub fn wheel_nav_key(mouse: &MouseEvent) -> Option<KeyEvent> {
+pub(crate) fn wheel_nav_key(mouse: &MouseEvent) -> Option<KeyEvent> {
     let code = match mouse.kind {
         MouseEventKind::ScrollUp => KeyCode::Up,
         MouseEventKind::ScrollDown => KeyCode::Down,
         _ => return None,
     };
     Some(KeyEvent::new(code, KeyModifiers::NONE))
+}
+
+/// Where a key press goes before it reaches any dispatcher.
+///
+/// Shared by every screen that reads its own keys (today the Tree and the Home
+/// screen). Classifying once, up front, is what makes the invariant "`Ctrl+V`
+/// never falls through to a `Char(c)` arm and types the letter `v`" structural:
+/// the paste chord is checked first, so a new screen cannot silently regress it
+/// by forgetting the check in its own dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeyRoute {
+    /// Read the system clipboard and paste it.
+    Paste,
+    /// Hand the key to the active modal.
+    Modal,
+    /// Hand the key to the screen's own dispatcher. The Tree calls it
+    /// navigation; the Home screen calls it the menu — the same route.
+    Screen,
+}
+
+/// Classifies a key press before it reaches any dispatcher.
+///
+/// The clipboard-paste chord is checked first, so `Ctrl+V` can never fall
+/// through to a text field.
+pub(crate) fn route_key(key: &KeyEvent, modal_open: bool) -> KeyRoute {
+    if is_clipboard_paste(key) {
+        KeyRoute::Paste
+    } else if modal_open {
+        KeyRoute::Modal
+    } else {
+        KeyRoute::Screen
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -96,6 +128,21 @@ pub enum Action {
 }
 
 impl Action {
+    /// An [`Action::InsertChar`] for `c`, or [`Action::None`] when `c` is a
+    /// control character.
+    ///
+    /// `crossterm` can deliver a control character as `KeyCode::Char` — a C1
+    /// control, or a paste on a terminal that ignored bracketed paste. A text
+    /// field must never store one, so they are rejected at the dispatch
+    /// boundary, before any insert path can see them.
+    fn insert(c: char) -> Self {
+        if c.is_control() {
+            Self::None
+        } else {
+            Self::InsertChar(c)
+        }
+    }
+
     pub fn from_normal(key: &KeyEvent) -> Self {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             return match key.code {
@@ -171,7 +218,7 @@ impl Action {
             KeyCode::Enter => Self::ConfirmSearch,
             KeyCode::Esc => Self::ClearSearch,
             KeyCode::Backspace => Self::Backspace,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -220,7 +267,7 @@ impl Action {
             KeyCode::End => Self::CursorEnd,
             KeyCode::Backspace => Self::Backspace,
             KeyCode::Delete => Self::DeleteChar,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -273,7 +320,7 @@ impl Action {
             KeyCode::Delete => Self::DeleteChar,
             KeyCode::Enter => Self::ExitInput,
             KeyCode::Esc => Self::ExitInput,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -311,7 +358,7 @@ impl Action {
             KeyCode::Esc => Self::Cancel,
             KeyCode::Enter => Self::Confirm,
             KeyCode::Backspace | KeyCode::Delete => Self::Backspace,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -367,7 +414,7 @@ impl Action {
             KeyCode::Right => Self::CursorRight,
             KeyCode::Home => Self::CursorHome,
             KeyCode::End => Self::CursorEnd,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -393,7 +440,7 @@ impl Action {
             KeyCode::Right => Self::CursorRight,
             KeyCode::Home => Self::CursorHome,
             KeyCode::End => Self::CursorEnd,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -414,7 +461,7 @@ impl Action {
             KeyCode::Right => Self::CursorRight,
             KeyCode::Home => Self::CursorHome,
             KeyCode::End => Self::CursorEnd,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -713,6 +760,16 @@ mod tests {
     }
 
     #[test]
+    fn route_key_checks_the_paste_chord_before_the_modal() {
+        // The chord wins whatever the screen state, so a paste can never fall
+        // through to a `Char(c)` arm; without it, the modal decides.
+        assert_eq!(route_key(&ctrl(KeyCode::Char('v')), true), KeyRoute::Paste);
+        assert_eq!(route_key(&ctrl(KeyCode::Char('v')), false), KeyRoute::Paste);
+        assert_eq!(route_key(&key(KeyCode::Char('v')), true), KeyRoute::Modal);
+        assert_eq!(route_key(&key(KeyCode::Char('v')), false), KeyRoute::Screen);
+    }
+
+    #[test]
     fn ctrl_v_is_the_clipboard_paste_chord() {
         assert!(is_clipboard_paste(&ctrl(KeyCode::Char('v'))));
         assert!(
@@ -992,6 +1049,37 @@ mod tests {
         );
         assert_eq!(
             Action::from_symbol_checklist(&key(KeyCode::Char('x'))),
+            Action::None
+        );
+    }
+
+    #[test]
+    fn a_control_char_key_never_inserts() {
+        // `crossterm` can deliver a control character as `KeyCode::Char` (a C1
+        // control, or a paste on a terminal that ignored bracketed paste); a
+        // text field must reject it rather than store it.
+        assert_eq!(
+            Action::from_search(&key(KeyCode::Char('\u{9b}'))),
+            Action::None
+        );
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Char('\u{1b}'))),
+            Action::None
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Char('\u{7}'))),
+            Action::None
+        );
+        assert_eq!(
+            Action::from_custom_field_name(&key(KeyCode::Char('\u{9b}'))),
+            Action::None
+        );
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::Char('\u{1b}'))),
+            Action::None
+        );
+        assert_eq!(
+            Action::from_change_pw_input(&key(KeyCode::Char('\u{9b}'))),
             Action::None
         );
     }

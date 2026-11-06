@@ -8,8 +8,8 @@ use std::borrow::Cow;
 use zeroize::Zeroizing;
 
 use super::HomeAction;
-use crate::cursor::{FieldEdit, SecretFieldGroup, secret_field_spans};
-use crate::hitbox::{HitMap, is_left};
+use crate::cursor::{FieldEdit, SecretFieldGroup, paste_clearing_error, secret_field_spans};
+use crate::hitbox::{ClickSurface, record_rows};
 use crate::theming::{Action, ElementStyle, texts};
 use crate::vault::widget::chrome::{display_path, make_overlay, paint_overlay};
 use crossterm::event::{KeyEvent, MouseButton};
@@ -24,11 +24,9 @@ pub struct UnlockPrompt {
     file_data: Vec<u8>,
     fields: SecretFieldGroup,
     error: Option<String>,
-    /// The clickable field rows recorded by the renderer.
-    hits: HitMap<usize>,
-    /// The panel the renderer drew last frame, or `None` before the first frame.
-    /// A left click outside it dismisses the prompt, like `Esc`.
-    rect: Option<Rect>,
+    /// The clickable field rows and the panel the renderer drew, so a left click
+    /// focuses a field and a click outside the panel dismisses the prompt.
+    clicks: ClickSurface<usize>,
 }
 
 impl UnlockPrompt {
@@ -39,8 +37,7 @@ impl UnlockPrompt {
             file_data,
             fields: SecretFieldGroup::with_fields(1),
             error: None,
-            hits: HitMap::default(),
-            rect: None,
+            clicks: ClickSurface::default(),
         }
     }
 
@@ -83,17 +80,12 @@ impl UnlockPrompt {
 
     /// Pastes the clipboard's text into the password field, single-line only.
     pub fn handle_paste(&mut self, text: &str) {
-        if self.fields.paste_clipboard(text) {
-            self.error = None;
-        }
+        paste_clearing_error(&mut self.fields, &mut self.error, text);
     }
 
-    /// A left click on the field focuses it; the right button is ignored.
+    /// A left click on the field focuses it; any other button is ignored.
     pub fn handle_click(&mut self, button: MouseButton, x: u16, y: u16) {
-        if !is_left(button) {
-            return;
-        }
-        if let Some(index) = self.hits.hit(x, y, button) {
+        if let Some(index) = self.clicks.target_at(button, x, y) {
             self.fields.focus(index);
         }
     }
@@ -101,15 +93,15 @@ impl UnlockPrompt {
     /// The panel the renderer drew last frame, or `None` before the first frame.
     /// A left click outside it dismisses the prompt, like `Esc`.
     pub(crate) fn panel_rect(&self) -> Option<Rect> {
-        self.rect
+        self.clicks.panel()
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect, display_full_path: bool) {
-        self.hits.clear();
+        self.clicks.clear();
         let shown_path = display_path(&self.file_path, display_full_path);
 
         let overlay_area = make_overlay(area, if self.error.is_some() { 8 } else { 7 });
-        self.rect = Some(overlay_area);
+        self.clicks.set_panel(overlay_area);
         let block = Block::default()
             .title(texts::HOME_ENTER_PASSPHRASE)
             .borders(Borders::ALL)
@@ -144,13 +136,10 @@ impl UnlockPrompt {
         lines.push(Line::from(""));
 
         let inner = block.inner(overlay_area);
-        if inner.height > 3 {
-            self.hits.push(
-                Rect::new(inner.x, inner.y + 3, inner.width, 1),
-                MouseButton::Left,
-                0,
-            );
-        }
+        // The field row sits three lines below the panel top; it exists only when
+        // the panel is tall enough to draw it.
+        let count = usize::from(inner.height > 3);
+        record_rows(&mut self.clicks, inner, 3, count, |_| 0);
 
         paint_overlay(
             frame,
