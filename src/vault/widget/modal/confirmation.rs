@@ -38,24 +38,30 @@ pub enum ConfirmKind {
 /// A confirmation dialog: `y`/`Enter` accepts, anything else declines.
 pub struct Confirmation {
     kind: ConfirmKind,
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it declines, like `Esc` — never accepts.
+    rect: Option<Rect>,
 }
 
 impl Confirmation {
     pub fn delete_recent(path: String) -> Self {
         Self {
             kind: ConfirmKind::DeleteRecent { path },
+            rect: None,
         }
     }
 
     pub fn change_password() -> Self {
         Self {
             kind: ConfirmKind::ChangePassword,
+            rect: None,
         }
     }
 
     pub fn no_passphrase(file_path: String) -> Self {
         Self {
             kind: ConfirmKind::NoPassphrase { file_path },
+            rect: None,
         }
     }
 
@@ -63,6 +69,7 @@ impl Confirmation {
     pub fn share_no_passphrase(dest: String) -> Self {
         Self {
             kind: ConfirmKind::ShareNoPassphrase { dest },
+            rect: None,
         }
     }
 
@@ -105,7 +112,13 @@ impl Confirmation {
         }
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it declines, like `Esc` — never accepts.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
+    }
+
+    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         let title = match &self.kind {
             ConfirmKind::DeleteRecent { .. } => texts::HOME_DELETE_CONFIRM,
             ConfirmKind::ChangePassword => texts::HOME_CHANGE_PASSWORD,
@@ -122,6 +135,7 @@ impl Confirmation {
         };
 
         let overlay_area = make_overlay(area, 6);
+        self.rect = Some(overlay_area);
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)

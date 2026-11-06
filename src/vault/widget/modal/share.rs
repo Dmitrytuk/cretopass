@@ -34,6 +34,9 @@ pub struct SharePassphrase {
     passphrase: Passphrase,
     /// The clickable field rows recorded by the renderer.
     hits: HitMap<usize>,
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it dismisses the dialog, like `Esc`.
+    rect: Option<Rect>,
 }
 
 impl SharePassphrase {
@@ -43,6 +46,7 @@ impl SharePassphrase {
             dest,
             passphrase: Passphrase::new(),
             hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -86,6 +90,12 @@ impl SharePassphrase {
         }
     }
 
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it dismisses the dialog, like `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
+    }
+
     pub fn render(&mut self, frame: &mut Frame, area: Rect, display_full_path: bool) {
         self.hits.clear();
         let shown_dest = display_path(&self.dest, display_full_path);
@@ -95,6 +105,7 @@ impl SharePassphrase {
             9
         };
         let overlay_area = make_overlay(area, height);
+        self.rect = Some(overlay_area);
         let block = Block::default()
             .title(texts::SHARE_TITLE_PASSPHRASE)
             .borders(Borders::ALL)

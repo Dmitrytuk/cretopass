@@ -40,6 +40,9 @@ pub struct ConfigurationModal {
     selected: usize,
     /// The clickable setting rows recorded by the renderer.
     hits: HitMap<usize>,
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it discards the edits, like `Esc`.
+    rect: Option<Rect>,
 }
 
 impl ConfigurationModal {
@@ -48,6 +51,7 @@ impl ConfigurationModal {
         Self {
             selected: 0,
             hits: HitMap::default(),
+            rect: None,
         }
     }
 
@@ -88,9 +92,16 @@ impl ConfigurationModal {
         }
     }
 
+    /// The panel the renderer drew last frame, or `None` before the first frame.
+    /// A left click outside it discards the edits, like `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.rect
+    }
+
     pub fn render(&mut self, frame: &mut Frame, area: Rect, config: &Configuration) {
         self.hits.clear();
         let overlay_area = make_overlay(area, 10);
+        self.rect = Some(overlay_area);
         let block = Block::default()
             .title(texts::CONFIG_TITLE)
             .borders(Borders::ALL)
