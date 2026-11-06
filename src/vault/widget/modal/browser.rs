@@ -75,6 +75,12 @@ impl BrowserModal {
         &mut self.state
     }
 
+    /// The browser's own state, for tests that need to inspect it.
+    #[cfg(test)]
+    pub fn state(&self) -> &FileBrowserState {
+        &self.state
+    }
+
     /// The directory and hidden-entry memory for the next opening.
     pub fn session(&self) -> FileBrowserSession {
         self.state.session()
@@ -143,6 +149,13 @@ impl BrowserModal {
     /// needs mutable access.
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         file_browser::render_file_browser(frame, area, &mut self.state);
+    }
+
+    /// The topmost panel the browser drew last frame, or `None` before its first
+    /// frame. The modal dispatcher turns a click outside it into the browser's
+    /// `Esc`.
+    pub(crate) fn panel_rect(&self) -> Option<Rect> {
+        self.state.panel_rect()
     }
 
     pub fn status_parts(&self) -> (&'static str, ElementStyle, Cow<'_, str>) {

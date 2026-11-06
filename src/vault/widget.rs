@@ -300,8 +300,8 @@ where
 /// Dispatches a key to the active modal.
 ///
 /// The modal reads the key itself and reports a [`HomeAction`](modal::HomeAction), which
-/// [`orchestrator::execute`] then performs. The File Browser never reaches here:
-/// it owns its own viewport state and is dispatched by the event loop.
+/// [`orchestrator::execute`] then performs. The File Browser is included: its
+/// handler owns the browser's own key routing.
 fn handle_modal_key<B: Backend>(
     key: event::KeyEvent,
     state: &mut HomeState,
@@ -324,8 +324,8 @@ fn handle_modal_key<B: Backend>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::file_browser::{FileBrowserMode, FileBrowserSession};
-    use crate::file_handling;
+    use crate::file_browser::{FileBrowserMode, FileBrowserSession, FileBrowserState};
+    use crate::file_handling::{self, ExportFormat};
     use crate::hitbox::test_support::outside_point;
     use crate::theming::{Palette, texts};
     use crate::vault::active_file::ActiveVaultState;
@@ -1075,6 +1075,15 @@ mod tests {
             .expect("the active modal records a panel")
     }
 
+    /// The File Browser's own state, so a test can assert a pending confirmation
+    /// survived or was cleared.
+    fn browser_of(state: &HomeState) -> &FileBrowserState {
+        match &state.modal {
+            Some(Modal::FileBrowser(browser)) => browser.state(),
+            _ => panic!("expected the File Browser modal"),
+        }
+    }
+
     /// Drives one click through the same routing the event loop uses.
     fn click(state: &mut HomeState, button: event::MouseButton, x: u16, y: u16) {
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
@@ -1206,6 +1215,305 @@ mod tests {
         click(&mut state, event::MouseButton::Left, x, y);
 
         assert!(state.modal.is_none(), "an outside click is the step's Esc");
+    }
+
+    #[test]
+    fn a_click_outside_the_file_browser_closes_it() {
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut browser =
+            BrowserModal::new(FileBrowserMode::OpenFile, &FileBrowserSession::default());
+        browser.state_mut().current_dir = PathBuf::from("/tmp");
+        state.modal = Some(Modal::FileBrowser(Box::new(browser)));
+        draw_home(&mut state);
+
+        let (x, y) = outside_point(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(
+            state.modal.is_none(),
+            "an outside click is the File Browser's Esc"
+        );
+    }
+
+    #[test]
+    fn a_click_inside_the_file_browser_panel_off_a_row_is_a_noop() {
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut browser =
+            BrowserModal::new(FileBrowserMode::OpenFile, &FileBrowserSession::default());
+        browser.state_mut().current_dir = PathBuf::from("/tmp");
+        state.modal = Some(Modal::FileBrowser(Box::new(browser)));
+        draw_home(&mut state);
+
+        // The panel's top-left cell is its border: inside, but no list row.
+        let rect = panel(&state);
+        click(&mut state, event::MouseButton::Left, rect.x, rect.y);
+
+        assert!(
+            matches!(state.modal, Some(Modal::FileBrowser(_))),
+            "a click inside the panel must not close the browser"
+        );
+    }
+
+    #[test]
+    fn an_outside_click_unwinds_only_the_open_file_browser_popup() {
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut browser =
+            BrowserModal::new(FileBrowserMode::CreateFile, &FileBrowserSession::default());
+        browser.state_mut().current_dir = PathBuf::from("/tmp");
+        state.modal = Some(Modal::FileBrowser(Box::new(browser)));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        // `af` opens the new-file name popup over the browser.
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Char('a')),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Char('f')),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        draw_home(&mut state);
+
+        let (x, y) = outside_point(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(
+            matches!(state.modal, Some(Modal::FileBrowser(_))),
+            "one outside click unwinds only the name popup"
+        );
+
+        // Back on the list, the next `Esc` closes the browser.
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Esc),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        assert!(
+            state.modal.is_none(),
+            "the browser was back on the list and the next Esc closed it"
+        );
+    }
+
+    #[test]
+    fn an_outside_click_declines_a_pending_file_browser_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("keep.age");
+        std::fs::write(&file, b"keep").unwrap();
+
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut browser =
+            BrowserModal::new(FileBrowserMode::OpenFile, &FileBrowserSession::default());
+        let inner = browser.state_mut();
+        inner.current_dir = dir.path().to_path_buf();
+        inner.confirm_delete = Some(file.to_string_lossy().to_string());
+        state.modal = Some(Modal::FileBrowser(Box::new(browser)));
+        draw_home(&mut state);
+
+        let (x, y) = outside_point(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(file.exists(), "an outside click must decline the delete");
+        assert!(
+            matches!(state.modal, Some(Modal::FileBrowser(_))),
+            "the browser stays open"
+        );
+
+        // The confirmation was cleared: the next `Esc` closes the browser.
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Esc),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        assert!(
+            state.modal.is_none(),
+            "the pending delete was declined, not confirmed"
+        );
+    }
+
+    #[test]
+    fn an_outside_click_declines_a_pending_file_browser_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("existing.json");
+        std::fs::write(&file, b"keep").unwrap();
+
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut browser = BrowserModal::new(
+            FileBrowserMode::ExportFile {
+                format: ExportFormat::Json,
+            },
+            &FileBrowserSession::default(),
+        );
+        let inner = browser.state_mut();
+        inner.current_dir = dir.path().to_path_buf();
+        inner.confirm_overwrite = Some(file.to_string_lossy().to_string());
+        state.modal = Some(Modal::FileBrowser(Box::new(browser)));
+        draw_home(&mut state);
+
+        let (x, y) = outside_point(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            b"keep".to_vec(),
+            "an outside click must not overwrite the file"
+        );
+        assert!(
+            matches!(state.modal, Some(Modal::FileBrowser(_))),
+            "the browser stays open"
+        );
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Esc),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        assert!(
+            state.modal.is_none(),
+            "the pending overwrite was declined, not confirmed"
+        );
+    }
+
+    #[test]
+    fn a_click_inside_a_pending_file_browser_delete_does_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("keep.age");
+        std::fs::write(&file, b"keep").unwrap();
+
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut browser =
+            BrowserModal::new(FileBrowserMode::OpenFile, &FileBrowserSession::default());
+        let inner = browser.state_mut();
+        inner.current_dir = dir.path().to_path_buf();
+        inner.confirm_delete = Some(file.to_string_lossy().to_string());
+        state.modal = Some(Modal::FileBrowser(Box::new(browser)));
+        draw_home(&mut state);
+
+        // The confirmation's centre sits over the list rows recorded underneath;
+        // the browser's early-return guard is what keeps them unreachable.
+        let rect = panel(&state);
+        click(
+            &mut state,
+            event::MouseButton::Left,
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2,
+        );
+
+        assert!(file.exists(), "a click inside the prompt must not delete");
+        assert_eq!(
+            browser_of(&state).confirm_delete.as_deref(),
+            Some(file.to_string_lossy().as_ref()),
+            "the confirmation is still pending"
+        );
+    }
+
+    #[test]
+    fn a_click_inside_a_pending_file_browser_overwrite_does_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("existing.json");
+        std::fs::write(&file, b"keep").unwrap();
+
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut browser = BrowserModal::new(
+            FileBrowserMode::ExportFile {
+                format: ExportFormat::Json,
+            },
+            &FileBrowserSession::default(),
+        );
+        let inner = browser.state_mut();
+        inner.current_dir = dir.path().to_path_buf();
+        inner.confirm_overwrite = Some(file.to_string_lossy().to_string());
+        state.modal = Some(Modal::FileBrowser(Box::new(browser)));
+        draw_home(&mut state);
+
+        let rect = panel(&state);
+        click(
+            &mut state,
+            event::MouseButton::Left,
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2,
+        );
+
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            b"keep".to_vec(),
+            "a click inside the prompt must not overwrite"
+        );
+        assert_eq!(
+            browser_of(&state).confirm_overwrite.as_deref(),
+            Some(file.to_string_lossy().as_ref()),
+            "the confirmation is still pending"
+        );
+    }
+
+    #[test]
+    fn an_outside_click_while_the_add_prefix_waits_closes_the_browser() {
+        // The `a` add prefix draws nothing and is not a popup, so the panel is
+        // still the overlay: an outside click closes the browser rather than
+        // consuming the invisible prefix.
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut browser =
+            BrowserModal::new(FileBrowserMode::CreateFile, &FileBrowserSession::default());
+        browser.state_mut().current_dir = PathBuf::from("/tmp");
+        state.modal = Some(Modal::FileBrowser(Box::new(browser)));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Char('a')),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        draw_home(&mut state);
+
+        let (x, y) = outside_point(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(
+            state.modal.is_none(),
+            "a prefix draws no popup, so an outside click closes the browser"
+        );
+    }
+
+    #[test]
+    fn an_outside_click_dismisses_the_file_browser_error() {
+        let mut state = HomeState::with_config(Configuration::default());
+        let mut browser =
+            BrowserModal::new(FileBrowserMode::OpenFile, &FileBrowserSession::default());
+        let inner = browser.state_mut();
+        inner.current_dir = PathBuf::from("/tmp");
+        inner.error = Some("boom".to_string());
+        state.modal = Some(Modal::FileBrowser(Box::new(browser)));
+        draw_home(&mut state);
+
+        let (x, y) = outside_point(panel(&state));
+        click(&mut state, event::MouseButton::Left, x, y);
+
+        assert!(
+            matches!(state.modal, Some(Modal::FileBrowser(_))),
+            "the error popup closes, not the browser"
+        );
+
+        // The error was cleared: the next `Esc` closes the browser.
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        handle_modal_key(
+            event::KeyEvent::from(KeyCode::Esc),
+            &mut state,
+            &mut terminal,
+        )
+        .unwrap();
+        assert!(
+            state.modal.is_none(),
+            "the error popup was dismissed one level"
+        );
     }
 
     #[test]

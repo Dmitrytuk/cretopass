@@ -1,7 +1,6 @@
 //! The browser's centered popups: the Locations picker and the transient
 //! input / delete / overwrite / error dialogs.
 
-use crossterm::event::MouseButton;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
@@ -14,7 +13,13 @@ use crate::theming::{ElementStyle, Icon, texts};
 use super::chrome::{centered_popup, centered_popup_sized};
 use super::list::update_scroll;
 
-pub(super) fn render_locations_popup(frame: &mut Frame, area: Rect, state: &mut FileBrowserState) {
+/// Draws the Locations picker and returns its rect, which the caller records as
+/// the dismissal panel.
+pub(super) fn render_locations_popup(
+    frame: &mut Frame,
+    area: Rect,
+    state: &mut FileBrowserState,
+) -> Rect {
     // The Home row shows at once; a `Loading…` row holds the disks' place
     // until the background enumeration lands.
     let loading = state.locations_loading();
@@ -45,9 +50,7 @@ pub(super) fn render_locations_popup(frame: &mut Frame, area: Rect, state: &mut 
                 break;
             }
             let rect = Rect::new(inner.x, inner.y + offset as u16, inner.width, 1);
-            state
-                .hits
-                .push(rect, MouseButton::Left, BrowserHit::Location(index));
+            state.clicks.record(rect, BrowserHit::Location(index));
         }
     }
 
@@ -109,7 +112,10 @@ pub(super) fn render_locations_popup(frame: &mut Frame, area: Rect, state: &mut 
     frame.render_widget(Clear, popup_area);
     frame.render_widget(block, popup_area);
     frame.render_widget(Paragraph::new(Text::from(rows)), inner);
+    popup_area
 }
+/// Draws a one-line text prompt and returns its rect, which the caller records
+/// as the dismissal panel.
 pub(super) fn render_input_popup(
     frame: &mut Frame,
     area: Rect,
@@ -117,7 +123,7 @@ pub(super) fn render_input_popup(
     label: &str,
     text: &str,
     cursor: usize,
-) {
+) -> Rect {
     let popup_area = centered_popup(area, 4);
     let block = Block::default()
         .title(title)
@@ -133,18 +139,18 @@ pub(super) fn render_input_popup(
     frame.render_widget(Clear, popup_area);
     frame.render_widget(block, popup_area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+    popup_area
 }
-pub(super) fn render_delete_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
-    let Some(ref path_str) = state.confirm_delete else {
-        return;
-    };
+/// Draws the delete confirmation for `path_str` and returns its rect, which the
+/// caller records as the dismissal panel.
+pub(super) fn render_delete_popup(frame: &mut Frame, area: Rect, path_str: &str) -> Rect {
+    let popup_area = centered_popup(area, 4);
 
     let filename = std::path::Path::new(path_str)
         .file_name()
         .map(|n| n.to_string_lossy())
         .unwrap_or(std::borrow::Cow::Borrowed(path_str));
 
-    let popup_area = centered_popup(area, 4);
     let block = Block::default()
         .title(texts::OVERLAY_CONFIRM_DELETE)
         .borders(Borders::ALL)
@@ -167,18 +173,24 @@ pub(super) fn render_delete_popup(frame: &mut Frame, area: Rect, state: &FileBro
     frame.render_widget(Clear, popup_area);
     frame.render_widget(block, popup_area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+    popup_area
 }
-pub(super) fn render_overwrite_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
-    let Some(ref path_str) = state.confirm_overwrite else {
-        return;
-    };
+/// Draws the overwrite confirmation for `path_str` and returns its rect, which
+/// the caller records as the dismissal panel. `is_share` selects the folder
+/// wording (a share writes into a folder, an export overwrites a file).
+pub(super) fn render_overwrite_popup(
+    frame: &mut Frame,
+    area: Rect,
+    path_str: &str,
+    is_share: bool,
+) -> Rect {
+    let popup_area = centered_popup(area, 4);
 
     let filename = std::path::Path::new(path_str)
         .file_name()
         .map(|n| n.to_string_lossy())
         .unwrap_or(std::borrow::Cow::Borrowed(path_str));
 
-    let popup_area = centered_popup(area, 4);
     let block = Block::default()
         .title(texts::OVERLAY_CONFIRM_OVERWRITE)
         .borders(Borders::ALL)
@@ -187,7 +199,7 @@ pub(super) fn render_overwrite_popup(frame: &mut Frame, area: Rect, state: &File
     let inner = block.inner(popup_area);
     // An export overwrites a file; a share writes into a folder that already has
     // something in it.
-    let prompt = if state.mode.is_share_destination() {
+    let prompt = if is_share {
         format!("{}{}? ", texts::FB_PROMPT_SHARE_FOLDER, filename)
     } else {
         format!(
@@ -205,13 +217,18 @@ pub(super) fn render_overwrite_popup(frame: &mut Frame, area: Rect, state: &File
     frame.render_widget(Clear, popup_area);
     frame.render_widget(block, popup_area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+    popup_area
 }
-pub(super) fn render_error_popup(frame: &mut Frame, area: Rect, state: &FileBrowserState) {
-    let Some(ref err) = state.error else {
-        return;
-    };
-
+/// Draws the error popup, if there is one. Returns the rect when drawn, so the
+/// caller can stack it over the panel below; `None` when there is no error.
+pub(super) fn render_error_popup(
+    frame: &mut Frame,
+    area: Rect,
+    state: &FileBrowserState,
+) -> Option<Rect> {
+    let err = state.error.as_ref()?;
     let popup_area = centered_popup(area, 4);
+
     let block = Block::default()
         .title(texts::ALERT_TITLE)
         .borders(Borders::ALL)
@@ -229,6 +246,7 @@ pub(super) fn render_error_popup(frame: &mut Frame, area: Rect, state: &FileBrow
     frame.render_widget(Clear, popup_area);
     frame.render_widget(block, popup_area);
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+    Some(popup_area)
 }
 
 #[cfg(test)]

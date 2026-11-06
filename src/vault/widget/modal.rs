@@ -201,11 +201,10 @@ impl Modal {
     ///
     /// A left click **outside** the panel the renderer drew is the modal's `Esc`:
     /// the existing key path runs, so the click and the key can never drift. That
-    /// closes a prompt, discards the Configuration edits, or declines a
-    /// confirmation — a click can never answer `y`. About and the passive Alert
-    /// dismiss on any click, so they report no panel to test against; the
-    /// File Browser is a deliberate exception, for the reason on
-    /// [`Modal::panel_rect`].
+    /// closes a prompt, discards the Configuration edits, declines a
+    /// confirmation, or closes the File Browser — a click can never answer `y`.
+    /// About and the passive Alert dismiss on any click, so they report no panel
+    /// to test against.
     ///
     /// A password prompt only moves the focus between its fields, and a
     /// confirmation takes no in-panel clicks, so their `handle_click` returns
@@ -243,11 +242,9 @@ impl Modal {
     /// The panel the active modal drew last frame, when a click outside it is a
     /// dismissal.
     ///
-    /// `None` for the overlays that already dismiss on any click (About, Alert)
-    /// and for the File Browser. The browser is a deliberate exception: its
-    /// clickable list fills most of the screen, so a click beside it is far more
-    /// likely to be a near-miss on a row than a request to abandon an in-progress
-    /// file choice — it keeps its own click handling instead.
+    /// The File Browser reports its topmost popup, so an outside click closes it
+    /// or unwinds one browser popup. `None` is reserved for the overlays that
+    /// already dismiss on any click (About, Alert).
     pub(crate) fn panel_rect(&self) -> Option<Rect> {
         match self {
             Self::Unlock(prompt) => prompt.panel_rect(),
@@ -257,7 +254,8 @@ impl Modal {
             Self::Confirmation(confirmation) => confirmation.panel_rect(),
             Self::Export(wizard) => wizard.panel_rect(),
             Self::SharePassphrase(prompt) => prompt.panel_rect(),
-            Self::FileBrowser(_) | Self::About(_) | Self::Alert(_) => None,
+            Self::FileBrowser(browser) => browser.panel_rect(),
+            Self::About(_) | Self::Alert(_) => None,
         }
     }
 }

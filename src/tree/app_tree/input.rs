@@ -1,9 +1,8 @@
 //! Input routing: keys, mouse and paste, dispatched to the tree or the modal.
 //!
-//! Every input device funnels through the shared classifier
-//! [`route_key`](crate::theming::route_key) and [`handle_mouse`] so a click and
-//! its key run the same code: the renderer owns the geometry, a click maps to the
-//! same [`Action`](crate::theming::Action) a key would produce, and
+//! Every input device funnels through the shared classifier [`route_key`] and
+//! [`handle_mouse`] so a click and its key run the same code: the renderer owns
+//! the geometry, a click maps to the same [`Action`] a key would produce, and
 //! [`dispatch_action`] performs it. A modal is taken out of the state for the
 //! duration of its handler so it can borrow the tree.
 
