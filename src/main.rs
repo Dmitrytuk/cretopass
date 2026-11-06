@@ -16,9 +16,7 @@ Options:
 
 Commands:
   remove           Delete the app and all artifacts from the system
-                   (self-managed installs only)
-  update           Reinstall the latest release by running its installer
-                   (self-managed installs only; no version comparison)";
+                   (self-managed installs only)";
 
 /// Feedback block appended to `--help`.
 ///

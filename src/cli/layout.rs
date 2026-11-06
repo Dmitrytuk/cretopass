@@ -5,9 +5,9 @@
 //! [`detect`](super::detect) and [`remove`](super::remove) read, so the layout
 //! exists in exactly one place on the Rust side (see ADR 0008).
 //!
-//! It also owns the safe temporary-directory primitive shared by `update` and
-//! `remove`, so both commands create `0700` directories with unpredictable
-//! names instead of a predictable `{prefix}-{pid}` path.
+//! It also owns the safe temporary-directory primitive used by `remove`, so
+//! the command creates a `0700` directory with an unpredictable name instead
+//! of a predictable `{prefix}-{pid}` path.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -188,6 +188,9 @@ impl TempDir {
     ///
     /// Propagates the underlying [`io::Error`] when the directory cannot be
     /// created (including when an attacker has pre-created the path).
+    // Only the Windows self-remove helper creates a temp directory at runtime;
+    // the primitive still ships on Unix so its unit tests run there too.
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub(crate) fn create(prefix: &str) -> io::Result<Self> {
         let path = std::env::temp_dir().join(format!("{prefix}-{}", uuid::Uuid::new_v4()));
         create_private_dir(&path)?;
@@ -195,14 +198,16 @@ impl TempDir {
     }
 
     /// Returns the directory path.
+    // Same Windows-only runtime use as `create`; kept on Unix for the tests.
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 
     /// Leaks the directory so it is not removed on drop.
     ///
-    /// Used on Windows, where a detached helper reads the staged script after
-    /// the current process has exited.
+    /// Used on Windows, where the detached self-remove helper still needs the
+    /// directory after the current process has exited.
     // `keep` is only called on the Windows detached-helper path; tests use it
     // too, but non-test Unix builds would otherwise see it as dead code.
     #[cfg_attr(not(windows), allow(dead_code))]
@@ -235,8 +240,8 @@ pub(crate) fn create_new_file(path: &Path) -> io::Result<std::fs::File> {
 /// Rejects an environment-derived path that is unsafe to embed in a generated
 /// batch file — either not absolute, or containing a shell metacharacter.
 ///
-/// Kept in this one place so the security-relevant validator cannot drift
-/// between `update` and `remove`.
+/// Lives next to the layout it guards so the security-relevant validator has a
+/// single home.
 ///
 /// # Errors
 ///
@@ -257,6 +262,9 @@ pub(crate) fn ensure_safe_windows_path(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(unix)]
+// Only reached through `TempDir::create`, a Windows runtime path; kept on Unix
+// so the temp-dir tests exercise the `0700` directory creation.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn create_private_dir(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
 

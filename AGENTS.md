@@ -45,8 +45,8 @@ map and cross-module data flow.
 - [0005 — tree](./src/tree/docs/adr/0005-tree-module.md) — Node model, TreeState, InputMode, event loop, rendering, autosave
 - [0006 — vault](./src/vault/docs/adr/0006-vault-module.md) — Home screen, ActiveVaultState, configuration persistence
 - [0007 — file_browser](./src/file_browser/docs/adr/0007-file-browser.md) — directory browser overlay
-- [0008 — CLI lifecycle commands](./docs/adr/0008-cli-lifecycle-commands.md) — `update`/`remove` architecture, self-managed installs, detached helpers
-- [0009 — CLI module](./src/cli/docs/adr/0009-cli-module.md) — `cli` module facade + sub-module layout (`detect`, `update`, `remove`)
+- [0008 — CLI lifecycle commands](./docs/adr/0008-cli-lifecycle-commands.md) — `remove` architecture, self-managed installs, detached helper (the `update` half was removed in ADR 0027)
+- [0009 — CLI module](./src/cli/docs/adr/0009-cli-module.md) — `cli` module facade + sub-module layout (`detect`, `remove`)
 - [0010 — Asynchronous tree autosave](./docs/adr/0010-async-tree-autosave.md) — background writer, latest-wins snapshots, bounded exit flush
 - [0011 — Animated status spinner](./docs/adr/0011-animated-status-spinner.md) — busy glyph and title-bar status
 - [0012 — Password generator](./docs/adr/0012-password-generator.md) — strict-leaf generator, `Ctrl+G` modal, symbol checklist, session settings
@@ -61,3 +61,5 @@ map and cross-module data flow.
 - [0023 — Sharing a vault subtree](./docs/adr/0023-sharing-a-vault-subtree.md) — a share bundle: a re-encrypted node (with or without its children) or whole file plus a `HOW-TO-OPEN.txt` instruction, named by the File Browser and written atomically
 - [0024 — Browsing never reads file contents](./docs/adr/0024-browsing-never-reads-file-contents.md) — name-only listing and background directory/disk loaders so a slow or hung filesystem cannot freeze the TUI
 - [0025 — Clipboard gateway](./docs/adr/0025-clipboard-gateway.md) — `arboard` on every platform with a command-line helper fallback, a process-wide keep-alive handle, and an honest copy verdict
+- [0026 — Deterministic mouse input](./docs/adr/0026-deterministic-mouse-input.md) — mouse capture owned by the app: a wheel tick is navigation, a click is hit-tested into the same `Action` its key produces
+- [0027 — No in-app network access](./docs/adr/0027-no-in-app-network-access.md) — `cretopass update` removed: the binary makes no network requests, updating is out of process

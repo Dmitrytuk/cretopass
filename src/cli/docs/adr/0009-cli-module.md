@@ -1,19 +1,21 @@
 # 0009 — cli module
 
-CLI lifecycle subcommands (`update`, `remove`) that operate on the
-installation itself rather than on secret data.
+CLI lifecycle subcommands that operate on the installation itself rather than
+on secret data. Only `remove` remains: `update` (self-update over the network)
+was removed so the binary makes no network requests (see
+[ADR 0027](../../../../docs/adr/0027-no-in-app-network-access.md)).
 
-**Decision:** keep the CLI commands in a separate `cli` module with a
+**Decision:** keep the CLI command in a separate `cli` module with a
 facade file (`src/cli.rs`) and **private** sub-modules under `src/cli/`.
 The only public surface is the [`LifecycleCommand`](../../../cli.rs) enum
 (`parse` + `run`) and the `EXIT_FOREIGN_INSTALL` constant, so `main.rs` is a
-pure parser + dispatcher. The module has no TUI dependencies — it only prints
-to stdout/stderr and exits, and isolates platform-specific logic (Unix shell
-vs PowerShell, detached helpers, self-remove staging).
+pure parser + dispatcher. The module has no TUI dependencies and no network
+dependencies — it only prints to stdout/stderr and exits, and isolates
+platform-specific logic (artefact layout mirroring, detached self-remove
+staging on Windows).
 
-**Rejected alternative:** inline update/remove logic in `main.rs`. Would
-bloat the binary entry point with platform-conditional code, shell
-scripting, and I/O orchestration.
+**Rejected alternative:** inline remove logic in `main.rs`. Would bloat the
+binary entry point with platform-conditional code and I/O orchestration.
 
 ## Sub-modules
 
@@ -21,17 +23,16 @@ scripting, and I/O orchestration.
 |------|---------------|
 | `detect.rs` | `InstallSource` enum (SelfManaged/Pacman/CargoInstall/Unknown) with `detect()` / `detect_from(exe)` and `require_self_managed() -> Result<(), ForeignInstall>`; per-platform binary-path heuristics |
 | `layout.rs` | **Single Rust owner of the install layout**: `home_dir`, `bin_dir`, `binary_path`, `install_dir`, `completions`, `rc_files`, `gui_artifacts`, `powershell_profiles`, `start_menu_shortcut`, plus the safe `TempDir` primitive |
-| `update.rs` | `run_update()` — downloads `install.sh`/`install.ps1` from GitHub Releases (HTTPS-pinned) and runs it; on Windows spawns a detached helper for self-replace |
 | `remove.rs` | `run_remove()` — collects all installed artifacts (binary, config dir, completions, rc marker blocks, GUI artifacts, PowerShell profile, User `PATH`), prompts for confirmation, deletes/edits them; on Windows spawns a detached helper for self-remove of the locked binary |
 
 ## Contracts
 
-- `update` and `remove` refuse to operate unless `InstallSource::require_self_managed()` passes; a foreign install returns `ExitCode::from(EXIT_FOREIGN_INSTALL)` (`2`).
+- `remove` refuses to operate unless `InstallSource::require_self_managed()` passes; a foreign install returns `ExitCode::from(EXIT_FOREIGN_INSTALL)` (`2`).
 - `require_self_managed` returns a typed `ForeignInstall(InstallSource)` error implementing `Display` + `Error`, so callers can distinguish pacman from cargo without parsing text.
-- `update` delegates entirely to the platform installer script — no version comparison in Rust. The download is pinned to HTTPS and the `CRETOPASS_UPDATE_URL` override is compiled out of release builds.
+- Neither the module nor the binary makes any network request; `update` was removed in [ADR 0027](../../../../docs/adr/0027-no-in-app-network-access.md).
 - `remove` reads every path from `layout.rs`; it mirrors the installer layout in reverse.
 - `remove` exit codes: `0` success (including a user abort), `2` foreign install, `1` when any artifact could not be removed.
-- Both commands return `ExitCode` directly (no `Result` propagation up).
+- `remove` returns `ExitCode` directly (no `Result` propagation up).
 
 ## Dependencies
 

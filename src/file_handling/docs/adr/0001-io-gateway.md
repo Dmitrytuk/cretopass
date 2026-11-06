@@ -5,12 +5,12 @@ entire application. All vault and document I/O is mediated through this module
 so that encryption, error handling, and import/export/share logic share one
 place.
 
-**Deliberate exception:** the CLI lifecycle commands (`cli/layout.rs`,
-`cli/remove.rs`, `cli/update.rs`) still use `std::fs` directly. They manage the
-app's own install artifacts rather than secrets, and are kept independent of the
-gateway so `remove`/`update` do not depend on the vault stack. Every other
-module — including the Home config in `vault/utils.rs` — writes only through
-this gateway.
+**Deliberate exception:** the CLI lifecycle command (`cli/layout.rs`,
+`cli/remove.rs`) still uses `std::fs` directly. It manages the
+app's own install artifacts rather than secrets, and is kept independent of the
+gateway so `remove` does not depend on the vault stack. Every other module —
+including the Home config in `vault/utils.rs` — writes only through this
+gateway.
 
 **Rejected alternative:** sprinkling `std::fs` calls across modules. This would
 make it impossible to guarantee atomic saves, enforce encryption on write, or

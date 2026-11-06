@@ -21,7 +21,7 @@ snapshot back to an age-encrypted JSON file.
 | `tree` | [0005](../../src/tree/docs/adr/0005-tree-module.md) | Tree data model, state machine, rendering, async event loop |
 | `vault` | [0006](../../src/vault/docs/adr/0006-vault-module.md) | Home screen, active vault state, configuration persistence |
 | `file_browser` | [0007](../../src/file_browser/docs/adr/0007-file-browser.md) | OS directory browser overlay with mounted-disk locations and hidden-entry toggle; listings and disk enumeration run off the UI thread, and browsing reads no file contents ([0024](0024-browsing-never-reads-file-contents.md)) |
-| `cli` | [0009](../../src/cli/docs/adr/0009-cli-module.md) | CLI lifecycle subcommands (`update`, `remove`) — no TUI |
+| `cli` | [0009](../../src/cli/docs/adr/0009-cli-module.md) | CLI lifecycle subcommand (`remove`) — no TUI, no network |
 
 ## Cross-module data flow
 
@@ -71,6 +71,7 @@ the wheel reach the app at all.
 6. **byte-offset cursor** — all text editing uses byte offsets with explicit UTF-8 boundary checks via `is_char_boundary()` and `len_utf8()`.
 7. **Generator as a strict leaf** — password generation is a pure, TUI-free module. The tree maps a field type to a generator; the module never imports `FieldType` or any TUI code (see [0012](0012-password-generator.md)).
 8. **Never block the UI on I/O** — directory listings and disk enumeration run on detached background threads with a bounded wait, and browsing reads no file contents, so a slow or hung filesystem (a Windows cloud-sync folder, a disconnected network mount) cannot freeze the TUI (see [0024](0024-browsing-never-reads-file-contents.md)).
+9. **No network access** — the binary makes no network requests in any mode. The former `cretopass update` self-update was removed because downloading and executing the installer is the one egress a local password manager must not have (see [0027](0027-no-in-app-network-access.md)).
 
 ## Dependencies
 
