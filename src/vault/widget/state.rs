@@ -54,15 +54,22 @@ impl Default for HomeState {
 }
 
 impl HomeState {
+    /// Builds the state from the on-disk configuration and the terminal's
+    /// capabilities.
     pub fn new() -> Self {
-        Self::with_config(utils::load_config())
+        let mut state = Self::with_config(utils::load_config());
+        // The busy-glyph frame set is a terminal capability; resolve it here, at
+        // the composition root, so `with_config` stays environment-independent.
+        state.spinner = Spinner::detected();
+        state
     }
 
     /// Builds the state from an already-loaded [`Configuration`], skipping the
     /// config-file read and the environment lookup behind it.
     ///
     /// Tests use this so a suite run never depends on — or writes to — the
-    /// developer's real config directory.
+    /// developer's real config directory. It builds the deterministic (Braille)
+    /// spinner; [`HomeState::new`] overrides it with the detected frame set.
     pub(crate) fn with_config(config: Configuration) -> Self {
         // Apply the persisted colour scheme before the first frame is drawn.
         set_palette(Palette::from_name(&config.palette_name));

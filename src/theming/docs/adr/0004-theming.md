@@ -29,13 +29,23 @@ impossible without touching every module.
 
 ## Icons
 
-`icon.rs` is the one place a glyph is chosen. Icons must stay within **WGL4**
+`icon.rs` is the one place an icon glyph is chosen. Icons must stay within **WGL4**
 (or plain ASCII), because the console fonts Windows ships are WGL4-level: a
 codepoint outside it has no glyph in the font, and Windows substitutes it from
 Segoe UI Symbol/Emoji, drawing the boxed emoji form — usually double-width,
 which also shifts the row. The expand/collapse pair is the WGL4-safe `►` / `▼`
 (`U+25BA` / `U+25BC`); the boxed-emoji triangles `U+25B6` `▶` / `U+25C0` `◀`
 are banned for exactly this reason.
+
+The same rule governs the title-bar spinner
+([0011](../../../../docs/adr/0011-animated-status-spinner.md)): its
+`SpinnerStyle` uses the Braille frames where the terminal understands UTF-8 —
+the process locale is UTF-8 or unset — and the WGL4-safe half-blocks
+(`U+2580` `▀`, `U+2590` `▐`, `U+2584` `▄`, `U+258C` `▌`) on Windows, which
+ignores the locale entirely, so by default the busy glyph never collapses to
+one substituted placeholder. An explicitly non-UTF-8 locale falls back to ASCII.
+`CRETOPASS_SPINNER` overrides the choice when the default is wrong for the
+terminal in use.
 
 ## Alerts
 

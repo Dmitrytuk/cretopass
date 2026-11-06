@@ -115,6 +115,9 @@ pub struct TreeState {
 
 impl TreeState {
     /// Creates a new `TreeState` with the given root.
+    ///
+    /// Builds the deterministic (Braille) busy glyph; the composition roots set
+    /// the detected frame set when they open the tree.
     pub fn new(root: Node) -> Self {
         let mut state = Self {
             root,
