@@ -22,6 +22,24 @@ Rules that follow from it:
   so it cannot leak through a process listing. A helper counts as success only
   when it exits zero: a present-but-broken `xclip` (headless, no `DISPLAY`) falls
   through to the next helper and finally to arboard's error.
+- **Helpers are trusted by absolute path, never by `PATH`.** Both ladders probe
+  `TRUSTED_HELPER_DIRS` directly (`/usr/bin`, `/bin` and NixOS's
+  `/run/current-system/sw/bin` on Linux; `/usr/bin` and `/bin` on macOS) and
+  require a regular executable file. `PATH` is not consulted at all, so a
+  writable directory earlier in `PATH` cannot supply a trojan `xclip` that
+  captures every pasted secret, and a stripped environment does not silently
+  lose the fallback. **Accepted limitation:** user-managed install locations
+  (`~/.local/bin`, `~/.nix-profile/bin`, `/snap/bin`, Homebrew prefixes, …) are
+  excluded, so a helper installed there is ignored and the ladder falls back to
+  arboard. On a pure-Wayland session without XWayland that means a
+  system-package `wl-paste`/`wl-copy` is the only helper path; the trade-off is
+  deliberate for a password manager.
+- **Captured clipboard bytes are wiped on every path.** A failed helper may have
+  written part of the clipboard to stdout before exiting non-zero, so
+  `finish_helper_output` zeroizes that buffer on failure as well as on invalid
+  UTF-8; `stderr` is wiped on every outcome because a misbehaving helper can echo
+  there too. Only a successful, valid read moves its bytes into the returned
+  `Zeroizing<String>`.
 - **Windows goes through `CF_UNICODETEXT`.** arboard's Win32 backend writes a
   UTF-16 clipboard item, so Cyrillic and other non-ASCII values survive. This is
   why `cmd /C clip` (console code page) was rejected.

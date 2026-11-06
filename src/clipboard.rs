@@ -13,6 +13,7 @@
 
 use std::fmt;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Mutex, OnceLock, TryLockError};
@@ -192,12 +193,79 @@ fn copy_with_arboard(text: &str) -> Result<(), ClipboardError> {
     }
 }
 
+/// The absolute directories a clipboard helper may be loaded from.
+///
+/// Helpers are **never** loaded from an arbitrary `PATH` entry: a writable
+/// directory earlier in `PATH` could otherwise supply a trojan `xclip` that
+/// captures every pasted secret. The ladders probe these root-owned system
+/// package locations directly instead, and the list is intentionally short.
+/// NixOS's system profile is included because that is where its packages place
+/// the helpers.
+///
+/// User-managed install locations (`~/.local/bin`, `~/.nix-profile/bin`,
+/// `/snap/bin`, Homebrew prefixes, …) are deliberately excluded: a helper
+/// installed there is ignored and the ladder falls back to arboard. That is an
+/// accepted limitation, documented in ADR 0025.
+const TRUSTED_HELPER_DIRS: &[&str] = if cfg!(target_os = "macos") {
+    &["/usr/bin", "/bin"]
+} else if cfg!(target_os = "linux") {
+    &["/usr/bin", "/bin", "/run/current-system/sw/bin"]
+} else {
+    &[]
+};
+
+/// Resolves helper `name` to an executable in a trusted system directory.
+///
+/// Probes [`TRUSTED_HELPER_DIRS`] directly; `PATH` is not consulted at all, so
+/// a writable `PATH` entry can never shadow a system helper, and a stripped
+/// environment does not silently lose the fallback.
+fn resolve_helper(name: &str) -> Option<PathBuf> {
+    resolve_helper_in(TRUSTED_HELPER_DIRS, name)
+}
+
+/// The pure core of [`resolve_helper`]: the first executable `name` in `dirs`.
+///
+/// Only the directories passed in are considered — there is no `PATH` input —
+/// so an untrusted entry can never be selected. Tests inject their own list.
+fn resolve_helper_in(dirs: &[&str], name: &str) -> Option<PathBuf> {
+    dirs.iter().find_map(|dir| {
+        let path = Path::new(dir).join(name);
+        is_executable_file(&path).then_some(path)
+    })
+}
+
+/// Whether `path` is a regular, executable file (following symlinks).
+///
+/// The trusted directories are expected to be root-owned, so symlink following
+/// is safe there: only root could plant the link or swap the target.
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        // Helpers are only spawned on Linux/macOS, both `unix`; this arm keeps
+        // the function total without pretending a Windows exec-bit check exists.
+        true
+    }
+}
+
 /// Copies `text` through the platform's helper command, if one exists.
 ///
-/// Returns `false` when no helper is configured for the platform or every
-/// helper failed. A helper only counts as success when it exits zero: a
-/// present-but-broken helper (a headless `xclip` that cannot open the display)
-/// must not masquerade as a copy, so the ladder falls through to the next one.
+/// Returns `false` when no helper is configured for the platform, no trusted
+/// copy is installed, or every helper failed. A helper only counts as success
+/// when it exits zero: a present-but-broken helper (a headless `xclip` that
+/// cannot open the display) must not masquerade as a copy, so the ladder falls
+/// through to the next one.
 fn copy_with_helper(text: &str) -> bool {
     let cmds: &[&[&str]] = if cfg!(target_os = "macos") {
         &[&["pbcopy"]]
@@ -212,7 +280,10 @@ fn copy_with_helper(text: &str) -> bool {
     };
 
     for args in cmds {
-        if let Ok(mut child) = std::process::Command::new(args[0])
+        let Some(program) = resolve_helper(args[0]) else {
+            continue;
+        };
+        if let Ok(mut child) = std::process::Command::new(program)
             .args(&args[1..])
             .stdin(std::process::Stdio::piped())
             .spawn()
@@ -286,11 +357,11 @@ fn paste_with_arboard() -> Result<Zeroizing<String>, ClipboardError> {
 
 /// Reads the clipboard through the platform's helper command, if one exists.
 ///
-/// Returns `None` when no helper is configured for the platform or every helper
-/// failed. A helper only counts as a read when it exits zero *and* its output is
-/// valid UTF-8: a present-but-broken helper (a headless `xclip` that cannot open
-/// the display) must not masquerade as an empty clipboard, so the ladder falls
-/// through to the next one.
+/// Returns `None` when no helper is configured for the platform, no trusted copy
+/// is installed, or every helper failed. A helper only counts as a read when it
+/// exits zero *and* its output is valid UTF-8: a present-but-broken helper (a
+/// headless `xclip` that cannot open the display) must not masquerade as an
+/// empty clipboard, so the ladder falls through to the next one.
 fn paste_with_helper() -> Option<Zeroizing<String>> {
     let cmds: &[&[&str]] = if cfg!(target_os = "macos") {
         &[&["pbpaste"]]
@@ -305,26 +376,55 @@ fn paste_with_helper() -> Option<Zeroizing<String>> {
     };
 
     for args in cmds {
-        let Ok(output) = std::process::Command::new(args[0])
+        let Some(program) = resolve_helper(args[0]) else {
+            continue;
+        };
+        let Ok(mut output) = std::process::Command::new(program)
             .args(&args[1..])
             .output()
         else {
             continue;
         };
-        if !output.status.success() {
-            continue;
-        }
-        match String::from_utf8(output.stdout) {
-            Ok(text) => return Some(Zeroizing::new(text)),
-            // Not usable text: wipe the bytes we read before trying the next
-            // helper, so raw clipboard contents do not linger.
-            Err(error) => {
-                let mut bytes = error.into_bytes();
-                bytes.zeroize();
-            }
+        let text = finish_helper_output(output.status.success(), &mut output.stdout);
+        // A misbehaving helper may echo clipboard bytes to stderr too; wipe it
+        // on every outcome, not just the read that failed.
+        output.stderr.zeroize();
+        if let Some(text) = text {
+            return Some(text);
         }
     }
     None
+}
+
+/// Turns a helper's captured stdout into text, wiping the bytes on every
+/// failure path.
+///
+/// A failed helper may still have written part of the clipboard into its
+/// stdout before exiting non-zero, so the buffer is zeroized before being
+/// dropped. Invalid UTF-8 is the same: the bytes are wiped and the ladder tries
+/// the next helper. Taking `&mut Vec<u8>` (rather than consuming it) is what
+/// makes the failure-path wipe directly testable.
+fn finish_helper_output(success: bool, stdout: &mut Vec<u8>) -> Option<Zeroizing<String>> {
+    if !success {
+        stdout.zeroize();
+        return None;
+    }
+    // Validate before moving the buffer, so an invalid-UTF-8 read is wiped in
+    // place and the caller-visible buffer proves the wipe happened.
+    if std::str::from_utf8(stdout).is_err() {
+        stdout.zeroize();
+        return None;
+    }
+    match String::from_utf8(std::mem::take(stdout)) {
+        Ok(text) => Some(Zeroizing::new(text)),
+        // Unreachable after the validation above; wipe anyway so the
+        // "every failure path zeroizes" invariant has no gap.
+        Err(error) => {
+            let mut bytes = error.into_bytes();
+            bytes.zeroize();
+            None
+        }
+    }
 }
 
 /// Why a clipboard operation failed.
@@ -539,5 +639,120 @@ mod tests {
             "dropping the guard releases the slot"
         );
         wait_until_idle();
+    }
+
+    // ── Helper resolution (PATH trust) ──
+
+    fn write_executable(path: &Path) {
+        std::fs::write(path, b"#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(path).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(path, permissions).unwrap();
+        }
+    }
+
+    #[test]
+    fn helper_resolution_finds_the_helper_in_the_given_directory() {
+        let trusted = tempfile::tempdir().unwrap();
+        write_executable(&trusted.path().join("xclip"));
+
+        // The resolver has no PATH input: it examines exactly the directories
+        // it is given, so production passing only the trusted list is the
+        // boundary that keeps a writable PATH entry from being used.
+        let resolved = resolve_helper_in(&[trusted.path().to_str().unwrap()], "xclip");
+
+        assert_eq!(resolved, Some(trusted.path().join("xclip")));
+    }
+
+    #[test]
+    fn trusted_helper_dirs_are_absolute_system_locations() {
+        assert!(!TRUSTED_HELPER_DIRS.is_empty());
+        for dir in TRUSTED_HELPER_DIRS {
+            assert!(
+                Path::new(dir).is_absolute(),
+                "a trusted helper dir must be absolute: {dir}"
+            );
+        }
+    }
+
+    #[test]
+    fn helper_resolution_returns_none_for_a_missing_helper() {
+        let dir = tempfile::tempdir().unwrap();
+
+        assert_eq!(
+            resolve_helper_in(&[dir.path().to_str().unwrap()], "xclip"),
+            None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn helper_resolution_requires_an_executable_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("xclip");
+        std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+            permissions.set_mode(0o644);
+            std::fs::set_permissions(&path, permissions).unwrap();
+        }
+
+        assert_eq!(
+            resolve_helper_in(&[dir.path().to_str().unwrap()], "xclip"),
+            None
+        );
+    }
+
+    #[test]
+    fn helper_resolution_rejects_a_directory_named_like_a_helper() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("xclip")).unwrap();
+
+        assert_eq!(
+            resolve_helper_in(&[dir.path().to_str().unwrap()], "xclip"),
+            None,
+            "a directory is not an executable helper"
+        );
+    }
+
+    // ── Helper output handling ──
+
+    #[test]
+    fn a_failed_helper_output_is_wiped() {
+        let mut stdout = b"partial secret".to_vec();
+
+        assert!(finish_helper_output(false, &mut stdout).is_none());
+        assert!(
+            stdout.iter().all(|&byte| byte == 0),
+            "a failed helper's captured bytes must be wiped"
+        );
+    }
+
+    #[test]
+    fn a_successful_helper_output_becomes_zeroizing_text() {
+        let mut stdout = b"secret".to_vec();
+
+        let text = finish_helper_output(true, &mut stdout).expect("valid text");
+
+        assert_eq!(text.as_str(), "secret");
+        assert!(
+            stdout.is_empty(),
+            "the bytes moved into the returned buffer"
+        );
+    }
+
+    #[test]
+    fn invalid_utf8_helper_output_is_wiped() {
+        let mut stdout = vec![0xff, 0xfe];
+
+        assert!(finish_helper_output(true, &mut stdout).is_none());
+        assert!(
+            stdout.iter().all(|&byte| byte == 0),
+            "invalid UTF-8 must be wiped in place"
+        );
     }
 }
