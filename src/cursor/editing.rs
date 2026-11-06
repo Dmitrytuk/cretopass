@@ -72,6 +72,20 @@ pub fn insert_str_at(text: &mut String, cursor: &mut usize, s: &str) {
     *cursor = pos + s.len();
 }
 
+/// Removes every control character from `text`, borrowing when there are none.
+///
+/// Used for single-line fields, where a line break is as unwanted as an escape
+/// sequence. (`ratatui`'s `Span` renderer filters `\n` but no other control
+/// character; stripping all of them keeps a single-line field strictly
+/// single-line.)
+pub(crate) fn strip_control_chars(text: &str) -> Cow<'_, str> {
+    if text.chars().any(char::is_control) {
+        Cow::Owned(text.chars().filter(|c| !c.is_control()).collect())
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 /// How a pasted string is sanitised before it enters a single-line field.
 ///
 /// A terminal clipboard often carries trailing newlines or entirely unrelated
@@ -79,7 +93,8 @@ pub fn insert_str_at(text: &mut String, cursor: &mut usize, s: &str) {
 /// every paste surface funnels through the same rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PastePolicy {
-    /// A single-line field: line breaks are dropped, everything else kept.
+    /// A single-line field: control characters (line breaks, `ESC`, `BEL`, …)
+    /// are dropped, everything else kept.
     SingleLine,
     /// A digits-only field (the generator length): everything but ASCII digits
     /// is dropped.
@@ -91,10 +106,7 @@ impl PastePolicy {
     /// needs to be removed.
     pub fn clean(self, text: &str) -> Cow<'_, str> {
         match self {
-            Self::SingleLine if text.contains(['\r', '\n']) => {
-                Cow::Owned(text.chars().filter(|c| *c != '\r' && *c != '\n').collect())
-            }
-            Self::SingleLine => Cow::Borrowed(text),
+            Self::SingleLine => strip_control_chars(text),
             Self::Digits if text.chars().all(|c| c.is_ascii_digit()) => Cow::Borrowed(text),
             Self::Digits => Cow::Owned(text.chars().filter(char::is_ascii_digit).collect()),
         }
@@ -262,5 +274,24 @@ mod tests {
             PastePolicy::Digits.clean("42"),
             Cow::Borrowed("42")
         ));
+    }
+
+    #[test]
+    fn strip_control_chars_borrows_clean_text_and_removes_controls() {
+        assert!(matches!(
+            strip_control_chars("plain text"),
+            Cow::Borrowed("plain text")
+        ));
+        assert_eq!(strip_control_chars("a\u{1b}[2Jb"), "a[2Jb");
+        assert_eq!(strip_control_chars("x\u{7}y\u{0}z"), "xyz");
+        assert_eq!(strip_control_chars("\u{1b}\u{7}"), "");
+    }
+
+    #[test]
+    fn single_line_policy_drops_terminal_escape_sequences() {
+        // A clipboard can carry a raw CSI sequence; the field must never keep
+        // the `ESC` that would let it drive the terminal at render time.
+        assert_eq!(PastePolicy::SingleLine.clean("pw\u{1b}[201~"), "pw[201~");
+        assert_eq!(PastePolicy::SingleLine.clean("a\tb"), "ab");
     }
 }

@@ -119,11 +119,13 @@ pub fn handle_key(key: KeyEvent, state: &mut FileBrowserState) -> Option<FileBro
                 state.search_active = false;
                 return None;
             }
-            KeyCode::Char(c) => {
+            KeyCode::Char(c) if !c.is_control() => {
                 state.search_query.push(c);
                 state.clamp_selection();
                 return None;
             }
+            // A control character is consumed and dropped, never routed on.
+            KeyCode::Char(_) => return None,
             KeyCode::Backspace => {
                 state.search_query.pop();
                 state.clamp_selection();
@@ -329,6 +331,31 @@ mod tests {
         assert_eq!(state.entries.len(), before + 1);
 
         let _ = std::fs::remove_dir(&created);
+    }
+
+    #[test]
+    fn a_control_char_is_rejected_by_the_name_input() {
+        let mut state = make_state(FileBrowserMode::CreateFile);
+        handle_key(key(KeyCode::Char('a')), &mut state);
+        handle_key(key(KeyCode::Char('d')), &mut state); // `ad` focuses the input
+        assert_eq!(state.focus, FocusTarget::Input);
+
+        handle_key(key(KeyCode::Char('x')), &mut state);
+        handle_key(key(KeyCode::Char('\u{9b}')), &mut state); // C1 CSI
+        handle_key(key(KeyCode::Char('\u{1b}')), &mut state); // ESC
+
+        assert_eq!(state.creating_name, "x", "control chars are dropped");
+    }
+
+    #[test]
+    fn a_control_char_is_rejected_by_the_search_box() {
+        let mut state = make_state(FileBrowserMode::OpenFile);
+        state.search_active = true;
+
+        handle_key(key(KeyCode::Char('a')), &mut state);
+        handle_key(key(KeyCode::Char('\u{9b}')), &mut state);
+
+        assert_eq!(state.search_query, "a", "control chars are dropped");
     }
 
     #[test]

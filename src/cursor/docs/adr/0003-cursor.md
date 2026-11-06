@@ -30,6 +30,8 @@ descriptions.
 | `backspace_at(text, cursor) → usize` | Remove the char left of the cursor, return the new offset |
 | `delete_at(text, cursor)` | Remove the char under the cursor |
 | `insert_char_at(text, cursor, c)` | Insert a char, advancing `cursor` past it |
+| `strip_control_chars(text) → Cow<str>` | Drop every control character (single-line fields) |
+| `PastePolicy::clean(text) → Cow<str>` | Sanitise a paste: `SingleLine` drops control chars, `Digits` keeps ASCII digits |
 | `selected_style(is_selected) → Style` | Style for a multi-row selected item |
 | `selected_span(text, is_selected) → Span` | Render a list row with the `▸`/pad prefix |
 | `cursor_field_spans(label, text, cursor) → Vec<Span>` | Render `text` with an inverted cursor cell under the byte offset |
@@ -38,7 +40,23 @@ descriptions.
 
 `editing` is re-exported `pub`; `secret_field` is re-exported `pub(crate)` — the
 password prompts are its only consumers, so the public surface stays the
-low-level primitives.
+low-level primitives. `strip_control_chars` is `pub(crate)`: only the paste
+policy calls it.
+
+## Sanitising pasted text
+
+`ratatui`'s `Span` renderer filters only `\n` and writes any other control
+character straight into a cell, so a clipboard payload carrying a raw `ESC` (or
+`BEL`, C1, …) could drive the terminal after a paste. `PastePolicy::SingleLine`
+therefore routes every paste through `strip_control_chars`, which drops **every**
+control character; `PastePolicy::Digits` keeps only ASCII digits. Typed input is
+guarded the same way before any insert: `theming::Action::insert` rejects a
+control character, and the File Browser's text-edit and search handlers apply
+the same rule.
+
+This is a deliberate tightening: a control character can no longer be typed or
+pasted into a field, so a value that previously carried one (a tab pasted into a
+passphrase) must be re-entered.
 
 ## Editing quirks
 

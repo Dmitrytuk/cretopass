@@ -96,6 +96,21 @@ pub enum Action {
 }
 
 impl Action {
+    /// An [`Action::InsertChar`] for `c`, or [`Action::None`] when `c` is a
+    /// control character.
+    ///
+    /// `crossterm` can deliver a control character as `KeyCode::Char` — a C1
+    /// control, or a paste on a terminal that ignored bracketed paste. A text
+    /// field must never store one, so they are rejected at the dispatch
+    /// boundary, before any insert path can see them.
+    fn insert(c: char) -> Self {
+        if c.is_control() {
+            Self::None
+        } else {
+            Self::InsertChar(c)
+        }
+    }
+
     pub fn from_normal(key: &KeyEvent) -> Self {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             return match key.code {
@@ -171,7 +186,7 @@ impl Action {
             KeyCode::Enter => Self::ConfirmSearch,
             KeyCode::Esc => Self::ClearSearch,
             KeyCode::Backspace => Self::Backspace,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -220,7 +235,7 @@ impl Action {
             KeyCode::End => Self::CursorEnd,
             KeyCode::Backspace => Self::Backspace,
             KeyCode::Delete => Self::DeleteChar,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -273,7 +288,7 @@ impl Action {
             KeyCode::Delete => Self::DeleteChar,
             KeyCode::Enter => Self::ExitInput,
             KeyCode::Esc => Self::ExitInput,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -311,7 +326,7 @@ impl Action {
             KeyCode::Esc => Self::Cancel,
             KeyCode::Enter => Self::Confirm,
             KeyCode::Backspace | KeyCode::Delete => Self::Backspace,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -367,7 +382,7 @@ impl Action {
             KeyCode::Right => Self::CursorRight,
             KeyCode::Home => Self::CursorHome,
             KeyCode::End => Self::CursorEnd,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -393,7 +408,7 @@ impl Action {
             KeyCode::Right => Self::CursorRight,
             KeyCode::Home => Self::CursorHome,
             KeyCode::End => Self::CursorEnd,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -414,7 +429,7 @@ impl Action {
             KeyCode::Right => Self::CursorRight,
             KeyCode::Home => Self::CursorHome,
             KeyCode::End => Self::CursorEnd,
-            KeyCode::Char(c) => Self::InsertChar(c),
+            KeyCode::Char(c) => Self::insert(c),
             _ => Self::None,
         }
     }
@@ -992,6 +1007,37 @@ mod tests {
         );
         assert_eq!(
             Action::from_symbol_checklist(&key(KeyCode::Char('x'))),
+            Action::None
+        );
+    }
+
+    #[test]
+    fn a_control_char_key_never_inserts() {
+        // `crossterm` can deliver a control character as `KeyCode::Char` (a C1
+        // control, or a paste on a terminal that ignored bracketed paste); a
+        // text field must reject it rather than store it.
+        assert_eq!(
+            Action::from_search(&key(KeyCode::Char('\u{9b}'))),
+            Action::None
+        );
+        assert_eq!(
+            Action::from_form_input(&key(KeyCode::Char('\u{1b}'))),
+            Action::None
+        );
+        assert_eq!(
+            Action::from_create_secret_file(&key(KeyCode::Char('\u{7}'))),
+            Action::None
+        );
+        assert_eq!(
+            Action::from_custom_field_name(&key(KeyCode::Char('\u{9b}'))),
+            Action::None
+        );
+        assert_eq!(
+            Action::from_generator(&key(KeyCode::Char('\u{1b}'))),
+            Action::None
+        );
+        assert_eq!(
+            Action::from_change_pw_input(&key(KeyCode::Char('\u{9b}'))),
             Action::None
         );
     }
