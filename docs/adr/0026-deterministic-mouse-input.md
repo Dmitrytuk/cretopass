@@ -35,6 +35,15 @@ Rules that follow from it:
   single left click while a leaf is activated by the right button (which opens its
   Detail); a right click on a Detail field row copies the value (an empty value is a
   silent no-op).
+- **An outside click is that modal's `Esc`.** A left click that misses a dismissable
+  modal's panel runs the modal's own `Esc` handler — the same code path as the key —
+  so a click closes a form, closes an export/share wizard, unwinds one nested popup
+  (a nested confirmation steps back one level), discards Configuration edits, or
+  declines a Confirmation. A click can still never answer `y`. A modal that has not
+  been drawn yet records no panel, so a stray click cannot dismiss it. The File
+  Browser-backed export/share destination steps are a deliberate exception: their
+  clickable list fills most of the screen, so a click beside it reads as a near-miss
+  rather than a request to abandon the whole flow.
 - **Destructive prompts take no clicks.** The Tree's confirmation prompts
   (delete-field, share-without-password) record no hit-boxes, the File Browser's
   click handler returns early while a delete/overwrite confirm is pending (its list
@@ -60,7 +69,8 @@ app already offers through its own clipboard gateway ([ADR 0025](0025-clipboard-
 - Caret positioning by clicking inside a field (per-character hit-testing; odd for
   masked fields).
 - Click-to-select/extend text, drag, double-click word selection.
-- Clicks on the status bar or title bar.
+- Clicks on the status bar or title bar. With a dismissable modal open, a click that
+  lands there is simply outside the modal's panel and counts as its `Esc`.
 
 ## Consequences
 

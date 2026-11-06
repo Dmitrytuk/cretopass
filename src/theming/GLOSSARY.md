@@ -71,5 +71,7 @@ A left/right button press that a screen hit-tests on its Hit-boxes and turns int
 the same `Action` its key would produce. A click first moves the selection to the
 clicked row; a repeat click on the already-selected row activates it. The right
 button copies a Detail field's value. Drags and moves are ignored, and a
-destructive confirmation has no Hit-boxes at all, so no click can answer `y`.
+destructive confirmation has no Hit-boxes at all, so no click can answer `y`. A left
+click outside a dismissable Modal's panel is that Modal's `Esc`; a Modal that has not
+been drawn records no panel and cannot be dismissed that way.
 _Avoid_: Tap, press
