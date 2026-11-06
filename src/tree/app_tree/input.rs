@@ -1,17 +1,18 @@
 //! Input routing: keys, mouse and paste, dispatched to the tree or the modal.
 //!
-//! Every input device funnels through a small classifier ([`key_route`],
-//! [`handle_mouse`]) so a click and its key run the same code: the renderer owns
-//! the geometry, a click maps to the same [`Action`](crate::theming::Action) a
-//! key would produce, and [`dispatch_action`] performs it. A modal is taken out
-//! of the state for the duration of its handler so it can borrow the tree.
+//! Every input device funnels through the shared classifier
+//! [`route_key`](crate::theming::route_key) and [`handle_mouse`] so a click and
+//! its key run the same code: the renderer owns the geometry, a click maps to the
+//! same [`Action`](crate::theming::Action) a key would produce, and
+//! [`dispatch_action`] performs it. A modal is taken out of the state for the
+//! duration of its handler so it can borrow the tree.
 
 use std::io;
 
 use crate::clipboard;
 use crate::cursor::PastePolicy;
 use crate::file_handling::{Autosave, SaveError};
-use crate::theming::{Action, is_clipboard_paste, wheel_nav_key};
+use crate::theming::{Action, KeyRoute, route_key, wheel_nav_key};
 use crate::tree::node::Node;
 use crate::tree::widget::{
     AddPosition, Detail, ExportWizard, Help, InputMode, Modal, SaveExit, SaveState, ShareWizard,
@@ -25,32 +26,6 @@ use zeroize::Zeroizing;
 use super::r#loop::{AutosaveAction, autosave_action};
 use super::render::ui;
 
-/// Where a key press goes once the save overlay has been ruled out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum KeyRoute {
-    /// Read the system clipboard and paste it.
-    Paste,
-    /// Hand the key to the active modal.
-    Modal,
-    /// Hand the key to the navigation dispatcher for the current mode.
-    Navigation,
-}
-
-/// Classifies a key press before it reaches any dispatcher.
-///
-/// The clipboard-paste chord is checked first, so `Ctrl+V` can never fall
-/// through to a `Char(c)` arm and type the letter `v`. Routing it here — rather
-/// than inside twelve dispatchers — is what makes "nowhere else" structural.
-pub(super) fn key_route(key: &event::KeyEvent, state: &TreeState) -> KeyRoute {
-    if is_clipboard_paste(key) {
-        KeyRoute::Paste
-    } else if state.modal.is_some() {
-        KeyRoute::Modal
-    } else {
-        KeyRoute::Navigation
-    }
-}
-
 /// Runs one key press through routing and the autosave bookkeeping.
 ///
 /// Both a real key and a wheel tick arrive here, so the two input devices cannot
@@ -62,10 +37,10 @@ pub(super) fn handle_key_press<B: Backend>(
     autosave: &mut Option<Autosave<Node>>,
     submitted: &mut u64,
 ) -> io::Result<()> {
-    match key_route(&key, state) {
+    match route_key(&key, state.modal.is_some()) {
         KeyRoute::Paste => paste_from_clipboard(state),
         KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
-        KeyRoute::Navigation => dispatch_key(key, state),
+        KeyRoute::Screen => dispatch_key(key, state),
     }
     flush_autosave(state, autosave, submitted);
     Ok(())

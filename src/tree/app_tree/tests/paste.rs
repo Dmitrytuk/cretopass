@@ -8,18 +8,18 @@ fn ctrl_v_classifies_as_paste_even_with_a_modal_open() {
     // With a modal open, `Ctrl+V` still pastes rather than reaching it.
     let with_modal = editing_state();
     assert_eq!(
-        key_route(&ctrl(KeyCode::Char('v')), &with_modal),
+        route_key(&ctrl(KeyCode::Char('v')), with_modal.modal.is_some()),
         KeyRoute::Paste
     );
     // A bare `v` reaches the modal, where it types.
     assert_eq!(
-        key_route(&key(KeyCode::Char('v')), &with_modal),
+        route_key(&key(KeyCode::Char('v')), with_modal.modal.is_some()),
         KeyRoute::Modal
     );
     // With no modal, `Ctrl+V` pastes instead of navigating.
     let no_modal = TreeState::new(Node::new("Root"));
     assert_eq!(
-        key_route(&ctrl(KeyCode::Char('v')), &no_modal),
+        route_key(&ctrl(KeyCode::Char('v')), no_modal.modal.is_some()),
         KeyRoute::Paste
     );
 }

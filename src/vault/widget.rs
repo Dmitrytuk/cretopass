@@ -27,7 +27,7 @@ use crate::clipboard;
 use crate::hitbox::is_left;
 use crate::theming::SPINNER_TICK;
 use crate::theming::Status;
-use crate::theming::{is_clipboard_paste, wheel_nav_key};
+use crate::theming::{KeyRoute, route_key, wheel_nav_key};
 
 use menu::handle_home_key;
 use modal::Modal;
@@ -66,31 +66,6 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     }
 }
 
-/// Where a key press goes once it has been read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum KeyRoute {
-    /// Read the system clipboard and paste it.
-    Paste,
-    /// Hand the key to the Home menu.
-    Menu,
-    /// Hand the key to the active modal.
-    Modal,
-}
-
-/// Classifies a key press before it reaches any handler.
-///
-/// The clipboard-paste chord is checked first, so `Ctrl+V` can never fall
-/// through to a text field and type the letter `v`.
-fn key_route(key: &event::KeyEvent, state: &HomeState) -> KeyRoute {
-    if is_clipboard_paste(key) {
-        KeyRoute::Paste
-    } else if state.modal.is_none() {
-        KeyRoute::Menu
-    } else {
-        KeyRoute::Modal
-    }
-}
-
 /// Handles one terminal event: a `Ctrl+V` is serviced as a clipboard paste, a
 /// term-native (bracketed) paste is applied to the active input, a key press
 /// goes to the menu or the active modal, and anything else is ignored.
@@ -100,11 +75,13 @@ fn handle_event<B: Backend>(
     terminal: &mut Terminal<B>,
 ) -> io::Result<()> {
     match event {
-        Event::Key(key) if key.kind == KeyEventKind::Press => match key_route(&key, state) {
-            KeyRoute::Paste => paste_from_clipboard(state),
-            KeyRoute::Menu => handle_home_key(key, state, terminal)?,
-            KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
-        },
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
+            match route_key(&key, state.modal.is_some()) {
+                KeyRoute::Paste => paste_from_clipboard(state),
+                KeyRoute::Screen => handle_home_key(key, state, terminal)?,
+                KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
+            }
+        }
         Event::Paste(text) => {
             // The event buffer can hold a secret; wipe it on drop, like the
             // `Ctrl+V` source does.
@@ -134,10 +111,10 @@ fn handle_mouse<B: Backend>(
                 return Ok(());
             }
             if let Some(key) = wheel_nav_key(&mouse) {
-                match key_route(&key, state) {
+                match route_key(&key, state.modal.is_some()) {
                     // A wheel tick carries no modifiers, so it is never the paste chord.
                     KeyRoute::Paste => {}
-                    KeyRoute::Menu => handle_home_key(key, state, terminal)?,
+                    KeyRoute::Screen => handle_home_key(key, state, terminal)?,
                     KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
                 }
             }
@@ -908,12 +885,21 @@ mod tests {
             vec![1],
         )));
 
-        assert_eq!(key_route(&paste_key(), &with_modal), KeyRoute::Paste);
-        assert_eq!(key_route(&bare_v(), &with_modal), KeyRoute::Modal);
+        assert_eq!(
+            route_key(&paste_key(), with_modal.modal.is_some()),
+            KeyRoute::Paste
+        );
+        assert_eq!(
+            route_key(&bare_v(), with_modal.modal.is_some()),
+            KeyRoute::Modal
+        );
 
         let menu = HomeState::with_config(Configuration::default());
-        assert_eq!(key_route(&paste_key(), &menu), KeyRoute::Paste);
-        assert_eq!(key_route(&bare_v(), &menu), KeyRoute::Menu);
+        assert_eq!(
+            route_key(&paste_key(), menu.modal.is_some()),
+            KeyRoute::Paste
+        );
+        assert_eq!(route_key(&bare_v(), menu.modal.is_some()), KeyRoute::Screen);
     }
 
     // ── Mouse wheel routing ──

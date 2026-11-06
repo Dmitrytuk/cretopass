@@ -29,7 +29,7 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 | `widget/orchestrator.rs` | the one place a `TreeAction` becomes real work: system clipboard, export file write, screen transitions |
 | `app_tree.rs` | module facade: declares the sub-modules and re-exports the public API (`run_app`, `SaveTarget`, `ExitStatus`). Holds no logic |
 | `app_tree/loop.rs` | the async `run_app()` driver (`EventStream` + `tokio::select!`), autosave submission, the bounded exit flush with the force-quit escape hatch, and the autosave/exit policy (`autosave_action`, `exit_plan`, the save-overlay handlers) |
-| `app_tree/input.rs` | input routing: `key_route`, key/mouse/click dispatch, paste plumbing, and the navigation-mode handlers |
+| `app_tree/input.rs` | input routing: key/mouse/click dispatch, paste plumbing, and the navigation-mode handlers (the shared `KeyRoute`/`route_key` classifier lives in `theming/key.rs`) |
 | `app_tree/render.rs` | `ui()`: paints the tree through the renderer, the unified status bar, and the search / save-error / discard-confirm overlays |
 
 ## Data model

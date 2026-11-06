@@ -27,6 +27,38 @@ pub fn wheel_nav_key(mouse: &MouseEvent) -> Option<KeyEvent> {
     Some(KeyEvent::new(code, KeyModifiers::NONE))
 }
 
+/// Where a key press goes before it reaches any dispatcher.
+///
+/// Shared by every screen that reads its own keys (today the Tree and the Home
+/// screen). Classifying once, up front, is what makes the invariant "`Ctrl+V`
+/// never falls through to a `Char(c)` arm and types the letter `v`" structural:
+/// the paste chord is checked first, so a new screen cannot silently regress it
+/// by forgetting the check in its own dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeyRoute {
+    /// Read the system clipboard and paste it.
+    Paste,
+    /// Hand the key to the active modal.
+    Modal,
+    /// Hand the key to the screen's own dispatcher. The Tree calls it
+    /// navigation; the Home screen calls it the menu — the same route.
+    Screen,
+}
+
+/// Classifies a key press before it reaches any dispatcher.
+///
+/// The clipboard-paste chord is checked first, so `Ctrl+V` can never fall
+/// through to a text field.
+pub(crate) fn route_key(key: &KeyEvent, modal_open: bool) -> KeyRoute {
+    if is_clipboard_paste(key) {
+        KeyRoute::Paste
+    } else if modal_open {
+        KeyRoute::Modal
+    } else {
+        KeyRoute::Screen
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Action {
     NavDown,
@@ -725,6 +757,16 @@ mod tests {
 
     fn ctrl(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn route_key_checks_the_paste_chord_before_the_modal() {
+        // The chord wins whatever the screen state, so a paste can never fall
+        // through to a `Char(c)` arm; without it, the modal decides.
+        assert_eq!(route_key(&ctrl(KeyCode::Char('v')), true), KeyRoute::Paste);
+        assert_eq!(route_key(&ctrl(KeyCode::Char('v')), false), KeyRoute::Paste);
+        assert_eq!(route_key(&key(KeyCode::Char('v')), true), KeyRoute::Modal);
+        assert_eq!(route_key(&key(KeyCode::Char('v')), false), KeyRoute::Screen);
     }
 
     #[test]
