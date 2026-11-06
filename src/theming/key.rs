@@ -6,7 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKi
 /// reach a plain-char match that would otherwise type the letter. `Ctrl+Shift+V`
 /// counts too: a shifted `V` arrives uppercase, and terminals report their own
 /// paste that way.
-pub fn is_clipboard_paste(key: &KeyEvent) -> bool {
+pub(crate) fn is_clipboard_paste(key: &KeyEvent) -> bool {
     key.modifiers.contains(KeyModifiers::CONTROL)
         && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
 }
@@ -18,7 +18,7 @@ pub fn is_clipboard_paste(key: &KeyEvent) -> bool {
 /// dispatch, with no per-screen coordinate math. Every other mouse event — a
 /// click, a drag, a move — maps to `None`, because those are hit-tested against
 /// a screen's own targets rather than translated into keys.
-pub fn wheel_nav_key(mouse: &MouseEvent) -> Option<KeyEvent> {
+pub(crate) fn wheel_nav_key(mouse: &MouseEvent) -> Option<KeyEvent> {
     let code = match mouse.kind {
         MouseEventKind::ScrollUp => KeyCode::Up,
         MouseEventKind::ScrollDown => KeyCode::Down,
