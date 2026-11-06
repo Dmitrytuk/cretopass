@@ -51,8 +51,9 @@ password pair that the Tree and Home share flows both use, and never imports
 The `clipboard` module is a strict leaf below `tree`: `tree::widget::orchestrator`
 calls `clipboard::copy_text` when the Detail modal reports a copy, and the module
 owns the process-wide `arboard::Clipboard` handle without importing `TreeState`
-([0025](0025-clipboard-gateway.md)). `clipboard::paste_text` is the read side: the
-two event loops read it once for `Ctrl+V` and hand the text to the active surface.
+([0025](0025-clipboard-gateway.md)). `clipboard::PasteJob` is the read side: the
+two event loops start it for `Ctrl+V`, poll it off the UI thread, and hand the
+resulting text to the active surface.
 
 `hitbox` is a strict leaf below every screen: each renderer records the `HitBox`es of
 its clickable rows, and the event loop turns a click into the same `Action` its key

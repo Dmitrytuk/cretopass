@@ -13,6 +13,7 @@
 
 use std::io;
 
+use crate::clipboard;
 use crate::file_handling::{
     Autosave, CancelToken, SAVE_TIMEOUT, SaveError, SaveEvent, save_tree_guarded,
 };
@@ -27,7 +28,8 @@ use tokio::time::MissedTickBehavior;
 use zeroize::Zeroizing;
 
 use super::input::{
-    apply_paste, browser_loading, handle_key_press, handle_mouse, poll_browser_listing,
+    apply_paste, apply_paste_result, browser_loading, handle_key_press, handle_mouse,
+    poll_browser_listing,
 };
 use super::render::ui;
 
@@ -92,6 +94,10 @@ pub fn run_app<B: Backend>(
         let mut events = EventStream::new();
         terminal.draw(|f| ui(f, state))?;
 
+        // A `Ctrl+V` read runs on a worker thread; this holds the in-flight job
+        // so the tick branch can pick its result up without blocking the loop.
+        let mut paste: Option<clipboard::PasteJob> = None;
+
         // Drives the title-bar spinner. The first tick is immediate, but the
         // tick branch below is guarded by `save_state.spins()`, so the app does
         // not redraw at the spinner rate while nothing is outstanding.
@@ -125,11 +131,19 @@ pub fn run_app<B: Backend>(
                                     terminal,
                                     &mut autosave,
                                     &mut submitted,
+                                    &mut paste,
                                 )?;
                             }
                         }
                         Some(Ok(Event::Mouse(mouse))) => {
-                            handle_mouse(mouse, state, terminal, &mut autosave, &mut submitted)?;
+                            handle_mouse(
+                                mouse,
+                                state,
+                                terminal,
+                                &mut autosave,
+                                &mut submitted,
+                                &mut paste,
+                            )?;
                         }
                         Some(Ok(Event::Paste(text))) => {
                             // A term-native paste arrives atomically as one event
@@ -184,11 +198,16 @@ pub fn run_app<B: Backend>(
                     }
                 }
                 // The tick drives the save spinner and also polls the File
-                // Browser's directory listing, so a browser waiting on a slow
-                // filesystem stays responsive and its `Loading…` row is redrawn.
-                _ = tick.tick(), if state.save_state.spins() || browser_loading(state) => {
+                // Browser's directory listing and an in-flight clipboard read,
+                // so a browser waiting on a slow filesystem and a hung
+                // clipboard owner both stay off the event loop.
+                _ = tick.tick(), if state.save_state.spins() || browser_loading(state) || paste.is_some() => {
                     state.spinner.advance();
                     poll_browser_listing(state);
+                    if let Some(result) = paste.as_mut().and_then(clipboard::PasteJob::poll) {
+                        paste = None;
+                        apply_paste_result(result, state);
+                    }
                 }
             }
 

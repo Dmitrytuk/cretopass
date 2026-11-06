@@ -35,6 +35,10 @@ Rules that follow from it:
   next copy re-initialises. A poisoned mutex is recovered with
   `PoisonError::into_inner()`: the cache holds no invariant a panic could break,
   so refusing to use it would only break copying for good.
+- **The UI never blocks on the handle.** A read runs on a worker and may hold the
+  cached handle while a wedged selection owner hangs, so the copy path takes the
+  mutex with `try_lock`; a taken lock reports `Busy` and falls through to the
+  helper instead of freezing the UI thread.
 - **The verdict is a uniform result modal.** `Detail` no longer owns a transient
   alert: `CopyToClipboard` is handled in
   [`orchestrator`](../../src/tree/widget/orchestrator.rs) by `report_copy`, which
@@ -46,12 +50,23 @@ Rules that follow from it:
 
 ## Reading — clipboard paste
 
-`clipboard::paste_text` is the read side of the same gateway: `arboard.get_text()`
-first, then the read ladder `wl-paste -n` → `xclip -o -selection clipboard` →
-`xsel -b -o` (Linux) and `pbpaste` (macOS). It reuses the same process-wide handle and
-returns the text in a `Zeroizing<String>`, because a clipboard read usually carries a
-secret. `ClipboardError::Read` reports an unreadable clipboard, and the screens treat
-that as a silent no-op: a paste that cannot happen never shows a false success.
+`clipboard::PasteJob` is the read side of the same gateway: it starts
+`arboard.get_text()` (then the read ladder `wl-paste -n` → `xclip -o -selection
+clipboard` → `xsel -b -o` on Linux, `pbpaste` on macOS) on a **worker thread**.
+It reuses the same process-wide handle and returns the text in a
+`Zeroizing<String>`, because a clipboard read usually carries a secret.
+
+The read is **non-blocking**: a hung X11 selection owner or a wedged helper can
+block `get_text`/`output` indefinitely, so the two event loops never call it
+directly. Each loop holds the in-flight `PasteJob` and polls it on its normal
+tick; once the result lands (or `PASTE_TIMEOUT`, 500 ms, elapses) the job is
+dropped and the text handed to the active surface. A worker that outlives the
+timeout is detached and its late result discarded; an RAII single-flight slot
+(`PASTE_READ_IN_FLIGHT`, released even if the worker panics) keeps at most one
+worker alive, so repeated `Ctrl+V` cannot accumulate blocked threads on the
+shared handle. `ClipboardError::Timeout`, `Busy`, `WorkerStopped` and `Spawn`
+report those cases, and the screens treat every read error as a silent no-op: a
+paste that cannot happen never shows a false success.
 
 `Ctrl+V` is intercepted **once per event loop**, before any dispatcher, so it can never
 fall through to a `Char(c)` arm and type the letter `v`; the same `apply_paste` serves a

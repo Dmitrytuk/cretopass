@@ -36,9 +36,10 @@ pub(super) fn handle_key_press<B: Backend>(
     terminal: &mut Terminal<B>,
     autosave: &mut Option<Autosave<Node>>,
     submitted: &mut u64,
+    paste: &mut Option<clipboard::PasteJob>,
 ) -> io::Result<()> {
     match route_key(&key, state.modal.is_some()) {
-        KeyRoute::Paste => paste_from_clipboard(state),
+        KeyRoute::Paste => start_paste(state, paste),
         KeyRoute::Modal => handle_modal_key(key, state, terminal)?,
         KeyRoute::Screen => dispatch_key(key, state),
     }
@@ -86,6 +87,7 @@ pub(super) fn handle_mouse<B: Backend>(
     terminal: &mut Terminal<B>,
     autosave: &mut Option<Autosave<Node>>,
     submitted: &mut u64,
+    paste: &mut Option<clipboard::PasteJob>,
 ) -> io::Result<()> {
     if state.save_exit != SaveExit::None || state.save_state.overlay_message().is_some() {
         return Ok(());
@@ -96,7 +98,7 @@ pub(super) fn handle_mouse<B: Backend>(
                 return Ok(());
             }
             if let Some(key) = wheel_nav_key(&mouse) {
-                handle_key_press(key, state, terminal, autosave, submitted)?;
+                handle_key_press(key, state, terminal, autosave, submitted, paste)?;
             }
         }
         MouseEventKind::Down(button) => {
@@ -498,27 +500,27 @@ pub(super) fn apply_paste(text: &str, state: &mut TreeState) {
     }
 }
 
-/// Reads the system clipboard and applies it to the active surface.
-fn paste_from_clipboard(state: &mut TreeState) {
-    paste_into(state, clipboard::paste_text);
+/// Starts a clipboard read for a `Ctrl+V`, if some surface can accept a paste.
+///
+/// The read runs on a worker ([`clipboard::PasteJob`]) because a hung X11
+/// selection owner must not freeze the event loop; the loop polls the job on its
+/// normal tick and hands the result to [`apply_paste_result`]. A job already in
+/// flight is left alone, and with no surface the read is skipped entirely.
+pub(super) fn start_paste(state: &TreeState, paste: &mut Option<clipboard::PasteJob>) {
+    if paste_target(state) && paste.is_none() {
+        *paste = clipboard::PasteJob::spawn().ok();
+    }
 }
 
-/// Applies the result of `read` to the active surface.
+/// Applies a finished clipboard read to the active surface.
 ///
-/// An unreadable or empty clipboard is a silent no-op: pasting must never show
-/// a false success or disturb the field. When no surface can accept a paste the
-/// read is skipped entirely — it is synchronous, and a hung X11 clipboard owner
-/// must not freeze the UI for a `Ctrl+V` that provably does nothing. Taking the
-/// read as an argument is what lets the failure path be tested without a
-/// display.
-pub(super) fn paste_into(
+/// An unreadable, timed-out or empty clipboard is a silent no-op: pasting must
+/// never show a false success or disturb the field.
+pub(super) fn apply_paste_result(
+    result: Result<Zeroizing<String>, clipboard::ClipboardError>,
     state: &mut TreeState,
-    read: impl FnOnce() -> Result<Zeroizing<String>, clipboard::ClipboardError>,
 ) {
-    if !paste_target(state) {
-        return;
-    }
-    if let Ok(text) = read() {
+    if let Ok(text) = result {
         apply_paste(&text, state);
     }
 }

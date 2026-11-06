@@ -46,14 +46,15 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             render(f, area, &mut state);
         })?;
 
-        // While the File Browser is waiting for a directory listing, keep
-        // redrawing on the spinner tick so the UI never looks frozen — but still
-        // read keys, so Esc closes the browser immediately while the fs call is
-        // stuck on another thread.
-        if browser_is_loading(&state) {
-            // Apply any completed listing every iteration, so a result is never
-            // stuck behind a stream of keys.
+        // While the File Browser is waiting for a directory listing, or a
+        // clipboard read is in flight, keep redrawing on the spinner tick so the
+        // UI never looks frozen — but still read keys, so Esc closes the browser
+        // immediately while the fs call is stuck on another thread.
+        if browser_is_loading(&state) || state.paste.is_some() {
+            // Apply any completed listing/paste every iteration, so a result is
+            // never stuck behind a stream of keys.
             poll_browser_listing(&mut state);
+            poll_paste(&mut state);
             if event::poll(SPINNER_TICK)? {
                 handle_event(event::read()?, &mut state, terminal)?;
             } else {
@@ -179,27 +180,37 @@ fn apply_paste(text: &str, state: &mut HomeState) {
     }
 }
 
-/// Reads the system clipboard and applies it to the active surface.
-fn paste_from_clipboard(state: &mut HomeState) {
-    paste_into(state, clipboard::paste_text);
-}
-
-/// Applies the result of `read` to the active surface.
+/// Starts a clipboard read for a `Ctrl+V`, if the active modal can accept one.
 ///
-/// An unreadable or empty clipboard is a silent no-op: pasting must never show
-/// a false success or disturb the field. With no modal open — the menu itself
-/// has no text input — the read is skipped entirely: it is synchronous, and a
-/// hung X11 clipboard owner must not freeze the UI for a `Ctrl+V` that provably
-/// does nothing. Taking the read as an argument is what lets the skip and the
-/// failure path be tested without a display.
-fn paste_into(
-    state: &mut HomeState,
-    read: impl FnOnce() -> Result<Zeroizing<String>, clipboard::ClipboardError>,
-) {
-    if state.modal.is_none() {
+/// The read runs on a worker ([`clipboard::PasteJob`]) because a hung X11
+/// selection owner must not freeze the event loop; [`poll_paste`] picks the
+/// result up on the spinner tick. With no modal — the menu itself has no text
+/// input — the read is skipped entirely. A job already in flight is left alone.
+fn paste_from_clipboard(state: &mut HomeState) {
+    if state.modal.is_none() || state.paste.is_some() {
         return;
     }
-    if let Ok(text) = read() {
+    state.paste = clipboard::PasteJob::spawn().ok();
+}
+
+/// Applies the result of an in-flight clipboard read, if any.
+///
+/// An unreadable, timed-out or empty clipboard is a silent no-op: pasting must
+/// never show a false success or disturb the field.
+fn poll_paste(state: &mut HomeState) {
+    let Some(result) = state.paste.as_mut().and_then(clipboard::PasteJob::poll) else {
+        return;
+    };
+    state.paste = None;
+    apply_paste_result(result, state);
+}
+
+/// Applies a finished clipboard read to the active modal.
+fn apply_paste_result(
+    result: Result<Zeroizing<String>, clipboard::ClipboardError>,
+    state: &mut HomeState,
+) {
+    if let Ok(text) = result {
         apply_paste(&text, state);
     }
 }
@@ -841,14 +852,13 @@ mod tests {
     fn a_paste_with_no_modal_skips_the_clipboard_read() {
         let mut state = HomeState::with_config(Configuration::default());
         assert!(state.modal.is_none());
-        let mut read = false;
 
-        paste_into(&mut state, || {
-            read = true;
-            Ok(Zeroizing::new("ignored".to_string()))
-        });
+        paste_from_clipboard(&mut state);
 
-        assert!(!read, "the synchronous read must be skipped with no modal");
+        assert!(
+            state.paste.is_none(),
+            "no clipboard worker is started with no modal"
+        );
     }
 
     #[test]
@@ -859,9 +869,10 @@ mod tests {
             vec![1],
         )));
 
-        paste_into(&mut state, || {
-            Err(clipboard::ClipboardError::Read("no display".to_string()))
-        });
+        apply_paste_result(
+            Err(clipboard::ClipboardError::Read("no display".to_string())),
+            &mut state,
+        );
 
         match &state.modal {
             Some(Modal::Unlock(prompt)) => assert_eq!(prompt.typed().as_str(), ""),

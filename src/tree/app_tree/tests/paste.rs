@@ -30,9 +30,10 @@ fn a_failed_clipboard_read_leaves_the_form_untouched() {
     handle_form(key(KeyCode::Char('i')), &mut state);
     let before = form_of(&state).scratch.as_ref().map(|s| s.text.clone());
 
-    paste_into(&mut state, || {
-        Err(clipboard::ClipboardError::Read("no display".to_string()))
-    });
+    apply_paste_result(
+        Err(clipboard::ClipboardError::Read("no display".to_string())),
+        &mut state,
+    );
 
     assert_eq!(
         form_of(&state).scratch.as_ref().map(|s| s.text.clone()),
@@ -46,7 +47,7 @@ fn a_clipboard_read_reaches_the_open_form() {
     let mut state = editing_state();
     handle_form(key(KeyCode::Char('i')), &mut state);
 
-    paste_into(&mut state, || Ok(Zeroizing::new("pw".to_string())));
+    apply_paste_result(Ok(Zeroizing::new("pw".to_string())), &mut state);
 
     assert_eq!(form_of(&state).scratch.as_ref().unwrap().text, "Rootpw");
 }
@@ -56,25 +57,22 @@ fn an_empty_clipboard_read_changes_nothing() {
     let mut state = editing_state();
     handle_form(key(KeyCode::Char('i')), &mut state);
 
-    paste_into(&mut state, || Ok(Zeroizing::new(String::new())));
+    apply_paste_result(Ok(Zeroizing::new(String::new())), &mut state);
 
     assert_eq!(form_of(&state).scratch.as_ref().unwrap().text, "Root");
 }
 
 #[test]
 fn a_paste_with_no_surface_skips_the_clipboard_read() {
-    let mut state = TreeState::new(Node::new("Root"));
+    let state = TreeState::new(Node::new("Root"));
     assert!(matches!(state.mode, InputMode::Normal));
-    let mut read = false;
+    let mut paste = None;
 
-    paste_into(&mut state, || {
-        read = true;
-        Ok(Zeroizing::new("x".to_string()))
-    });
+    start_paste(&state, &mut paste);
 
     assert!(
-        !read,
-        "the synchronous read must be skipped with no surface"
+        paste.is_none(),
+        "no clipboard worker is started with no paste surface"
     );
 }
 
@@ -82,10 +80,10 @@ fn a_paste_with_no_surface_skips_the_clipboard_read() {
 fn the_term_native_and_ctrl_v_sources_reach_the_same_field() {
     let mut via_chord = editing_state();
     handle_form(key(KeyCode::Char('i')), &mut via_chord);
-    paste_into(&mut via_chord, || Ok(Zeroizing::new("shared".to_string())));
+    apply_paste_result(Ok(Zeroizing::new("shared".to_string())), &mut via_chord);
 
     // `Event::Paste` calls `apply_paste` directly; the chord reaches it
-    // through `paste_into`. Both must land in the same place.
+    // through `apply_paste_result`. Both must land in the same place.
     let mut via_term = editing_state();
     handle_form(key(KeyCode::Char('i')), &mut via_term);
     apply_paste("shared", &mut via_term);

@@ -25,6 +25,7 @@ fn a_wheel_tick_moves_the_tree_selection() {
         &mut terminal,
         &mut None,
         &mut 0,
+        &mut None,
     )
     .unwrap();
     assert_eq!(state.selected, 1, "the wheel selects the next row");
@@ -35,6 +36,7 @@ fn a_wheel_tick_moves_the_tree_selection() {
         &mut terminal,
         &mut None,
         &mut 0,
+        &mut None,
     )
     .unwrap();
     assert_eq!(state.selected, 0, "the wheel selects the previous row");
@@ -47,7 +49,15 @@ fn the_wheel_never_closes_help_or_an_alert() {
 
     let mut help = TreeState::new(Node::new("Root"));
     help.modal = Some(Modal::Help(Help));
-    handle_mouse(scroll_down, &mut help, &mut terminal, &mut None, &mut 0).unwrap();
+    handle_mouse(
+        scroll_down,
+        &mut help,
+        &mut terminal,
+        &mut None,
+        &mut 0,
+        &mut None,
+    )
+    .unwrap();
     assert!(
         matches!(help.modal, Some(Modal::Help(_))),
         "the wheel must not dismiss Help"
@@ -55,7 +65,15 @@ fn the_wheel_never_closes_help_or_an_alert() {
 
     let mut alert = TreeState::new(Node::new("Root"));
     alert.modal = Some(Modal::error("boom"));
-    handle_mouse(scroll_down, &mut alert, &mut terminal, &mut None, &mut 0).unwrap();
+    handle_mouse(
+        scroll_down,
+        &mut alert,
+        &mut terminal,
+        &mut None,
+        &mut 0,
+        &mut None,
+    )
+    .unwrap();
     assert!(
         matches!(alert.modal, Some(Modal::Alert(_))),
         "the wheel must not dismiss an Alert"
@@ -74,6 +92,7 @@ fn the_wheel_is_a_noop_while_a_save_overlay_is_parked() {
         &mut terminal,
         &mut None,
         &mut 0,
+        &mut None,
     )
     .unwrap();
 
