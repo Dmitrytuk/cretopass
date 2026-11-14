@@ -328,7 +328,6 @@ pub fn share_instruction(file_name: &str, passwordless: bool) -> String {
     lines.join("\n")
 }
 
-pub const MSG_NOT_IMPLEMENTED: &str = "This feature is not yet implemented";
 pub const MSG_NO_OPEN_FILE: &str = "No file is currently open";
 pub const MSG_CANNOT_DELETE_OPEN: &str = "Cannot delete the currently open file from recent files";
 pub const MSG_CANNOT_WRITE: &str = "Cannot write to this path";
@@ -364,7 +363,6 @@ pub const PASSWORD_MASK: &str = "*****";
 pub const COPY_CHECK: &str = "✓ Copied!";
 pub const MSG_COPY_FAILED: &str = "Failed to copy: ";
 pub const SEPARATOR_RECENT_FILES: &str = "─── Recent Files ───";
-pub const NEW_FOLDER_DEFAULT: &str = "New Folder";
 pub const DEFAULT_NAME: &str = "Untitled";
 pub const DEFAULT_ROOT_NAME: &str = "Secrets";
 pub const CUSTOM_FIELD_DEFAULT: &str = "Custom";

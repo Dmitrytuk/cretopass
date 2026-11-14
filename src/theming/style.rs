@@ -57,7 +57,6 @@ pub enum ElementStyle {
     StatusLoading,
     StatusSaving,
     StatusSaveFailed,
-    StatusInfo,
     FbPathBar,
     /// The file name an export will write, appended to the browser's path bar.
     FbExportName,
@@ -83,7 +82,6 @@ pub enum ElementStyle {
     HomePassLabel,
     HomeFieldLabel,
     CursorLabel,
-    CursorDimmed,
     CursorNormalText,
 }
 
@@ -184,7 +182,6 @@ impl ElementStyle {
             Self::StatusLoading => Style::default().fg(scheme.status_loading),
             Self::StatusSaving => Style::default().fg(scheme.status_saving),
             Self::StatusSaveFailed => Style::default().fg(scheme.status_failed),
-            Self::StatusInfo => Style::default().fg(scheme.text),
             Self::FbPathBar => Style::default()
                 .fg(scheme.text)
                 .add_modifier(Modifier::BOLD)
@@ -215,7 +212,6 @@ impl ElementStyle {
             Self::HomePassLabel => Style::default().fg(scheme.accent),
             Self::HomeFieldLabel => Style::default().fg(scheme.text),
             Self::CursorLabel => Style::default().fg(scheme.cursor_dim),
-            Self::CursorDimmed => Style::default().fg(scheme.cursor_dim),
             Self::CursorNormalText => Style::default().fg(scheme.text),
         }
     }

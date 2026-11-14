@@ -155,6 +155,10 @@ impl Node {
     }
 
     /// Creates a branch node with pre-populated children.
+    ///
+    /// Test-only: the app builds its tree from import parsing or the Home
+    /// screen, and never needs a pre-filled branch up front.
+    #[cfg(test)]
     pub fn with_children(name: impl Into<String>, children: Vec<Node>) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -200,15 +204,6 @@ impl Node {
             }
         }
         None
-    }
-
-    /// Returns `true` if a node with the given [`Uuid`] exists anywhere in
-    /// this subtree (including the root itself).
-    pub fn contains(&self, id: Uuid) -> bool {
-        if self.id == id {
-            return true;
-        }
-        self.children.iter().any(|c| c.contains(id))
     }
 }
 

@@ -42,7 +42,7 @@ fn assert_no_terminal_background(state: &mut TreeState) {
 
 #[test]
 fn tree_screen_paints_every_cell() {
-    let mut state = TreeState::new(crate::build_demo_tree());
+    let mut state = TreeState::new(build_demo_tree());
     assert_no_terminal_background(&mut state);
 }
 

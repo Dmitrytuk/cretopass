@@ -255,6 +255,7 @@ impl FileBrowserState {
     }
 
     /// Number of entries after applying the current search query.
+    #[cfg(test)]
     pub fn filtered_len(&self) -> usize {
         self.filtered_indices().len()
     }
@@ -352,7 +353,7 @@ impl FileBrowserState {
 
         if let Some(outcome) = self.loader.poll() {
             match outcome {
-                ListingOutcome::Loaded { entries, .. } => {
+                ListingOutcome::Loaded { entries } => {
                     self.previous = None;
                     self.entries = entries;
                     self.selected = self
@@ -363,8 +364,8 @@ impl FileBrowserState {
                     self.clamp_selection();
                     self.reconcile_pending_delete();
                 }
-                ListingOutcome::Failed { error, .. } => self.on_listing_failure(format!("{error}")),
-                ListingOutcome::TimedOut { .. } => {
+                ListingOutcome::Failed { error } => self.on_listing_failure(format!("{error}")),
+                ListingOutcome::TimedOut => {
                     self.on_listing_failure(texts::MSG_DIRECTORY_NOT_RESPONDING.to_string());
                 }
             }

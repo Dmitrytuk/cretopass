@@ -1,5 +1,5 @@
 pub mod active_file;
 pub mod utils;
 
-mod widget;
-pub use widget::{HomeState, run};
+pub(crate) mod widget;
+pub use widget::run;

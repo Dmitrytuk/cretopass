@@ -21,11 +21,6 @@ use super::FileHandlingError;
 pub struct Passphrase<'a>(&'a [u8]);
 
 impl<'a> Passphrase<'a> {
-    /// Borrows `bytes` as a passphrase.
-    pub fn new(bytes: &'a [u8]) -> Self {
-        Self(bytes)
-    }
-
     /// The raw bytes.
     pub fn as_bytes(&self) -> &'a [u8] {
         self.0
@@ -109,12 +104,12 @@ mod tests {
         assert_eq!(Passphrase::from(&vec).as_bytes(), b"hunter2");
         assert_eq!(Passphrase::from(&zeroizing).as_bytes(), b"hunter2");
         assert_eq!(Passphrase::from(&zeroizing_string).as_bytes(), b"hunter2");
-        assert_eq!(Passphrase::new(b"hunter2").as_utf8().unwrap(), "hunter2");
+        assert_eq!(Passphrase::from(b"hunter2").as_utf8().unwrap(), "hunter2");
     }
 
     #[test]
     fn non_utf8_bytes_are_rejected_as_utf8() {
-        let passphrase = Passphrase::new(&[0xff, 0xfe]);
+        let passphrase = Passphrase::from(&[0xff, 0xfe]);
 
         assert!(matches!(
             passphrase.as_utf8(),
@@ -125,7 +120,7 @@ mod tests {
     #[test]
     fn debug_never_shows_the_bytes() {
         assert_eq!(
-            format!("{:?}", Passphrase::new(b"hunter2")),
+            format!("{:?}", Passphrase::from(b"hunter2")),
             "Passphrase(\"<redacted>\")"
         );
     }

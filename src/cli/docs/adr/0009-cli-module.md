@@ -8,8 +8,9 @@ was removed so the binary makes no network requests (see
 **Decision:** keep the CLI command in a separate `cli` module with a
 facade file (`src/cli.rs`) and **private** sub-modules under `src/cli/`.
 The only public surface is the [`LifecycleCommand`](../../../cli.rs) enum
-(`parse` + `run`) and the `EXIT_FOREIGN_INSTALL` constant, so `main.rs` is a
-pure parser + dispatcher. The module has no TUI dependencies and no network
+(`parse` + `run`) and the `EXIT_FOREIGN_INSTALL` constant, so `cli::run()` is a
+pure parser + dispatcher and `main.rs` stays a three-line shell. The module has
+no TUI dependencies and no network
 dependencies — it only prints to stdout/stderr and exits, and isolates
 platform-specific logic (artefact layout mirroring, detached self-remove
 staging on Windows).

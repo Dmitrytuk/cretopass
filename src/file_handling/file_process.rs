@@ -345,8 +345,10 @@ pub fn looks_like_vault(path: impl AsRef<Path>) -> bool {
 /// Returns `true` if the file starts with the age-encryption magic header.
 ///
 /// Unlike [`looks_like_vault`], this opens the file, so it hydrates a cloud
-/// placeholder. It is for callers that genuinely need the content (tests, and
-/// any future explicit file probe), never for a directory listing.
+/// placeholder. It is for callers that genuinely need the content — tests that
+/// must prove a written file really is age-encrypted — never for a directory
+/// listing (see ADR 0007).
+#[cfg(test)]
 pub fn is_age_file(path: impl AsRef<Path>) -> bool {
     let path = path.as_ref();
     if !path.is_file() {
@@ -355,6 +357,7 @@ pub fn is_age_file(path: impl AsRef<Path>) -> bool {
     scan_age_header(path)
 }
 
+#[cfg(test)]
 fn scan_age_header(path: &Path) -> bool {
     let mut file = match atomic::open_for_read(path) {
         Ok(f) => f,

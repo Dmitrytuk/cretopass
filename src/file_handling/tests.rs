@@ -1,16 +1,17 @@
-//! Facade-level round-trip: `export_tree` then `import_tree`, through
-//! `file_handling` alone, with no UI in the loop.
+//! Facade-level round-trip: `export_tree` then `import_tree`, through the
+//! gateway alone, with no UI in the loop.
 //!
-//! This is the integration counterpart to the unit round-trips inside
-//! `file_handling::import`. It proves the gateway's public seam is enough to
+//! This is the counterpart to the unit round-trips inside
+//! [`import`](super::import): it proves the facade's re-exports are enough to
 //! write a tree and read an equivalent one back for every format, and it pins
 //! the two ambiguity cases the CSV path encoding exists for: a `" > "` inside a
 //! name, and two same-named siblings.
 
 use std::path::Path;
 
-use cretopass::file_handling::{ExportFormat, export_tree, import_tree};
-use cretopass::{ExtraField, FieldType, Node};
+use crate::tree::node::{ExtraField, FieldType, Node};
+
+use super::{ExportFormat, export_tree, import_tree};
 
 fn custom(label: &str, value: &str) -> ExtraField {
     ExtraField {

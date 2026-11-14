@@ -15,7 +15,7 @@ turned into the same `Action` its key would produce. Two new leaf modules carry 
   turns on, in one place: raw mode, the alternate screen, bracketed paste and mouse
   capture. `setup()` enables them; `restore()` undoes them, and it is idempotent, so
   it also serves the panic hook installed before any mode changes — teardown is
-  symmetric on normal exit, on error and on panic. `lib.rs` stays thin wiring.
+  symmetric on normal exit, on error and on panic. `main.rs` stays thin wiring.
 - **`hitbox`** ([source](../../src/hitbox.rs)) is a strict leaf over `ratatui` and
   `crossterm`, like `generator` and `clipboard`. `HitBox<T>` pairs a `Rect` with the
   target a click there means; `HitMap<T>` records one per clickable region each frame

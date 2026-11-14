@@ -170,3 +170,74 @@ fn rendered_text(state: &mut TreeState) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+/// A demo tree with sample data: a "Knowledge Base" root containing Rust,
+/// Python, and Docker categories, each with three leaf topics.
+///
+/// Render tests paint this when they need a tree deeper than a single node.
+fn build_demo_tree() -> Node {
+    /// Attaches a Description extra field to a node and returns it.
+    fn described(mut node: Node, description: &str) -> Node {
+        node.extra_fields.push(ExtraField::description(description));
+        node
+    }
+
+    let rust = described(
+        Node::with_children(
+            "Rust",
+            vec![
+                described(
+                    Node::new("Ownership"),
+                    "Borrow checker, lifetimes, and memory management",
+                ),
+                described(
+                    Node::new("Traits"),
+                    "Shared behavior via trait definitions and implementations",
+                ),
+                described(
+                    Node::new("Async"),
+                    "Async/await, futures, and tokio runtime",
+                ),
+            ],
+        ),
+        "Systems language focused on safety and performance",
+    );
+
+    let python = described(
+        Node::with_children(
+            "Python",
+            vec![
+                described(
+                    Node::new("AsyncIO"),
+                    "Event loop, coroutines, and async/await syntax",
+                ),
+                described(Node::new("Typing"), "Type hints, MyPy, and gradual typing"),
+                described(
+                    Node::new("Packaging"),
+                    "pip, venv, poetry, and dependency management",
+                ),
+            ],
+        ),
+        "High-level general purpose programming language",
+    );
+
+    let docker = described(
+        Node::with_children(
+            "Docker",
+            vec![
+                described(
+                    Node::new("Images"),
+                    "Building custom images with Dockerfiles",
+                ),
+                described(
+                    Node::new("Compose"),
+                    "Multi-container applications with docker-compose.yml",
+                ),
+                described(Node::new("Volumes"), "Persistent data storage and sharing"),
+            ],
+        ),
+        "Container platform for developing and running applications",
+    );
+
+    Node::with_children("Knowledge Base", vec![rust, python, docker])
+}

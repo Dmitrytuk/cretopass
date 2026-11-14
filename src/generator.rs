@@ -20,6 +20,8 @@ mod login;
 mod password;
 
 pub use login::generate_login;
+#[cfg(test)]
+pub use password::SymbolSet;
 pub use password::{
-    PasswordLength, PasswordLengthError, PasswordParams, SYMBOLS, SymbolSet, generate_password,
+    PasswordLength, PasswordLengthError, PasswordParams, SYMBOLS, generate_password,
 };

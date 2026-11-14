@@ -26,17 +26,17 @@ snapshot back to an age-encrypted JSON file.
 ## Cross-module data flow
 
 ```
-main.rs  ──▶  lib.rs  ──▶  vault::widget::run()   ──▶  tree::app_tree::run_app()
-                  │               │                            │
-                  │          file_browser             submit snapshot
-                  │               │                            │
-                  │          file_handling  ◀──────────  autosave worker
-                  │               │                     (latest wins)
-                  │          crypt (decrypt on open,
-                  │                 encrypt on save)
-                  │
-              theming  ◀──  cursor
-            (used by all UI)
+main.rs  ──▶  cli::run()  ──▶  app::run()  ──▶  vault::widget::run()  ──▶  tree::app_tree::run_app()
+                                   │                  │                        │
+                                   │            file_browser             submit snapshot
+                                   │                  │                        │
+                                   │            file_handling  ◀───────  autosave worker
+                                   │                  │                 (latest wins)
+                                   │             crypt (decrypt on open,
+                                   │                   encrypt on save)
+                                   │
+                               theming  ◀──  cursor
+                             (used by all UI)
 ```
 
 The `generator` module sits below `tree`: `tree::app_tree` maps a `Password`
@@ -57,9 +57,9 @@ resulting text to the active surface.
 
 `hitbox` is a strict leaf below every screen: each renderer records the `HitBox`es of
 its clickable rows, and the event loop turns a click into the same `Action` its key
-would produce ([0026](0026-deterministic-mouse-input.md)). `terminal` wraps `lib.rs`'s
-setup and teardown, and enabling mouse capture there is what makes those clicks and
-the wheel reach the app at all.
+would produce ([0026](0026-deterministic-mouse-input.md)). `terminal` wraps
+`app::run`'s setup and teardown, and enabling mouse capture there is what makes
+those clicks and the wheel reach the app at all.
 
 ## Core design principles
 
@@ -91,7 +91,9 @@ the wheel reach the app at all.
 | `sysinfo` 0.38 (disk) | file_handling::disks | cross-platform mounted-disk enumeration for file-browser Locations |
 | `tempfile` 3 | file_handling::atomic | exclusively created temp file + no-clobber `persist` for every atomic write |
 
-## Re-exports (public API)
+## No library target
 
-`src/lib.rs` re-exports for external consumers: `Node`, `ExtraField`, `FieldType`,
-`InputMode`, `TreeState`, `TreeWidget`, `run()`, `run_with_root()`.
+The crate ships as a single binary: `main.rs` only declares the modules,
+`cli::run()` parses the command line, and `app::run()` starts the TUI. There is
+no `lib.rs`, so there is no published API to keep compatible — every module is
+free to change between releases.

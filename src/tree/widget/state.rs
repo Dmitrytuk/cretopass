@@ -419,27 +419,6 @@ impl TreeState {
         }
     }
 
-    /// Returns the number of visible rows in the current tree view.
-    pub fn num_visible(&self) -> usize {
-        self.visible.len()
-    }
-
-    /// Returns the number of visible rows that match the active search query.
-    pub fn num_matched(&self) -> usize {
-        self.matched.len()
-    }
-
-    /// Returns the name of the currently selected visible row, if any.
-    pub fn current_name(&self) -> Option<String> {
-        self.visible.get(self.selected).map(|v| v.name.clone())
-    }
-
-    /// Clones and returns the full [`Node`] for the currently selected item.
-    pub fn current_node(&self) -> Option<Node> {
-        let id = self.visible.get(self.selected)?.id;
-        find_node(&self.root, id)
-    }
-
     /// Returns a reference to the [`Node`] for the currently selected item.
     pub fn current_node_ref(&self) -> Option<&Node> {
         let id = self.visible.get(self.selected)?.id;
@@ -463,18 +442,6 @@ impl TreeState {
         self.search_active = false;
         self.matched.clear();
     }
-}
-
-fn find_node(root: &Node, id: Uuid) -> Option<Node> {
-    if root.id == id {
-        return Some(root.clone());
-    }
-    for child in &root.children {
-        if let Some(found) = find_node(child, id) {
-            return Some(found);
-        }
-    }
-    None
 }
 
 fn find_node_ref(root: &Node, id: Uuid) -> Option<&Node> {
