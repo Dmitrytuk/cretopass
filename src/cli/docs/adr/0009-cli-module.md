@@ -1,18 +1,20 @@
 # 0009 — cli module
 
-CLI lifecycle subcommands that operate on the installation itself rather than
-on secret data. Only `remove` remains: `update` (self-update over the network)
-was removed so the binary makes no network requests (see
-[ADR 0027](../../../../docs/adr/0027-no-in-app-network-access.md)).
+CLI entry point and lifecycle subcommands that operate on the installation
+itself rather than on secret data. Only `remove` remains: `update`
+(self-update over the network) was removed so the binary makes no network
+requests (see [ADR 0027](../../../../docs/adr/0027-no-in-app-network-access.md)).
 
-**Decision:** keep the CLI command in a separate `cli` module with a
-facade file (`src/cli.rs`) and **private** sub-modules under `src/cli/`.
-The only public surface is the [`LifecycleCommand`](../../../cli.rs) enum
-(`parse` + `run`) and the `EXIT_FOREIGN_INSTALL` constant, so `main.rs` is a
-pure parser + dispatcher. The module has no TUI dependencies and no network
-dependencies — it only prints to stdout/stderr and exits, and isolates
-platform-specific logic (artefact layout mirroring, detached self-remove
-staging on Windows).
+**Decision:** keep the CLI entry in a separate `cli` module with a facade file
+(`src/cli.rs`) and **private** sub-modules under `src/cli/`. `cli::run()` is the
+binary's entry point: it parses `argv`, dispatches the one lifecycle subcommand
+(`remove`), and — when no subcommand is given — starts the TUI through
+`app::run()`. `main.rs` therefore stays a three-line shell. The lifecycle
+sub-modules (`detect`, `layout`, `remove`) have **no TUI dependencies** and no
+network dependencies: they only print to stdout/stderr and exit, and isolate
+platform-specific logic (artefact layout mirroring, detached self-remove staging
+on Windows). Only the TUI dispatch arm reaches the rest of the app (`app` →
+`vault` → `tree`).
 
 **Rejected alternative:** inline remove logic in `main.rs`. Would bloat the
 binary entry point with platform-conditional code and I/O orchestration.
@@ -27,6 +29,10 @@ binary entry point with platform-conditional code and I/O orchestration.
 
 ## Contracts
 
+- `cli::run()` is the only entry point: it parses `argv` and either dispatches
+  a lifecycle subcommand or hands control to `app::run()`. [`LifecycleCommand`](../../../cli.rs)
+  (`parse` + `run`) and `EXIT_FOREIGN_INSTALL` are its dispatch vocabulary, not a
+  public API — the crate has no library target.
 - `remove` refuses to operate unless `InstallSource::require_self_managed()` passes; a foreign install returns `ExitCode::from(EXIT_FOREIGN_INSTALL)` (`2`).
 - `require_self_managed` returns a typed `ForeignInstall(InstallSource)` error implementing `Display` + `Error`, so callers can distinguish pacman from cargo without parsing text.
 - Neither the module nor the binary makes any network request; `update` was removed in [ADR 0027](../../../../docs/adr/0027-no-in-app-network-access.md).
@@ -36,6 +42,8 @@ binary entry point with platform-conditional code and I/O orchestration.
 
 ## Dependencies
 
+- `app` — starts the TUI when no lifecycle subcommand is given
+- `theming::texts` — app identity for `--version` and the `--help` footer
 - `vault::utils` — `config_dir()` for determining the config directory to remove
 - `uuid` — unpredictable temporary-directory suffixes (already a crate dependency)
 - `std` otherwise — no new crates

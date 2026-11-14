@@ -170,3 +170,18 @@ fn rendered_text(state: &mut TreeState) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+/// A demo tree with sample data: a "Knowledge Base" root containing Rust,
+/// Python, and Docker categories, each with two leaf topics.
+///
+/// The render test paints this when it needs a tree deeper than a single node.
+fn build_demo_tree() -> Node {
+    Node::with_children(
+        "Knowledge Base",
+        vec![
+            Node::with_children("Rust", vec![Node::new("Ownership"), Node::new("Traits")]),
+            Node::with_children("Python", vec![Node::new("AsyncIO"), Node::new("Typing")]),
+            Node::with_children("Docker", vec![Node::new("Images"), Node::new("Volumes")]),
+        ],
+    )
+}

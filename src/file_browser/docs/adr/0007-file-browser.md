@@ -44,7 +44,6 @@ file listing UX to vault-specific modal logic, preventing reuse.
 - The file list and Locations overlay track viewport offsets (`scroll`, `location_scroll`) and keep a fixed 3-row margin (`SCROLL_OFFSET`) around the selection. The cursor moves inside that margin before the viewport scrolls, in both directions; the margin is clamped on short viewports, and at the end of the list the last item may sit on the bottom row, matching Vim/Neovim `scrolloff` behavior.
 - `render_file_browser()` takes `&mut FileBrowserState` because it maintains those viewport offsets while rendering.
 - All I/O (list_dir, list_disks, delete_file, rename, create_dir, probe writability) goes through `file_handling`.
-- Re-exports `FileEntry` from `file_handling` so consumers don't need to import it separately.
 
 ## Keybindings
 

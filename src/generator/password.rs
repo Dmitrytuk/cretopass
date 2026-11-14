@@ -174,6 +174,7 @@ impl SymbolSet {
     /// Selects or deselects `symbol`.
     ///
     /// Unknown characters are ignored.
+    #[cfg(test)]
     pub fn set(&mut self, symbol: char, selected: bool) {
         if let Some(index) = Self::index_of(symbol) {
             if selected {

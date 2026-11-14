@@ -6,10 +6,10 @@
 //! the windows over the tree to `modal.rs`. What a modal asks for is a
 //! `TreeAction`, performed by `execute` (see ADR 0005).
 //!
-//! The crate's external contract is [`TreeState`], [`InputMode`], [`SaveState`]
-//! and [`TreeWidget`] (re-exported by `lib.rs`). Every other item is
-//! `pub(crate)`: the tree event loop (`app_tree`) and the modals are the only
-//! consumers inside the crate.
+//! The screen's contract is [`TreeState`], [`InputMode`] and [`SaveState`],
+//! re-exported by the `tree` facade. Every other item is `pub(crate)`: the tree
+//! event loop (`app_tree`) and the modals are the only consumers inside the
+//! crate; the widget type itself is internal.
 
 mod busy;
 mod form;
@@ -19,8 +19,7 @@ mod render;
 mod save;
 mod state;
 
-// The crate's external contract (also re-exported by `lib.rs`).
-pub use render::TreeWidget;
+// The screen's contract, re-exported by the `tree` facade.
 pub use save::SaveState;
 pub use state::{InputMode, TreeState};
 
@@ -31,6 +30,7 @@ pub(crate) use modal::{
     ShareWizard, TreeAction, centered_rect,
 };
 pub(crate) use orchestrator::execute;
+pub(crate) use render::TreeWidget;
 pub(crate) use save::SaveExit;
 pub(crate) use state::AddPosition;
 pub(crate) use state::TreeHit;

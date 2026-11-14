@@ -1,0 +1,28 @@
+# cargo-audit configuration.
+#
+# Every entry below is a warning-level advisory inherited from the dependency
+# graph (all of them are unchanged from `develop`). They are listed explicitly so
+# a new, actionable advisory is not lost among them. Remove an ignore as soon as
+# the upstream fix reaches the lockfile.
+
+[advisories]
+ignore = [
+  # `basic-toml` (via `rkyv`) — parsing a crafted TOML document could panic.
+  # We never parse TOML; the crate arrives transitively.
+  "RUSTSEC-2026-0374",
+  # `paste` is unmaintained (archived). Transitive only; no replacement yet.
+  "RUSTSEC-2024-0436",
+  # `proc-macro-error2` is unmaintained. Build-time dependency of `rkyv`'s
+  # derive macros.
+  "RUSTSEC-2026-0173",
+  # `anyhow::Error::downcast_mut()` is unsound when the wrong type is requested.
+  # We never call it.
+  "RUSTSEC-2026-0190",
+  # `lru::IterMut` violates Stacked Borrows; `LruCache::pop()` lacks panic
+  # safety. `lru` is transitive (via `age`); we never hold an `IterMut`.
+  "RUSTSEC-2026-0002",
+  "RUSTSEC-2026-0253",
+  # `rustix` xattr functions with a zero-length buffer mark unwritten bytes as
+  # initialized. We never call xattr helpers with an empty buffer.
+  "RUSTSEC-2026-0486",
+]

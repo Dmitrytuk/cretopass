@@ -156,7 +156,7 @@ pub struct Spinner {
 impl Default for Spinner {
     /// Builds a deterministic spinner on the Braille frame set.
     ///
-    /// State builders ([`HomeState::with_config`](crate::vault::HomeState),
+    /// State builders (`vault::widget::HomeState::with_config`,
     /// [`TreeState::new`](crate::tree::widget::TreeState)) use this so tests never read
     /// the environment; the composition roots override it with
     /// [`Spinner::detected`].

@@ -25,17 +25,23 @@ pub(crate) mod xml;
 
 pub use autosave::{Autosave, SAVE_TIMEOUT, SaveError, SaveEvent};
 pub use cancel::CancelToken;
-pub use disks::{DiskInfo, list_disks};
+pub use disks::DiskInfo;
 pub use error::{FileHandlingError, SerdeContext};
 pub use export::{ExportFormat, export_tree, output_path, suggest_export_name};
 pub use file_process::{
-    FileEntry, create_dir, create_secret_file, decrypt_to_node, delete_file, is_age_file,
-    is_dir_empty, list_dir, list_dir_including_hidden, looks_like_vault, probe_path_writable,
-    read_file, rename_file, save_tree, validate_encrypted_file, write_file,
+    FileEntry, create_dir, create_secret_file, decrypt_to_node, delete_file, is_dir_empty,
+    looks_like_vault, probe_path_writable, read_file, rename_file, save_tree,
+    validate_encrypted_file, write_file,
 };
-pub use import::{ParseError, import_tree};
-pub use listing::{DirLoader, DiskLoader, LISTING_TIMEOUT, ListingOutcome};
-pub use passphrase::Passphrase;
+// Test-only seams: the app never reaches these, but the tests that exercise
+// the gateway do (browsing never reads file contents — ADR 0007 — and only
+// tests list a directory synchronously).
+#[cfg(test)]
+pub use file_process::{is_age_file, list_dir};
+#[cfg(test)]
+pub use import::ParseError;
+pub use import::import_tree;
+pub use listing::{DirLoader, DiskLoader, ListingOutcome};
 pub use share::{share_tree, suggest_share_name};
 
 // `pub(crate) use` marks a crate-internal seam: reached by other modules in the
@@ -49,3 +55,8 @@ pub(crate) use file_process::create_private_dir;
 pub(crate) use file_process::save_tree_guarded;
 // The JSON writer the export path reaches through this facade.
 pub(crate) use file_process::node_to_json;
+
+// The facade-level round-trip: `export_tree` then `import_tree`, with no UI in
+// the loop.
+#[cfg(test)]
+mod tests;

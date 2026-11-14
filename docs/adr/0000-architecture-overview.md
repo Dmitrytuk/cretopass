@@ -19,24 +19,25 @@ snapshot back to an age-encrypted JSON file.
 | `terminal` | [0026](0026-deterministic-mouse-input.md) | Terminal lifecycle — raw mode, the alternate screen, bracketed paste and mouse capture in one place, with one `restore()` reused by the panic hook |
 | `hitbox` | [0026](0026-deterministic-mouse-input.md) | Mouse hit-testing — a strict leaf over `ratatui`/`crossterm`; `HitBox<T>`/`HitMap<T>` map a click to the topmost recorded region's target, and `ClickSurface<T>` bundles a modal's map with its panel rect |
 | `tree` | [0005](../../src/tree/docs/adr/0005-tree-module.md) | Tree data model, state machine, rendering, async event loop |
+| `app` | — | TUI composition root: terminal setup/restore around the Home screen (`vault::run`); owns no feature logic |
 | `vault` | [0006](../../src/vault/docs/adr/0006-vault-module.md) | Home screen, active vault state, configuration persistence |
 | `file_browser` | [0007](../../src/file_browser/docs/adr/0007-file-browser.md) | OS directory browser overlay with mounted-disk locations and hidden-entry toggle; listings and disk enumeration run off the UI thread, and browsing reads no file contents ([0024](0024-browsing-never-reads-file-contents.md)) |
-| `cli` | [0009](../../src/cli/docs/adr/0009-cli-module.md) | CLI lifecycle subcommand (`remove`) — no TUI, no network |
+| `cli` | [0009](../../src/cli/docs/adr/0009-cli-module.md) | CLI entry point: parses `argv`, dispatches the lifecycle subcommand `remove` (lifecycle paths are TUI-free, no network), and starts the TUI through `app::run` |
 
 ## Cross-module data flow
 
 ```
-main.rs  ──▶  lib.rs  ──▶  vault::widget::run()   ──▶  tree::app_tree::run_app()
-                  │               │                            │
-                  │          file_browser             submit snapshot
-                  │               │                            │
-                  │          file_handling  ◀──────────  autosave worker
-                  │               │                     (latest wins)
-                  │          crypt (decrypt on open,
-                  │                 encrypt on save)
-                  │
-              theming  ◀──  cursor
-            (used by all UI)
+main.rs  ──▶  cli::run()  ──▶  app::run()  ──▶  vault::widget::run()  ──▶  tree::app_tree::run_app()
+                                   │                  │                        │
+                                   │            file_browser             submit snapshot
+                                   │                  │                        │
+                                   │            file_handling  ◀───────  autosave worker
+                                   │                  │                 (latest wins)
+                                   │             crypt (decrypt on open,
+                                   │                   encrypt on save)
+                                   │
+                               theming  ◀──  cursor
+                             (used by all UI)
 ```
 
 The `generator` module sits below `tree`: `tree::app_tree` maps a `Password`
@@ -57,9 +58,9 @@ resulting text to the active surface.
 
 `hitbox` is a strict leaf below every screen: each renderer records the `HitBox`es of
 its clickable rows, and the event loop turns a click into the same `Action` its key
-would produce ([0026](0026-deterministic-mouse-input.md)). `terminal` wraps `lib.rs`'s
-setup and teardown, and enabling mouse capture there is what makes those clicks and
-the wheel reach the app at all.
+would produce ([0026](0026-deterministic-mouse-input.md)). `terminal` wraps
+`app::run`'s setup and teardown, and enabling mouse capture there is what makes
+those clicks and the wheel reach the app at all.
 
 ## Core design principles
 
@@ -78,7 +79,7 @@ the wheel reach the app at all.
 | Crate | Used by | Purpose |
 |-------|---------|---------|
 | `ratatui` 0.28 | tree, vault, file_browser, cursor, theming, terminal, hitbox | TUI rendering |
-| `crossterm` 0.28 (`event-stream`) | lib, tree, vault, terminal, hitbox | terminal events, raw mode, mouse capture, async event stream |
+| `crossterm` 0.28 (`event-stream`) | app, tree, vault, terminal, hitbox | terminal events, raw mode, mouse capture, async event stream |
 | `tokio` 1 (`rt`, `sync`, `macros`, `time`) | tree | current-thread runtime, `select!`, save-event channel, spinner `interval` and bounded `timeout` |
 | `futures-util` 0.3 | tree | `StreamExt::next` for `EventStream` |
 | `age` 0.11 | crypt | passphrase-based encryption |
@@ -91,7 +92,9 @@ the wheel reach the app at all.
 | `sysinfo` 0.38 (disk) | file_handling::disks | cross-platform mounted-disk enumeration for file-browser Locations |
 | `tempfile` 3 | file_handling::atomic | exclusively created temp file + no-clobber `persist` for every atomic write |
 
-## Re-exports (public API)
+## No library target
 
-`src/lib.rs` re-exports for external consumers: `Node`, `ExtraField`, `FieldType`,
-`InputMode`, `TreeState`, `TreeWidget`, `run()`, `run_with_root()`.
+The crate ships as a single binary: `main.rs` only declares the modules,
+`cli::run()` parses the command line, and `app::run()` starts the TUI. There is
+no `lib.rs`, so there is no published API to keep compatible — every module is
+free to change between releases.

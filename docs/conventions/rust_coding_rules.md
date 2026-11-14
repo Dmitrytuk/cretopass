@@ -53,6 +53,7 @@ cargo doc --no-deps   # if public API was touched
 - Declare every module **that has sub-concerns** with a **facade file**: `module_name.rs` at the parent level, which re-exports the public API from sub-modules placed one-per-file inside the same-named directory (`module_name/`). `mod.rs` is forbidden. A single-concept leaf module (`clipboard.rs`, `hitbox.rs`, `terminal.rs`) stays flat even as it grows long: wrapping one concept in a directory adds indirection, not structure.
 - `lib.rs` / `main.rs` should be thin: re-exports, top-level docs, and wiring only.
 - For binaries: put logic in a library crate, keep `main.rs` to argument parsing + calling `lib::run()`.
+  - **Exception:** `cretopass` is deliberately a single binary target — there is no `lib.rs`; `main.rs` declares the modules, `cli::run` parses the command line, and `app::run` holds the wiring.
 - Use `pub(crate)` by default for internal items. Only `pub` what is meant to be a stable API.
 - Group imports: `std` → external crates → crate-local, separated by blank lines (rustfmt `group_imports` does this if configured).
 - Do not use glob imports (`use foo::*`) except for preludes and in `tests` modules (`use super::*`).
