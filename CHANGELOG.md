@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-14
+
+### Added
+
+- Automated crates.io publishing workflow (`publish-crate.yml`) triggered when a
+  GitHub release is published, backed by a `cargo publish --dry-run --locked`
+  packaging check in CI.
+
 ### Changed
 
 - The crate now ships as a **single binary target**: `src/lib.rs` is gone, the
