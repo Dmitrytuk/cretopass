@@ -19,7 +19,7 @@ Would complicate scrolling, search, and keyboard navigation for no benefit.
 | File | Responsibility |
 |------|---------------|
 | `node.rs` | `Node` struct (id, name, children, extra_fields), `ExtraField`, `FieldType` enum, legacy-`description` migration, recursive `find`/`find_mut`, wire-label helpers for import/export |
-| `widget.rs` | module facade: declares the sub-modules and re-exports the public API (`TreeState`, `InputMode`, `SaveState`, `TreeWidget`), the internal API (`Modal`, `TreeAction`, `Detail`, `FormState`, …, `execute`) and the test-only helpers. Holds no logic |
+| `widget.rs` | module facade: declares the sub-modules and re-exports the public API (`TreeState`, `InputMode`, `SaveState`), the internal API (`Modal`, `TreeAction`, `Detail`, `FormState`, `TreeWidget`, …, `execute`) and the test-only helpers. Holds no logic |
 | `widget/state.rs` | the tree model and its operations: `TreeState` (root, expanded set, selected index, visible list, navigation mode, vault path, modified flag, cut buffer, search state, `SaveState`, `SaveExit`, the `Modal` slot, the File Browser session memory), `VisibleNode`, the five-variant `InputMode` enum, `AddPosition`, and all tree mutation, navigation and search operations |
 | `widget/form.rs` | the Add/Edit form: `FormState` + undo/redo history (`Snapshot`, `Scratch`), the `FormRow`/`FormFocus`/`FormPending` enums, and `GeneratorModal` |
 | `widget/save.rs` | the autosave status `SaveState` and the parked exit `SaveExit` |
@@ -251,7 +251,7 @@ when the worker stops is not silent — the closed-event-channel branch reports
 
 The master passphrase and the vault path travel together in a
 `tree::app_tree::SaveTarget`; `run_app()` accepts it as an `Option<SaveTarget>`.
-`None` means a read-only tree (the library demo) and therefore no worker. See
+`None` means a tree with no save target — read-only, with no autosave worker. See
 [ADR 0010 — Asynchronous tree autosave](../../../../docs/adr/0010-async-tree-autosave.md)
 for the worker contract and the latest-wins rationale.
 

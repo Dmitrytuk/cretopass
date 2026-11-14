@@ -52,17 +52,18 @@ fn sample() -> Node {
 
 /// Every export format.
 ///
-/// The `match` is exhaustive on the crate's `Format` enum, so adding a variant
-/// fails to compile until it is listed here: a format cannot silently escape
-/// this test.
-fn all_formats() -> Vec<ExportFormat> {
-    let formats = [ExportFormat::Json, ExportFormat::Xml, ExportFormat::Csv];
-    for format in formats {
-        match format {
-            ExportFormat::Json | ExportFormat::Xml | ExportFormat::Csv => {}
-        }
+/// [`assert_exhaustive`] makes the `match` exhaustive on the crate's
+/// `ExportFormat` enum, so adding a variant fails to compile until it is listed
+/// here: a format cannot silently escape this test.
+fn all_formats() -> [ExportFormat; 3] {
+    [ExportFormat::Json, ExportFormat::Xml, ExportFormat::Csv]
+}
+
+/// Fails to compile when a new [`ExportFormat`] variant escapes `all_formats`.
+fn assert_exhaustive(format: ExportFormat) {
+    match format {
+        ExportFormat::Json | ExportFormat::Xml | ExportFormat::Csv => {}
     }
-    formats.to_vec()
 }
 
 /// Asserts `actual` is structurally equal to `expected` (names, extra fields,
@@ -70,18 +71,25 @@ fn all_formats() -> Vec<ExportFormat> {
 fn assert_same(expected: &Node, actual: &Node, format: ExportFormat) {
     assert_eq!(expected.name, actual.name, "{format:?}: node name");
 
-    let fields = |node: &Node| {
-        node.extra_fields
-            .iter()
-            .map(|f| (f.field_type.wire_label().into_owned(), f.value.clone()))
-            .collect::<Vec<_>>()
-    };
     assert_eq!(
-        fields(expected),
-        fields(actual),
-        "{format:?}: fields of {:?}",
+        expected.extra_fields.len(),
+        actual.extra_fields.len(),
+        "{format:?}: field count of {:?}",
         expected.name
     );
+    for (expected_field, actual_field) in expected.extra_fields.iter().zip(&actual.extra_fields) {
+        assert_eq!(
+            expected_field.field_type.wire_label(),
+            actual_field.field_type.wire_label(),
+            "{format:?}: field label of {:?}",
+            expected.name
+        );
+        assert_eq!(
+            expected_field.value, actual_field.value,
+            "{format:?}: field value of {:?}",
+            expected.name
+        );
+    }
 
     assert_eq!(
         expected.children.len(),
@@ -100,6 +108,7 @@ fn every_format_round_trips_through_the_gateway() {
     let original = sample();
 
     for format in all_formats() {
+        assert_exhaustive(format);
         let base = dir.path().join("roundtrip").to_string_lossy().to_string();
         let written = export_tree(&original, &base, format).unwrap();
         assert!(

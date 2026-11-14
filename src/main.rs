@@ -1,11 +1,11 @@
-#![deny(unsafe_code)]
-
 //! Cretopass: a terminal-based secret keeper.
 //!
 //! The crate has a single binary target — there is no library and therefore no
 //! published API. [`main`] only hands control to [`cli::run`], which parses the
 //! command line and either runs a lifecycle subcommand or starts the TUI
 //! through [`app::run`]. Every other module is application code.
+
+#![deny(unsafe_code)]
 
 mod app;
 mod cli;

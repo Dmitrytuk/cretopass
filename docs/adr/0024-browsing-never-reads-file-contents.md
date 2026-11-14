@@ -25,8 +25,8 @@ Rules that follow from it:
   keep only the entry's name and `entry.file_type()`. A row's
   `FileEntry::looks_like_vault` field is a display hint computed from the name
   (case-insensitive `.age`) — no `is_age_file` / `scan_age_header` on the browsing
-  path. The exact, content-based `is_age_file` survives only for callers that
-  genuinely need the content (tests, and any future explicit probe); opening a
+  path. The exact, content-based `is_age_file` is `#[cfg(test)]`-gated and
+  survives for tests only; a future explicit probe must opt back in. Opening a
   vault (`validate_encrypted_file` / `decrypt_to_node`) and importing a document
   read contents because the user explicitly targeted that file, so hydration (and
   the provider's dialog) is expected there.

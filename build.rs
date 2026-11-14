@@ -3,6 +3,8 @@
 //! On Windows, embeds the application icon (and basic metadata) into the
 //! produced `.exe` using `winres`. On every other platform this is a no-op.
 
+#![forbid(unsafe_code)]
+
 fn main() {
     #[cfg(windows)]
     embed_windows_icon();

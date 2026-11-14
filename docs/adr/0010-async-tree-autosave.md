@@ -96,7 +96,8 @@ cryptography work.
 - `run_app(terminal, state, target: Option<SaveTarget>)` receives both the path
   and the passphrase in one `SaveTarget { path, passphrase }`, so "path present,
   passphrase absent" is unrepresentable and no longer aborts the session with an
-  I/O error. `None` means a read-only tree (the library demo) with no worker.
+  I/O error. `None` means a tree with no save target — read-only, no autosave
+  worker.
 - `SaveTarget` has a hand-written `Debug` that redacts the passphrase.
 
 ## Event-loop contract

@@ -77,6 +77,7 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
-      # Fails the build on any advisory in Cargo.lock (RustSec database).
+      # Fails the build on any advisory in Cargo.lock that is not explicitly
+      # ignored with a reason in `audit.toml` (RustSec database).
       - name: Audit dependencies
         run: cargo audit

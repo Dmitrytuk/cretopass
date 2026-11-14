@@ -13,11 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   application wiring lives in `app.rs`, and the command line is parsed by
   `cli::run()`, so `main.rs` is a three-line shell. There is no published
   library API to keep compatible — the modules are free to change.
-- The published `.crate` no longer carries repo-only material (CI config, ADRs,
-  release scripts, platform icon sets, the dev toolchain pin). It shrank from
-  226 files / 976 KiB compressed to 160 files / 366 KiB, and the `authors`
-  field is dropped so crates.io owners are the source of truth instead of a
-  placeholder.
+- The published `.crate` no longer carries repo-only material: root-level
+  `docs/`, CI config, release scripts and platform icon sets, nor the dev
+  toolchain pin. The in-crate ADRs that module docs point to still ship. It
+  shrank from 226 files / 976 KiB compressed to 160 files / 367 KiB, and the
+  `authors` field is dropped so crates.io owners are the source of truth instead
+  of a placeholder.
 
 ## [1.1.1] - 2026-11-07
 

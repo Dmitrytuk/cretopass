@@ -37,8 +37,8 @@ use super::render::ui;
 /// tree.
 ///
 /// `path` and `passphrase` are always supplied together, so "path present,
-/// passphrase absent" cannot be represented. A tree without a save target (the
-/// read-only library demo) runs without autosave.
+/// passphrase absent" cannot be represented. A tree with no save target runs
+/// read-only, without autosave.
 pub struct SaveTarget {
     /// Path of the secret file to write.
     pub path: String,
@@ -67,7 +67,7 @@ pub enum ExitStatus {
 /// Runs the tree screen until the user quits or returns to the home screen.
 ///
 /// Committed changes are handed to a background save worker built from
-/// `target`; `None` means a read-only tree (the library demo) with no autosave.
+/// `target`; `None` means a read-only tree with no autosave.
 /// On exit the function waits for the latest snapshot to be written. A failed
 /// flush parks an exit prompt so the user can retry, quit without saving (after
 /// confirmation), or stay; the returned [`ExitStatus`] reports which happened.

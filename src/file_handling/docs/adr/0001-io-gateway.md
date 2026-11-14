@@ -45,6 +45,15 @@ module a submodule may still reach a sibling directly through `super::` (for
 example `share.rs` taking `sanitize` from `export.rs`), so "one facade" governs
 the module's callers, not its siblings' own imports.
 
+A third class is the **test-only seam**: a `#[cfg(test)] pub use` for a helper
+the production binary never names but the gateway's tests do (for example
+`is_age_file` and `list_dir`). The gate keeps the helper out of the release
+binary and makes `clippy -D warnings` reject an accidental production caller.
+Signature types reached only through `impl Into<T>` (`Passphrase`, `ParseError`)
+may stay behind their `pub(crate)` submodule instead of being re-exported; if a
+non-test call site ever needs the name, widen that submodule rather than adding
+`#[allow(unused_imports)]`.
+
 ## Contracts
 
 - Errors are layered. The atomic write layer reports `atomic::WriteError`
@@ -106,8 +115,10 @@ the module's callers, not its siblings' own imports.
 - `list_dir()` skips hidden (dot-prefixed) entries; `list_dir_including_hidden()` returns them too. Both sort directories first, then alphabetically.
 - `list_disks()` returns project-owned `DiskInfo` rows sorted by mount point. `sysinfo` excludes pseudo filesystems, tmpfs, optical media, network shares, and loop-backed `squashfs` mounts; a defensive filter also drops `/dev/loop*` and snap mounts. Returns an empty vector when no disks are reported.
 - The XML and CSV parsers are hand-rolled to avoid pulling in parser crates; each format lives in one module (`xml.rs`, `csv.rs`) that owns both its reader and its writer, so its escaping cannot drift between the two directions. Max XML nesting depth is 256 and max CSV path depth is also 256.
-- `FileEntry` is the public type for directory listings; `file_browser` re-exports it.
-- `DiskInfo` is the public type for mounted disks; `file_browser` consumes it via `list_disks()`.
+- `FileEntry` is the façade type for directory listings; `file_browser` imports it
+  from `file_handling` directly.
+- `DiskInfo` is the façade type for mounted disks; `listing::DiskLoader` calls
+  `list_disks()` on a detached thread and hands the rows to `file_browser`.
 
 For file_browser keybindings see [ADR 0007 — file_browser](../../file_browser/docs/adr/0007-file-browser.md).
 

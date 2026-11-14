@@ -23,7 +23,7 @@
 //! forgets the request; the detached thread keeps running but its result is
 //! stale and ignored.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -61,6 +61,9 @@ pub enum ListingOutcome {
 #[derive(Debug)]
 struct Message {
     generation: u64,
+    /// The directory the thread was asked to read. Kept so the loader can
+    /// refuse a result that does not belong to the directory on screen.
+    dir: PathBuf,
     entries: Result<Vec<FileEntry>, FileHandlingError>,
 }
 
@@ -68,6 +71,7 @@ struct Message {
 #[derive(Debug)]
 struct Pending {
     generation: u64,
+    dir: PathBuf,
     started: Instant,
 }
 
@@ -107,8 +111,10 @@ impl DirLoader {
     pub fn request(&mut self, dir: &Path, show_hidden: bool) {
         self.generation += 1;
         let generation = self.generation;
+        let requested = dir.to_path_buf();
         self.pending = Some(Pending {
             generation,
+            dir: requested.clone(),
             started: Instant::now(),
         });
 
@@ -123,6 +129,7 @@ impl DirLoader {
                 let entries = list_for(&thread_dir, show_hidden);
                 let _ = tx.send(Message {
                     generation,
+                    dir: thread_dir,
                     entries,
                 });
             });
@@ -132,6 +139,7 @@ impl DirLoader {
             // the caller falls back instead of waiting out the timeout.
             let _ = self.tx.send(Message {
                 generation,
+                dir: requested,
                 entries: Err(FileHandlingError::Io(error)),
             });
         }
@@ -162,7 +170,11 @@ impl DirLoader {
     /// [`Self::poll`] against a caller-supplied clock, so the timeout can be
     /// exercised without waiting (and without backdating an [`Instant`]).
     fn poll_at(&mut self, now: Instant) -> Option<ListingOutcome> {
-        let Some(generation) = self.pending.as_ref().map(|pending| pending.generation) else {
+        let Some((generation, dir)) = self
+            .pending
+            .as_ref()
+            .map(|pending| (pending.generation, pending.dir.clone()))
+        else {
             // Nothing outstanding: drain so a late stale result cannot build up.
             while self.rx.try_recv().is_ok() {}
             return None;
@@ -170,15 +182,17 @@ impl DirLoader {
 
         loop {
             match self.rx.try_recv() {
-                Ok(message) if message.generation == generation => {
+                // A superseded request, or a result that does not belong to the
+                // directory currently requested: never install it over the
+                // listing on screen (ADR 0007).
+                Ok(message) if message.generation != generation || message.dir != dir => {}
+                Ok(message) => {
                     self.pending = None;
                     return Some(match message.entries {
                         Ok(entries) => ListingOutcome::Loaded { entries },
                         Err(error) => ListingOutcome::Failed { error },
                     });
                 }
-                // A superseded request: drop it.
-                Ok(_) => {}
                 Err(_) => break,
             }
         }
@@ -375,7 +389,12 @@ mod tests {
         loader.request(&missing, false);
 
         match settle(&mut loader, Duration::from_secs(5)).expect("a listing outcome") {
-            ListingOutcome::Failed { .. } => {}
+            ListingOutcome::Failed { error } => {
+                assert!(
+                    matches!(error, FileHandlingError::Io(_)),
+                    "expected an I/O failure, got {error:?}"
+                );
+            }
             other => panic!("expected a failed listing, got {other:?}"),
         }
         assert!(!loader.is_pending());
@@ -484,6 +503,7 @@ mod tests {
             generation: 1,
             pending: Some(Pending {
                 generation: 1,
+                dir: PathBuf::from("/nonexistent"),
                 started: Instant::now(),
             }),
         };

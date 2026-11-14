@@ -19,9 +19,10 @@ snapshot back to an age-encrypted JSON file.
 | `terminal` | [0026](0026-deterministic-mouse-input.md) | Terminal lifecycle — raw mode, the alternate screen, bracketed paste and mouse capture in one place, with one `restore()` reused by the panic hook |
 | `hitbox` | [0026](0026-deterministic-mouse-input.md) | Mouse hit-testing — a strict leaf over `ratatui`/`crossterm`; `HitBox<T>`/`HitMap<T>` map a click to the topmost recorded region's target, and `ClickSurface<T>` bundles a modal's map with its panel rect |
 | `tree` | [0005](../../src/tree/docs/adr/0005-tree-module.md) | Tree data model, state machine, rendering, async event loop |
+| `app` | — | TUI composition root: terminal setup/restore around the Home screen (`vault::run`); owns no feature logic |
 | `vault` | [0006](../../src/vault/docs/adr/0006-vault-module.md) | Home screen, active vault state, configuration persistence |
 | `file_browser` | [0007](../../src/file_browser/docs/adr/0007-file-browser.md) | OS directory browser overlay with mounted-disk locations and hidden-entry toggle; listings and disk enumeration run off the UI thread, and browsing reads no file contents ([0024](0024-browsing-never-reads-file-contents.md)) |
-| `cli` | [0009](../../src/cli/docs/adr/0009-cli-module.md) | CLI lifecycle subcommand (`remove`) — no TUI, no network |
+| `cli` | [0009](../../src/cli/docs/adr/0009-cli-module.md) | CLI entry point: parses `argv`, dispatches the lifecycle subcommand `remove` (lifecycle paths are TUI-free, no network), and starts the TUI through `app::run` |
 
 ## Cross-module data flow
 
@@ -78,7 +79,7 @@ those clicks and the wheel reach the app at all.
 | Crate | Used by | Purpose |
 |-------|---------|---------|
 | `ratatui` 0.28 | tree, vault, file_browser, cursor, theming, terminal, hitbox | TUI rendering |
-| `crossterm` 0.28 (`event-stream`) | lib, tree, vault, terminal, hitbox | terminal events, raw mode, mouse capture, async event stream |
+| `crossterm` 0.28 (`event-stream`) | app, tree, vault, terminal, hitbox | terminal events, raw mode, mouse capture, async event stream |
 | `tokio` 1 (`rt`, `sync`, `macros`, `time`) | tree | current-thread runtime, `select!`, save-event channel, spinner `interval` and bounded `timeout` |
 | `futures-util` 0.3 | tree | `StreamExt::next` for `EventStream` |
 | `age` 0.11 | crypt | passphrase-based encryption |

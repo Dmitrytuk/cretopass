@@ -18,7 +18,7 @@ to reason about.
 
 | File | Responsibility |
 |------|---------------|
-| `widget.rs` | The Home screen: `run()` event loop, modal dispatch, `run_with_spinner`. Re-exports `HomeState`. |
+| `widget.rs` | The Home screen: `run()` event loop, modal dispatch, `run_with_spinner`. `HomeState` is widget-internal; the `vault` façade exports only `run`. |
 | `widget/state.rs` | `HomeState` — menu cursor, active vault, busy status and spinner, File Browser session memory, generator settings. |
 | `widget/menu.rs` | The Home menu: `handle_home_key` and the pure `menu_intent`. |
 | `widget/modal.rs` | The contract vocabulary: `Modal` (the one-window slot) and `HomeAction` (what a modal asks for); re-exports the modal types. |
@@ -35,7 +35,7 @@ the orchestrator performs it. See [0021](0021-home-intent-contract.md).
 
 ## Home screen flow
 
-1. `cargo run` → `vault::widget::run()`
+1. `cargo run` → `cli::run()` → `app::run()` → `vault::run()`
 2. Menu: "Open secret file", "Create new secret file", "Configuration", "Change file password", "Export active file", "Share active file", "Import from file", then the recent files list
 3. "Open secret file" → `BrowserModal` (OpenFile mode) → validate age header + size → `UnlockPrompt` → decrypt → `push_recent_secret_file()` → launch tree
 4. "Create new secret file" → `BrowserModal` (CreateFile mode) → Enter on a name hard-blocks if the path already exists → probe writability → `CreateSecretPrompt` (passphrase + confirmation, `Ctrl+S` reveals) → create encrypted file with root `"Secrets"` → launch tree. An all-empty pair falls through to the `Confirmation` asking for a passwordless file.
@@ -67,7 +67,7 @@ launching the tree, so returning to home does not re-show the dialog.
 
 ## Quirks & edge cases
 
-- Quit sets `state.quit = true` → event loop breaks → `main()` cleanup (LeaveAlternateScreen, disable_raw_mode, show_cursor).
+- Quit sets `state.quit = true` → event loop breaks → `app::run` teardown (`terminal::restore()`: LeaveAlternateScreen, disable_raw_mode, show_cursor).
 - `q` in tree quits everything (including home).
 - `H` (shift+h) in tree returns to home screen.
 - Wrong master password in the unlock prompt shows a red error bar; the prompt stays open with the typed text.

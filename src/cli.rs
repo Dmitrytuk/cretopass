@@ -40,12 +40,13 @@ Commands:
 /// Parses the command line and runs whatever it asks for.
 ///
 /// With no subcommand the TUI starts through [`crate::app::run`]; a lifecycle
-/// subcommand instead operates on the installation itself.
+/// subcommand instead operates on the installation itself. This is the single
+/// top-level error reporter: [`crate::app::run`] only returns its result.
 #[must_use]
 pub fn run() -> ExitCode {
     match parse_args() {
-        Ok(Some(command)) => command.run(),
-        Ok(None) => match crate::app::run() {
+        Ok(Invocation::Lifecycle(command)) => command.run(),
+        Ok(Invocation::Tui) => match crate::app::run() {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("Error: {e}");
@@ -56,13 +57,32 @@ pub fn run() -> ExitCode {
     }
 }
 
-/// Parses `argv` into at most one [`LifecycleCommand`].
+/// What an accepted command line asks for.
+#[derive(Debug, PartialEq, Eq)]
+enum Invocation {
+    /// No subcommand: start the TUI.
+    Tui,
+    /// Run a lifecycle subcommand.
+    Lifecycle(LifecycleCommand),
+}
+
+/// Parses the process's `argv` (without the program name).
+fn parse_args() -> Result<Invocation, ExitCode> {
+    parse_from(std::env::args_os().skip(1))
+}
+
+/// Parses an already-collected argument list into one [`Invocation`].
 ///
-/// Returns `Ok(None)` when the TUI should start, and `Err(exit_code)` when the
-/// argument list was rejected or `--help`/`--version` already printed their
-/// output. At most one subcommand is accepted.
-fn parse_args() -> Result<Option<LifecycleCommand>, ExitCode> {
-    let mut parser = lexopt::Parser::from_env();
+/// Returns `Err(exit_code)` when the arguments were rejected **or** when
+/// `--help`/`--version` already printed their output and the process should
+/// exit with that code. At most one subcommand is accepted. Taking the arguments
+/// as a parameter keeps the parser testable without spawning the binary.
+fn parse_from<I>(args: I) -> Result<Invocation, ExitCode>
+where
+    I: IntoIterator,
+    I::Item: Into<std::ffi::OsString>,
+{
+    let mut parser = lexopt::Parser::from_args(args);
     let mut subcommand: Option<LifecycleCommand> = None;
 
     loop {
@@ -105,14 +125,17 @@ fn parse_args() -> Result<Option<LifecycleCommand>, ExitCode> {
         }
     }
 
-    Ok(subcommand)
+    Ok(match subcommand {
+        Some(command) => Invocation::Lifecycle(command),
+        None => Invocation::Tui,
+    })
 }
 
 /// Feedback block appended to `--help`.
 ///
 /// Built from the shared app-identity constants in [`texts`] so the CLI help
 /// and the TUI About overlay never drift apart (see
-/// [ADR 0020](docs/adr/0020-feedback-and-issue-reporting.md)).
+/// [ADR 0020](../docs/adr/0020-feedback-and-issue-reporting.md)).
 fn help_footer() -> String {
     let mut out = String::new();
     out.push_str("\nAbout:\n");
@@ -185,6 +208,40 @@ mod tests {
     #[test]
     fn foreign_install_exit_code_is_two() {
         assert_eq!(EXIT_FOREIGN_INSTALL, 2);
+    }
+
+    /// No arguments means "start the TUI".
+    #[test]
+    fn no_arguments_start_the_tui() {
+        assert_eq!(parse_from(std::iter::empty::<&str>()), Ok(Invocation::Tui));
+    }
+
+    /// A lifecycle subcommand is dispatched instead of the TUI.
+    #[test]
+    fn a_lifecycle_subcommand_is_dispatched() {
+        assert_eq!(
+            parse_from(["remove"]),
+            Ok(Invocation::Lifecycle(LifecycleCommand::Remove))
+        );
+    }
+
+    /// `--help` and `--version` print their output and exit successfully.
+    #[test]
+    fn help_and_version_exit_successfully() {
+        assert_eq!(parse_from(["-h"]), Err(ExitCode::SUCCESS));
+        assert_eq!(parse_from(["--help"]), Err(ExitCode::SUCCESS));
+        assert_eq!(parse_from(["-V"]), Err(ExitCode::SUCCESS));
+        assert_eq!(parse_from(["--version"]), Err(ExitCode::SUCCESS));
+    }
+
+    /// Rejected arguments exit with a failure code, including the retired
+    /// `update` command and a duplicated subcommand.
+    #[test]
+    fn rejected_arguments_exit_with_failure() {
+        assert_eq!(parse_from(["--bogus"]), Err(ExitCode::FAILURE));
+        assert_eq!(parse_from(["install"]), Err(ExitCode::FAILURE));
+        assert_eq!(parse_from(["update"]), Err(ExitCode::FAILURE));
+        assert_eq!(parse_from(["remove", "remove"]), Err(ExitCode::FAILURE));
     }
 
     /// The `--help` footer surfaces the app version and every feedback link, so
