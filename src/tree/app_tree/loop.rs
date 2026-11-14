@@ -38,7 +38,9 @@ use super::render::ui;
 ///
 /// `path` and `passphrase` are always supplied together, so "path present,
 /// passphrase absent" cannot be represented. A tree with no save target runs
-/// read-only, without autosave.
+/// read-only, without autosave — production flows always supply one; the
+/// `None` case is a vault re-opened without a known path (the
+/// `MSG_NO_FILE_PATH` guard) and the autosave tests.
 pub struct SaveTarget {
     /// Path of the secret file to write.
     pub path: String,

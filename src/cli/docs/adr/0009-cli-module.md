@@ -44,6 +44,6 @@ binary entry point with platform-conditional code and I/O orchestration.
 
 - `app` — starts the TUI when no lifecycle subcommand is given
 - `theming::texts` — app identity for `--version` and the `--help` footer
-- `vault::utils` — `config_dir()` for determining the config directory to remove
+- `config` — `config_dir()` for determining the config directory to remove
 - `uuid` — unpredictable temporary-directory suffixes (already a crate dependency)
 - `std` otherwise — no new crates

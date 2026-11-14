@@ -251,7 +251,9 @@ when the worker stops is not silent — the closed-event-channel branch reports
 
 The master passphrase and the vault path travel together in a
 `tree::app_tree::SaveTarget`; `run_app()` accepts it as an `Option<SaveTarget>`.
-`None` means a tree with no save target — read-only, with no autosave worker. See
+`None` means a tree with no file to write back to — read-only, with no autosave
+worker; production Home flows always pass `Some`, and the remaining `None` case
+is a vault re-opened without a known path (the `MSG_NO_FILE_PATH` guard). See
 [ADR 0010 — Asynchronous tree autosave](../../../../docs/adr/0010-async-tree-autosave.md)
 for the worker contract and the latest-wins rationale.
 
