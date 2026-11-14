@@ -6,7 +6,7 @@ use std::process::ExitCode;
 #[cfg(any(target_os = "linux", windows))]
 use std::process::{Command, Stdio};
 
-use crate::vault::utils;
+use crate::config;
 
 use super::detect::InstallSource;
 use super::layout;
@@ -169,7 +169,7 @@ fn collect_artifacts(home: &Path) -> Vec<Artifact> {
     }
 
     // --- Config directory ---
-    let config_dir = utils::config_dir();
+    let config_dir = config::config_dir();
     if config_dir.exists() {
         if safe_to_delete(&config_dir, home) {
             out.push(Artifact::DeleteDir(config_dir));

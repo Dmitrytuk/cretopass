@@ -28,7 +28,7 @@ to reason about.
 | `widget/render.rs` | Rendering the menu, the modal on top of it, and the status bar. |
 | `widget/chrome.rs` | Overlay geometry and painting shared by the modals. |
 | `active_file.rs` | `ActiveVaultState` — holds `path: Option<String>`, `passphrase: Zeroizing<Vec<u8>>`, `node: Option<Node>`. Bridge between home and tree. |
-| `utils.rs` | `Configuration` struct, `config_dir()`, `push_recent_secret_file()`, `save_config()`/`load_config()` via rkyv, legacy `settings.pwd` → `config.pwd` migration |
+| `utils.rs` | `Configuration` struct, `push_recent_secret_file()`, `save_config()`/`load_config()` via rkyv, legacy `settings.pwd` → `config.pwd` migration; resolves the directory through `crate::config::config_dir()` |
 
 Modals never do I/O and never build one another: they report a `HomeAction` and
 the orchestrator performs it. See [0021](0021-home-intent-contract.md).
@@ -79,6 +79,7 @@ launching the tree, so returning to home does not re-show the dialog.
 
 - `rkyv` — config serialization
 - `zeroize` — passphrase zeroization
+- `config` — config-directory resolution
 - `file_handling` — all I/O
 - `file_browser` — the directory browser, wrapped as a `Modal` variant
 - `theming` — Action dispatch, strings, styles

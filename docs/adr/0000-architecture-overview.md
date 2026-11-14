@@ -12,6 +12,7 @@ snapshot back to an age-encrypted JSON file.
 | `file_handling` | [0001](../../src/file_handling/docs/adr/0001-io-gateway.md) | I/O gateway — the single vault/document I/O boundary (only the CLI lifecycle commands manage their own install artifacts); background autosave worker ([0010](0010-async-tree-autosave.md)) and background directory/disk loaders ([0024](0024-browsing-never-reads-file-contents.md)) |
 | `crypt` | [0002](../../src/crypt/docs/adr/0002-crypt.md) | age-based encryption/decryption |
 | `cursor` | [0003](../../src/cursor/docs/adr/0003-cursor.md) | UTF-8 byte-offset cursor editing + TUI span helpers, including the masked password fields (`SecretField`/`SecretFieldGroup`) |
+| `config` | — | Config-directory resolution (`config_dir`) — a strict leaf over `std`, shared by the Home screen's persistence and the CLI lifecycle `remove` |
 | `theming` | [0004](../../src/theming/docs/adr/0004-theming.md) | Centralized keybindings, styles, icons, UI strings, the switchable [dark and light colour schemes](0019-runtime-colour-scheme-switching.md) ([0015](0015-default-dark-colour-scheme.md)), the title-bar `Status`/`Spinner` ([0011](0011-animated-status-spinner.md)), and the shared status bar ([0014](0014-status-bar-unification.md)) |
 | `generator` | [0012](0012-password-generator.md) | Password generation — strict leaf, depends only on `rand`; TUI-free and tree-free |
 | `share` | [0023](0023-sharing-a-vault-subtree.md) | Share flow, UI-agnostic: the recipient's masked password pair (`Passphrase`), wrapped by the Tree and Home modals |
@@ -98,3 +99,8 @@ The crate ships as a single binary: `main.rs` only declares the modules,
 `cli::run()` parses the command line, and `app::run()` starts the TUI. There is
 no `lib.rs`, so there is no published API to keep compatible — every module is
 free to change between releases.
+
+Consequences: `cargo test --doc` cannot run for this package ("no library
+targets found"), so documentation examples are prose or `text`-fenced sketches
+and are never compiled; tests run through `cargo test --all-targets` (unit tests
+live beside their modules).

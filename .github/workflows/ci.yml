@@ -43,6 +43,22 @@ jobs:
       - name: Test
         run: cargo test --all-targets
 
+      # Guard the `include` allow-list in `Cargo.toml`: the crate must ship the
+      # Windows icon `build.rs` embeds, and must never ship a local vault,
+      # dev/secret directory or root-level repo document.
+      - name: Package contents
+        run: |
+          set -euo pipefail
+          cargo package --list > "$RUNNER_TEMP/package-files.txt"
+          if ! grep -qx 'assets/icons/cretopass.ico' "$RUNNER_TEMP/package-files.txt"; then
+            echo "::error::assets/icons/cretopass.ico is missing from the published package"
+            exit 1
+          fi
+          if grep -E '^(test_secrets|config_dev|\.opencode|\.ai_|\.issues)/|\.age$|^docs/' "$RUNNER_TEMP/package-files.txt"; then
+            echo "::error::repo-only or secret material would be published (see the paths above)"
+            exit 1
+          fi
+
       - name: Install script syntax
         run: sh -n install.sh
 

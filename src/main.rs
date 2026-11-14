@@ -10,6 +10,7 @@
 mod app;
 mod cli;
 mod clipboard;
+mod config;
 mod crypt;
 mod cursor;
 mod file_browser;

@@ -10,43 +10,23 @@ repository = "https://github.com/Dmitrytuk/cretopass"
 readme = "README.md"
 keywords = ["password-manager", "tui", "terminal", "encryption", "age"]
 categories = ["command-line-utilities", "cryptography"]
-exclude = [
-  # Local tooling, scratch data and local vaults (also gitignored): publishing
-  # from a copy without `.git` must not carry any of these.
-  "/.ai-reviews",
-  "/.ai_plan",
-  "/.issues",
-  "/.opencode",
-  "/.tmp",
-  "/.vscode",
-  "/.idea",
-  "/__pycache__",
-  "/config_dev",
-  "/test_secrets",
-  "/secrets3.age",
-  "/new",
-  "/mynew",
-  # Cargo never packages `.git`; the CI config is tracked but repo-only.
-  "/.git",
-  "/.github",
-  # Repo-only material: docs, release packaging, and platform icons.
-  # `build.rs` needs only `assets/icons/cretopass.ico`.
-  "/AGENTS.md",
-  "/GLOSSARY.md",
-  "/GLOSSARY-MAP.md",
-  "/docs",
-  "/scripts",
-  "/audit.toml",
-  "/rust-toolchain",
-  "/install.sh",
-  "/install.ps1",
-  "/assets/completions",
-  "/assets/linux",
-  "/assets/icons/flatpak",
-  "/assets/icons/linux",
-  "/assets/icons/macos",
-  "/assets/icons/cretopass.icns",
-  "/assets/icons/cretopass.png",
+# Default-deny packaging: only the paths below reach crates.io. Adding a
+# runtime asset (or another directory under `src/`) is a deliberate edit here,
+# so a local vault, scratch file or repo-only document cannot ship by omission.
+# `build.rs` needs `assets/icons/cretopass.ico`; the in-crate ADRs referenced by
+# module docs still ship under `/src`.
+include = [
+  "/src",
+  "/tests",
+  "/assets/icons/cretopass.ico",
+  "/build.rs",
+  "/Cargo.toml",
+  "/Cargo.lock",
+  "/README.md",
+  "/LICENSE",
+  "/LICENSE-THIRD-PARTY",
+  "/CHANGELOG.md",
+  "/SECURITY.md",
 ]
 
 [dependencies]
