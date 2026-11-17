@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- README only. The first screen now leads with the promise, a demo GIF, `cargo install cretopass`, four things the tool does not do, and a comparison with pass, gopass, and KeePassXC. The `curl | sh` installer is no longer the first command. No program change, no version bump.
+
 ## [1.1.2] - 2026-11-14
 
 ### Added
