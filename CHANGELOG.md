@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - README only. The first screen now leads with the promise, a demo GIF, `cargo install cretopass`, four things the tool does not do, and a comparison with pass, gopass, and KeePassXC. The `curl | sh` installer is no longer the first command. No program change, no version bump.
+- README only. The first screen now also says what it is in the words people search: offline terminal password manager, Rust, TUI. "No sharing" was wrong — an encrypted share-bundle exists — and now reads "no sync and no shared account". No program change, no version bump.
 
 ## [1.1.2] - 2026-11-14
 

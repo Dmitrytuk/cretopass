@@ -2,6 +2,8 @@
 
 A tree of secrets in the terminal. One file. No network.
 
+Offline terminal password manager, written in Rust. A TUI over one age-encrypted file — not a browser vault and not a `pass` store.
+
 I use it when I need an account I have not touched in months: open the tree, search, copy a field. A node is a name plus whatever fields I need — login, password, a note, a token — not a password slot with a title.
 
 ![Opening a recent file, searching, copying a field, and adding a node with a non-password field](docs/demo.gif)
@@ -18,7 +20,7 @@ No Rust toolchain: the release binary and its checksum are on the [latest releas
 
 What it does not do:
 
-- no sync, no sharing, no account
+- no sync and no shared account
 - no browser autofill, no mobile app
 - no `cretopass get` for scripts
 - no independent audit
