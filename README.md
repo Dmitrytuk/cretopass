@@ -10,11 +10,8 @@ I use it when I need an account I have not touched in months: open the tree, sea
 
 - Tree. Search, copy a field, generate one when creating the account.
 - One age-encrypted file. I pick the path. Backup is a copy of that file. A forgotten passphrase is not recoverable.
-- No network. The binary makes no network calls. Update was removed on purpose ([ADR 0027](docs/adr/0027-no-in-app-network-access.md)).
+- No network. The binary makes no network calls. 
 
-```sh
-cargo install cretopass
-```
 
 No Rust toolchain: the release binary and its checksum are on the [latest release](https://github.com/Dmitrytuk/cretopass/releases/latest).
 
@@ -37,6 +34,12 @@ What it does not do:
 For people who find `pass` and `gopass` too much GPG and too many commands, and KeePassXC a different window plus a browser. This does not read the `pass` format.
 
 ## Installation
+
+### Crates.io
+
+```sh
+cargo install cretopass
+```
 
 The commands below are the no-toolchain installer. They are not the first step: `cargo install cretopass` is.
 
