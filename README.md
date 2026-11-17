@@ -1,11 +1,42 @@
 # cretopass
 
-A terminal-based secret keeper built with Rust and [ratatui](https://github.com/ratatui/ratatui).
-It stores your secrets — logins, passwords, notes, and custom fields — in a
-hierarchical tree, and keeps everything in **one encrypted file that never
-leaves your machine**.
+A tree of secrets in the terminal. One file. No network.
+
+I use it when I need an account I have not touched in months: open the tree, search, copy a field. A node is a name plus whatever fields I need — login, password, a note, a token — not a password slot with a title.
+
+![Opening a recent file, searching, copying a field, and adding a node with a non-password field](docs/demo.gif)
+
+- Tree. Search, copy a field, generate one when creating the account.
+- One age-encrypted file. I pick the path. Backup is a copy of that file. A forgotten passphrase is not recoverable.
+- No network. The binary makes no network calls. Update was removed on purpose ([ADR 0027](docs/adr/0027-no-in-app-network-access.md)).
+
+```sh
+cargo install cretopass
+```
+
+No Rust toolchain: the release binary and its checksum are on the [latest release](https://github.com/Dmitrytuk/cretopass/releases/latest).
+
+What it does not do:
+
+- no sync, no sharing, no account
+- no browser autofill, no mobile app
+- no `cretopass get` for scripts
+- no independent audit
+
+| | cretopass | pass | gopass | KeePassXC |
+|---|---|---|---|---|
+| Where it lives | terminal, a tree | commands, flat files | commands | Qt |
+| Encryption | age, passphrase | GPG | GPG and age | AES-KDBX |
+| Besides a password | any fields on the node | a file is the secret | partial | yes |
+| Network and account | none | none | none; git optional | none |
+| Browser, sync, phone | none | none | git, not a browser | yes, that is its strength |
+| Install today | cargo or a release binary | packages everywhere | packages everywhere | packages everywhere |
+
+For people who find `pass` and `gopass` too much GPG and too many commands, and KeePassXC a different window plus a browser. This does not read the `pass` format.
 
 ## Installation
+
+The commands below are the no-toolchain installer. They are not the first step: `cargo install cretopass` is.
 
 ### Linux & macOS
 
